@@ -94,7 +94,11 @@ app.post('/api/tasks', async (req, res) => {
         });
 
         console.log('[Server] Agent finished task. Result:', JSON.stringify(result, null, 2));
-        io.emit('agent-stopped', { reason: result.success ? 'Task Completed' : 'Task Failed' });
+        io.emit('agent-stopped', {
+          reason: result.success ? 'Task Completed' : 'Task Failed',
+          success: result.success,
+          report: result.message // 최종 보고서 포함
+        });
       } catch (error: any) {
         console.error('[Server] Error during agent execution:', error);
         io.emit('agent-stopped', { reason: 'Error: ' + error.message });

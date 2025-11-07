@@ -650,12 +650,25 @@ export class BrowserController extends EventEmitter {
         });
       const ordered = orderedPairs.map(p => p.el);
 
+      // Detect already-selected states to avoid toggling off
+      const selectedStates: boolean[] = await Promise.all(
+        ordered.map((el: any) => el.evaluate((node: HTMLElement) => {
+          const pressed = (node.getAttribute('aria-pressed') || '').toString() === 'true';
+          const cls = (node.className || '').toString();
+          const hasSel = /rc-imageselect-tileselected/.test(cls);
+          return pressed || hasSel;
+        }))
+      );
+
       let clicked = 0;
       for (const i of indices) {
         const el = ordered[i];
         if (!el) continue;
+        // Skip if already selected to avoid toggling off
+        if (selectedStates[i]) continue;
         try {
-          await el.click({ delay: 50 });
+          const target = (await el.$('.rc-image-tile-wrapper')) || (await el.$('.rc-imageselect-tile')) || el;
+          await (target as any).click({ delay: 50 });
           await this.page!.waitForTimeout(250);
           clicked++;
           // Stream after each tile click for more frequent Live View updates

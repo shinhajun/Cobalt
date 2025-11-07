@@ -101,13 +101,13 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       // 이벤트 리스너 설정
       browserController.on('screenshot', (data) => {
-        if (mainWindow) {
+        if (mainWindow && isTaskRunning && !stopRequested) {
           mainWindow.webContents.send('agent-screenshot', data);
         }
       });
 
       browserController.on('log', (log) => {
-        if (mainWindow) {
+        if (mainWindow && isTaskRunning && !stopRequested) {
           mainWindow.webContents.send('agent-log', log);
         }
       });
@@ -139,7 +139,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       if (mainWindow && isTaskRunning) {
         mainWindow.webContents.send('agent-stopped', {
           reason: result.success ? 'Task Completed' : 'Task Failed',
-          message: result.message
+          success: result.success,
+          report: result.message  // 보고서로 전달
         });
       }
 
@@ -149,7 +150,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       if (mainWindow && isTaskRunning) {
         mainWindow.webContents.send('agent-stopped', {
           reason: 'Error',
-          message: error.message
+          success: false,
+          report: error.message
         });
       }
     } finally {
@@ -191,7 +193,8 @@ ipcMain.handle('stop-task', async (event) => {
       if (mainWindow) {
         mainWindow.webContents.send('agent-stopped', {
           reason: 'Stopped by user',
-          message: 'Task was manually stopped'
+          success: false,
+          report: 'Task was manually stopped'
         });
       }
 

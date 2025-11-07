@@ -53,6 +53,9 @@
       flex: 1;
       padding: 20px;
       overflow-y: auto;
+      min-height: 0; /* Allow flex child to shrink below content size */
+      display: flex;
+      flex-direction: column;
     }
 
     .form-group {
@@ -115,6 +118,7 @@
       font-weight: 600;
       cursor: pointer;
       transition: background-color 0.2s;
+      flex-shrink: 0; /* Don't shrink buttons */
     }
 
     .btn:hover:not(:disabled) {
@@ -141,6 +145,7 @@
       border-radius: 6px;
       font-size: 14px;
       display: none;
+      flex-shrink: 0; /* Don't shrink status message */
     }
 
     .status.show {
@@ -271,6 +276,7 @@
     }
 
     .logs {
+      flex: 0 1 auto; /* Allow to shrink, don't grow beyond max-height */
       max-height: 200px;
       overflow-y: auto;
       background-color: #1a1a1a;
@@ -280,16 +286,19 @@
       margin-top: 15px;
       font-size: 0.85rem;
       font-family: monospace;
-      transition: max-height 0.3s ease;
+      transition: max-height 0.3s ease, flex 0.3s ease;
+      min-height: 100px; /* Minimum height for logs */
     }
 
     .logs.expanded {
-      max-height: 600px;
+      flex: 1 1 auto; /* Expand to fill available space in parent */
+      max-height: none; /* Remove max-height constraint when expanded */
     }
 
     .form-inputs {
       transition: opacity 0.3s ease, max-height 0.3s ease;
       overflow: hidden;
+      flex-shrink: 0; /* Don't shrink form inputs */
     }
 
     .form-inputs.hidden {
@@ -314,6 +323,14 @@
 
     .log-message {
       color: #aaa;
+    }
+
+    .log-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 15px;
+      flex-shrink: 0; /* Don't shrink log header */
     }
   </style>
 </head>
@@ -360,7 +377,7 @@
 
         <div id="status" class="status"></div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+        <div class="log-header">
           <h3 style="font-size: 0.9rem; color: #aaa; margin: 0;">Logs</h3>
           <button id="copyLogsBtn" class="btn" style="width: auto; padding: 6px 12px; font-size: 0.85rem; background-color: #555;">Copy Logs</button>
         </div>
@@ -416,6 +433,71 @@
       entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-message">${message}</span>`;
       logs.appendChild(entry);
       logs.scrollTop = logs.scrollHeight;
+    }
+
+    // Show report in Live View
+    function showReportInLiveView(reportText) {
+      const img = document.getElementById('liveImage');
+      const placeholder = document.getElementById('placeholder');
+
+      // 이미지 숨김
+      if (img) img.style.display = 'none';
+      if (placeholder) placeholder.style.display = 'none';
+
+      // 기존 보고서 제거
+      const existingReport = document.getElementById('reportContainer');
+      if (existingReport) existingReport.remove();
+
+      // 보고서 컨테이너 생성
+      const reportContainer = document.createElement('div');
+      reportContainer.id = 'reportContainer';
+      reportContainer.style.cssText = `
+        padding: 30px;
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        max-width: 800px;
+        margin: 0 auto;
+        width: 100%;
+        box-sizing: border-box;
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        color: #333;
+        line-height: 1.6;
+        overflow-y: auto;
+        max-height: 100%;
+      `;
+
+      // 보고서 제목
+      const title = document.createElement('h2');
+      title.textContent = '📋 작업 완료 보고서';
+      title.style.cssText = `
+        color: #2563eb;
+        border-bottom: 3px solid #2563eb;
+        padding-bottom: 10px;
+        margin-bottom: 20px;
+        font-size: 24px;
+      `;
+      reportContainer.appendChild(title);
+
+      // 보고서 내용 (줄바꿈 및 포맷 유지)
+      const content = document.createElement('div');
+      content.style.cssText = `
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-size: 15px;
+      `;
+      content.textContent = reportText;
+      reportContainer.appendChild(content);
+
+      // Live View에 추가
+      screenshotArea.appendChild(reportContainer);
+
+      // URL 바 업데이트
+      urlBar.textContent = '작업 완료 - 보고서';
+      urlBar.classList.add('show');
+
+      // 로그에도 추가
+      addLog('보고서가 Live View에 표시되었습니다.');
     }
 
     // Run task
@@ -590,6 +672,11 @@
         indicator.classList.remove('active');
         showStatus(`Task stopped: ${data.reason}`, data.reason.includes('Error') ? 'error' : 'success');
         addLog(`Task stopped: ${data.reason}`);
+
+        // 작업 완료 시 보고서 표시
+        if (data.success && data.report) {
+          showReportInLiveView(data.report);
+        }
 
         // UI 리셋
         runBtn.disabled = false;

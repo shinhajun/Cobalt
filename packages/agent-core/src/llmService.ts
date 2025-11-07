@@ -54,6 +54,58 @@ export class LLMService {
     this.logCallback({ type, data });
   }
 
+  // Heuristic: decide if we can auto-finish with a report based on URL/content
+  private shouldAutoFinish(taskDescription: string, currentUrl: string, pageContent: string): boolean {
+    try {
+      const t = (taskDescription || '').toLowerCase();
+      const u = (currentUrl || '').toLowerCase();
+      const c = (pageContent || '').toLowerCase();
+
+      const calendarTerms = ['academic calendar', 'calendar', '학사', '학사일정', '학사 일정'];
+      const taskLooksLikeCalendar = calendarTerms.some(term => t.includes(term));
+      const urlLooksOfficial = /stonybrook\.edu/.test(u) || /registrar/.test(u);
+      const hasYearAndTerm = /(2023|2024|2025|2026)/.test(c) && /(fall|spring|summer|winter|가을|봄|여름|겨울)/.test(c);
+      const contentLongEnough = (pageContent?.length ?? 0) > 1000;
+
+      return taskLooksLikeCalendar && urlLooksOfficial && hasYearAndTerm && contentLongEnough;
+    } catch {
+      return false;
+    }
+  }
+
+  // Generate a Korean report summarizing an academic calendar page
+  private async generateAutoReport(taskDescription: string, currentUrl: string, pageContent: string): Promise<string> {
+    const instruction = `당신은 웹 자동화 에이전트입니다. 아래는 학사 일정 관련 페이지의 텍스트입니다.
+
+작업: "${taskDescription}"
+페이지 URL: ${currentUrl}
+
+요청: 아래 내용을 분석하여 1) 학기 시작/종료, 2) 수강/정정/철회 마감, 3) 휴일/휴강, 4) 기말고사/리딩데이, 5) 졸업/학위 관련 마감, 6) 등록금 환불 구간(있다면), 7) 그 외 중요한 일정 을 구조적으로 한국어 보고서로 정리하세요.
+- 간결하지만 빠짐없이 정리
+- 날짜는 원문 표기를 유지(예: Mon, Aug. 25 / 2025-08-25 등)
+- 불확실하면 '사이트 원문 참조'라고 명기
+- 마지막에 출처(URL)를 명시
+
+출력 형식 예시:
+제목
+요약
+주요 일정
+- 항목: 날짜 — 설명
+환불/등록 관련(있다면)
+휴일/휴강
+시험/리딩데이
+기타
+출처: <URL>`;
+
+    const prompt = `${instruction}\n\n===== 페이지 텍스트 시작 =====\n${pageContent}\n===== 페이지 텍스트 끝 =====`;
+    try {
+      const report = await this.generateText(prompt);
+      return report || '보고서를 생성하지 못했습니다. 페이지 원문을 참조해 주세요.';
+    } catch (e: any) {
+      return '보고서 생성 중 오류가 발생했습니다: ' + (e.message || String(e));
+    }
+  }
+
   // Solve image captcha via vision model by returning the raw text to type
   private async solveCaptchaImageToText(imageBase64: string): Promise<string | null> {
     if (!this.visionModel) {
@@ -337,7 +389,7 @@ No explanation, only JSON.`;
         8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>", "tilesVariable": "<VAR_NAME_FOR_TILES_BASE64>", "select": [0,3,4], "submit": true}
 
         Task Completion Actions:
-        9.  {"type": "FINISH", "message": "<MESSAGE_DESCRIBING_COMPLETION_AND_RESULTS>"}
+        9.  {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
         10.  {"type": "FAIL", "message": "<MESSAGE_DESCRIBING_FAILURE_REASON>"}
 
         Guidelines:
@@ -354,7 +406,11 @@ No explanation, only JSON.`;
         - After typing into a search box, always press Enter key to submit the search.
         - If CAPTCHA is detected (see Captcha Status in observation), use {"type":"TOOL_ACTION","tool":"solveCaptcha"}. For image-grid reCAPTCHA, request tiles using {"type":"TOOL_ACTION","tool":"recaptchaGrid"}.
         - Keep your thoughts concise but clear.
-        - If the task is to extract information, ensure it's captured in your thought process or reported in the FINISH action.
+        - When the task is complete, use the FINISH action with a comprehensive report in the message field:
+          * Include ALL information gathered (dates, schedules, important details, etc.)
+          * Format the report clearly with proper structure and organization
+          * Use Korean if the task was in Korean, otherwise use English
+          * Make the report detailed and easy to read
 
         Your Response (JSON only):
         {
@@ -438,6 +494,16 @@ No explanation, only JSON.`;
                    if(!pressSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: Selector or key missing for pressKey."; }
                 break;
+              case "finish":
+                // LLM이 실수로 소문자 finish를 보낸 경우도 마무리 처리
+                if (action.message) {
+                  this.emitLog('system', { message: `Task Finished: ${action.message}` });
+                  observation = `Finished with message.`;
+                  return { success: true, message: action.message };
+                } else {
+                  actionError = true; actionObservation = "Error: message missing for finish.";
+                }
+                break;
               default:
                 actionError = true;
                 actionObservation = `Error: Unknown browser command: ${action.command}`;
@@ -515,24 +581,30 @@ No explanation, only JSON.`;
                         if (indexes.length > 0) {
                           this.emitLog('system', { message: `Clicking tiles: [${indexes.join(', ')}]` });
                           await browserController.selectRecaptchaTiles(indexes);
+                          if (mode === 'PROGRESSIVE') {
+                            // 3x3: 클릭 후 자동으로 새 이미지가 교체되므로 검증(확인)은 누르지 않는다. 새 타일 로딩을 기다렸다가 다음 라운드로.
+                            const newSigs = await browserController.waitForRecaptchaTilesRefresh(prevSigs, 6000);
+                            if (newSigs) prevSigs = newSigs;
+                            const next = await browserController.getRecaptchaChallenge();
+                            if (!next || !next.gridImageBase64) break;
+                            challenge = next;
+                            await new Promise(r => setTimeout(r, 300));
+                            continue; // 다음 라운드로
+                          }
                         } else {
                           this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
                         }
 
-                        // 3x3: 새 이미지가 더이상 매칭되지 않을 때까지 반복. 4x4: 한 번에 모두 선택 후 바로 제출
-                        await browserController.submitRecaptchaChallenge();
-                        await browserController.streamScreenshot('recaptcha-submitted');
-                        await browserController.waitForPageLoad(8000);
-
-                        // Wait for any tile refresh (progressive load) then continue (only for 3x3)
-                        if (mode === 'PROGRESSIVE') {
-                          const newSigs = await browserController.waitForRecaptchaTilesRefresh(prevSigs, 6000);
-                          if (newSigs) prevSigs = newSigs;
+                        // 4x4: 항상 제출, 3x3: 더 이상 매칭이 없을 때만 제출
+                        if (mode === 'ALL_AT_ONCE' || indexes.length === 0) {
+                          await browserController.submitRecaptchaChallenge();
+                          await browserController.streamScreenshot('recaptcha-submitted');
+                          await browserController.waitForPageLoad(8000);
                         }
 
+                        // 다음 라운드 존재 여부 확인
                         const next = await browserController.getRecaptchaChallenge();
                         if (!next || !next.gridImageBase64) break;
-                        // 4x4에서는 보통 다음 라운드가 없어야 정상. 만약 또 나오면 추가 라운드 지속
                         this.emitLog('system', { message: 'Another reCAPTCHA round detected; continuing...' });
                         challenge = next;
                         await new Promise(r => setTimeout(r, 800));
@@ -654,6 +726,15 @@ No explanation, only JSON.`;
 
           case "FAIL":
             this.emitLog('error', { message: `Task Failed: ${action.message}` });
+            // 실패 직전에도 보고서를 생성할 수 있으면 생성해 함께 반환
+            try {
+              const currentUrl = browserController.getCurrentUrl();
+              const currentContent = await browserController.getPageContent();
+              if (this.shouldAutoFinish(taskDescription, currentUrl, currentContent)) {
+                const report = await this.generateAutoReport(taskDescription, currentUrl, currentContent);
+                return { success: false, message: `부분 보고서\n\n${report}` };
+              }
+            } catch (_) {}
             return { success: false, message: action.message || thought };
 
           default:
@@ -668,6 +749,18 @@ No explanation, only JSON.`;
         thought = `The previous action resulted in an error: ${error.message}. I need to re-evaluate the situation and try a different approach or a corrected action.`;
       }
     }
+
+    // 최종 자동 종료 전, 현재 페이지에서 보고서를 생성할 수 있으면 자동 보고 후 FINISH로 간주
+    try {
+      const currentUrl = browserController.getCurrentUrl();
+      const currentContent = await browserController.getPageContent();
+      if (this.shouldAutoFinish(taskDescription, currentUrl, currentContent)) {
+        const report = await this.generateAutoReport(taskDescription, currentUrl, currentContent);
+        const autoMsg = `자동 생성 보고서\n\n${report}`;
+        this.emitLog('system', { message: 'Auto-finish: generated report from current page.' });
+        return { success: true, message: autoMsg };
+      }
+    } catch (_) {}
 
     const finalMessage = "Max iterations reached. Task may not be complete.";
     this.emitLog('error', { message: finalMessage });
