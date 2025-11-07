@@ -21,6 +21,9 @@ let isRunning = false;
 let messageHistory = [];
 let logHistory = [];
 
+// iframe에서 실행되므로 parent window의 electronAPI 사용
+const electronAPI = window.parent.electronAPI || window.electronAPI;
+
 // Initialize
 function init() {
   // Load saved model
@@ -38,17 +41,17 @@ function init() {
 
   // Quick actions
   btnHome.addEventListener('click', () => {
-    window.electronAPI.quickAction('navigate', { url: 'https://google.com' });
+    electronAPI.quickAction('navigate', { url: 'https://google.com' });
     addSystemMessage('Navigating to Google...');
   });
 
   btnScreenshot.addEventListener('click', () => {
-    window.electronAPI.quickAction('screenshot');
+    electronAPI.quickAction('screenshot');
     addSystemMessage('Taking screenshot...');
   });
 
   btnRefresh.addEventListener('click', () => {
-    window.electronAPI.quickAction('refresh');
+    electronAPI.quickAction('refresh');
     addSystemMessage('Refreshing page...');
   });
 
@@ -88,15 +91,15 @@ function init() {
   });
 
   // IPC listeners
-  window.electronAPI.onAgentStarted((data) => {
+  electronAPI.onAgentStarted((data) => {
     addSystemMessage('Task started: ' + data.task);
   });
 
-  window.electronAPI.onAgentLog((log) => {
+  electronAPI.onAgentLog((log) => {
     addLog(log);
   });
 
-  window.electronAPI.onAgentStopped((data) => {
+  electronAPI.onAgentStopped((data) => {
     isRunning = false;
     btnRun.style.display = 'flex';
     btnStop.style.display = 'none';
@@ -111,7 +114,7 @@ function init() {
     removeThinkingIndicator();
   });
 
-  window.electronAPI.onAgentScreenshot((data) => {
+  electronAPI.onAgentScreenshot((data) => {
     // Screenshot events are handled by BrowserView now
     // We can optionally show a notification
   });
@@ -158,7 +161,7 @@ async function runTask() {
   // Send to main process
   const model = modelSelect.value;
   try {
-    const result = await window.electronAPI.runTask(task, model, settings);
+    const result = await electronAPI.runTask(task, model, settings);
     if (!result.success) {
       addErrorMessage('Failed to start task: ' + result.error);
       isRunning = false;
@@ -180,7 +183,7 @@ async function runTask() {
 // Stop task
 async function stopTask() {
   try {
-    await window.electronAPI.stopTask();
+    await electronAPI.stopTask();
     addSystemMessage('Stopping task...');
   } catch (error) {
     addErrorMessage('Error stopping task: ' + error.message);
@@ -303,7 +306,15 @@ function addLog(log) {
   const logEntry = document.createElement('div');
   logEntry.className = `log-entry ${log.type || 'system'}`;
 
-  const timestamp = new Date(log.timestamp).toLocaleTimeString();
+  // Handle timestamp safely
+  let timestamp = 'N/A';
+  if (log.timestamp) {
+    const date = new Date(log.timestamp);
+    if (!isNaN(date.getTime())) {
+      timestamp = date.toLocaleTimeString();
+    }
+  }
+
   const message = typeof log.data === 'string' ? log.data : log.data.message || JSON.stringify(log.data);
 
   logEntry.textContent = `[${timestamp}] ${message}`;
@@ -321,7 +332,15 @@ function addLog(log) {
 
 function copyLogs() {
   const logs = logHistory.map(log => {
-    const timestamp = new Date(log.timestamp).toLocaleTimeString();
+    // Handle timestamp safely
+    let timestamp = 'N/A';
+    if (log.timestamp) {
+      const date = new Date(log.timestamp);
+      if (!isNaN(date.getTime())) {
+        timestamp = date.toLocaleTimeString();
+      }
+    }
+
     const message = typeof log.data === 'string' ? log.data : log.data.message || JSON.stringify(log.data);
     return `[${timestamp}] ${message}`;
   }).join('\n');

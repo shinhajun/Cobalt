@@ -1,7 +1,7 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { ipcRenderer } = require('electron');
 
-// Electron API를 안전하게 노출
-contextBridge.exposeInMainWorld('electronAPI', {
+// contextIsolation: false 이므로 window 객체에 직접 노출
+window.electronAPI = {
   // 작업 실행 (task, model, settings)
   runTask: (taskPlan, model, settings) => ipcRenderer.invoke('run-task', { taskPlan, model, settings }),
 
@@ -27,6 +27,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAgentLog: (callback) => {
     ipcRenderer.on('agent-log', (event, data) => callback(data));
   }
-});
+};
 
-console.log('[Preload] Electron API exposed');
+console.log('[Preload] Electron API exposed to window.electronAPI');

@@ -180,10 +180,17 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       // Get cookies from BrowserView (for syncing to Playwright)
       let browserViewCookies = [];
-      if (browserView && settings && settings.syncCookies) {
+      if (browserView) {
         try {
           browserViewCookies = await browserView.webContents.session.cookies.get({});
           console.log('[Hybrid] Retrieved', browserViewCookies.length, 'cookies from BrowserView');
+
+          // 쿠키 동기화 설정 확인
+          if (settings && settings.syncCookies) {
+            console.log('[Hybrid] ✅ Cookie sync is ENABLED - Login session will be maintained');
+          } else {
+            console.log('[Hybrid] ⚠️ Cookie sync is DISABLED - AI will not be logged in');
+          }
         } catch (error) {
           console.error('[Hybrid] Failed to get BrowserView cookies:', error);
         }
@@ -343,17 +350,45 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       if (settings && settings.syncCookies && browserViewCookies.length > 0) {
         console.log('[Hybrid] Syncing cookies to Playwright...');
         try {
-          const playwrightCookies = browserViewCookies.map(cookie => ({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain,
-            path: cookie.path,
-            expires: cookie.expirationDate || -1,
-            httpOnly: cookie.httpOnly,
-            secure: cookie.secure,
-            sameSite: cookie.sameSite === 'unspecified' ? 'Lax' :
-                      cookie.sameSite === 'no_restriction' ? 'None' : cookie.sameSite
-          }));
+          // Convert Electron cookies to Playwright format
+          const playwrightCookies = browserViewCookies
+            .map(cookie => {
+              // Normalize sameSite value to Playwright format
+              let sameSite = 'Lax'; // Default fallback
+
+              if (cookie.sameSite) {
+                const sameSiteLower = cookie.sameSite.toLowerCase();
+                if (sameSiteLower === 'strict') {
+                  sameSite = 'Strict';
+                } else if (sameSiteLower === 'lax') {
+                  sameSite = 'Lax';
+                } else if (sameSiteLower === 'none' || sameSiteLower === 'no_restriction') {
+                  sameSite = 'None';
+                } else if (sameSiteLower === 'unspecified') {
+                  sameSite = 'Lax';
+                }
+              }
+
+              return {
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain,
+                path: cookie.path,
+                expires: cookie.expirationDate || -1,
+                httpOnly: cookie.httpOnly || false,
+                secure: cookie.secure || false,
+                sameSite: sameSite
+              };
+            })
+            .filter(cookie => {
+              // Filter out invalid cookies
+              if (!cookie.name || !cookie.value) {
+                console.warn('[Hybrid] Skipping invalid cookie:', cookie.name);
+                return false;
+              }
+              return true;
+            });
+
           await browserController.setCookies(playwrightCookies);
           console.log('[Hybrid] Synced', playwrightCookies.length, 'cookies to Playwright');
         } catch (error) {
