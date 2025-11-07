@@ -45,6 +45,12 @@ function createWindow() {
     minWidth: 1200,
     minHeight: 800,
     autoHideMenuBar: true, // 메뉴바 자동 숨김
+    titleBarStyle: 'hidden', // 타이틀바 텍스트 숨김
+    titleBarOverlay: {
+      color: '#f0f0f0',
+      symbolColor: '#000000',
+      height: 32
+    },
     webPreferences: {
       preload: path.join(__dirname, 'electron-preload.js'),
       contextIsolation: false, // toolbar에서 require 사용 가능하도록
@@ -150,14 +156,32 @@ app.on('window-all-closed', () => {
 });
 
 // IPC: 작업 분석 (단순 질문 vs 브라우저 작업 판별)
-ipcMain.handle('analyze-task', async (event, { task, model }) => {
+ipcMain.handle('analyze-task', async (event, { task, model, conversationHistory }) => {
   console.log('[Electron] Analyzing task type:', task);
+  console.log('[Electron] Conversation history length:', conversationHistory ? conversationHistory.length : 0);
 
   try {
     // LLM이 tool을 선택하도록 함
     const tempLLM = new LLMService(model || 'gpt-5-mini');
 
-    const analysisPrompt = `You are a helpful AI assistant. The user has asked: "${task}"
+    // Build conversation context
+    let contextPrompt = 'You are a helpful AI assistant.';
+
+    if (conversationHistory && conversationHistory.length > 0) {
+      contextPrompt += '\n\nConversation history:';
+      conversationHistory.forEach((msg) => {
+        if (msg.type === 'user') {
+          contextPrompt += `\nUser: ${msg.text}`;
+        } else if (msg.type === 'assistant') {
+          contextPrompt += `\nAssistant: ${msg.text}`;
+        }
+      });
+      contextPrompt += `\n\nNow the user asks: "${task}"`;
+    } else {
+      contextPrompt += ` The user has asked: "${task}"`;
+    }
+
+    const analysisPrompt = contextPrompt + `
 
 You have two options:
 1. If you can answer this question directly without needing to browse the web, use the "answer_directly" tool
@@ -252,12 +276,13 @@ Choose the appropriate tool now.`;
 });
 
 // IPC: 작업 실행
-ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
+ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversationHistory }) => {
   console.log('[Electron] Task received:', taskPlan);
   console.log('[Electron] Model:', model || 'gpt-5-mini');
+  console.log('[Electron] Conversation history length:', conversationHistory ? conversationHistory.length : 0);
   if (settings) {
     console.log('[Electron] Settings:', {
-      captchaVisionModel: settings.captchaVisionModel || '(default)',
+      visionModel: settings.visionModel || '(default)',
       syncResultToBrowserView: settings.syncResultToBrowserView !== undefined ? settings.syncResultToBrowserView : true,
       syncCookies: settings.syncCookies || false
     });
@@ -306,11 +331,11 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       // 환경 구성 병합: UI에서 온 설정값이 있으면 우선 적용 (프로세스 env override)
       // *** LLMService 생성 전에 환경변수를 먼저 설정해야 비전 모델이 올바르게 초기화됨 ***
       prevEnv = {
-        CAPTCHA_VISION_MODEL: process.env.CAPTCHA_VISION_MODEL,
+        VISION_MODEL: process.env.VISION_MODEL,
       };
-      if (settings && settings.captchaVisionModel) {
-        process.env.CAPTCHA_VISION_MODEL = settings.captchaVisionModel;
-        console.log('[Electron] Setting CAPTCHA_VISION_MODEL to:', settings.captchaVisionModel);
+      if (settings && settings.visionModel) {
+        process.env.VISION_MODEL = settings.visionModel;
+        console.log('[Electron] Setting VISION_MODEL to:', settings.visionModel);
       }
 
       // === HYBRID MODE: Step 2 - Launch Playwright in headless, stream screenshots to BrowserView ===
@@ -645,7 +670,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       stopRequested = false;
       // Restore previous env
       if (prevEnv) {
-        if (prevEnv.CAPTCHA_VISION_MODEL !== undefined) process.env.CAPTCHA_VISION_MODEL = prevEnv.CAPTCHA_VISION_MODEL; else delete process.env.CAPTCHA_VISION_MODEL;
+        if (prevEnv.VISION_MODEL !== undefined) process.env.VISION_MODEL = prevEnv.VISION_MODEL; else delete process.env.VISION_MODEL;
       }
       if (browserController) {
         await browserController.close();
@@ -656,6 +681,28 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
   // 즉시 응답 반환
   return { success: true, message: 'Task started' };
+});
+
+// IPC: API 키 업데이트
+ipcMain.handle('update-api-keys', async (_event, { openai, google }) => {
+  console.log('[Electron] Updating API keys...');
+
+  try {
+    if (openai) {
+      process.env.OPENAI_API_KEY = openai;
+      console.log('[Electron] OpenAI API key updated');
+    }
+
+    if (google) {
+      process.env.GOOGLE_API_KEY = google;
+      console.log('[Electron] Google API key updated');
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('[Electron] Failed to update API keys:', error);
+    return { success: false, error: error.message };
+  }
 });
 
 // IPC: 작업 중단

@@ -150,7 +150,7 @@
     .chat-iframe {
       position: fixed;
       right: 0;
-      top: 0;
+      top: 0; /* 맨 위부터 시작 (채팅 탭바도 상단 32px에 포함) */
       width: 25%;
       height: 100vh;
       border: none;
@@ -185,6 +185,7 @@
       overflow-y: hidden;
       z-index: 10001;
       transition: width 0.15s ease-out;
+      -webkit-app-region: drag; /* 타이틀바처럼 드래그 가능 */
     }
 
     .tab-bar.full-width {
@@ -207,6 +208,7 @@
       transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
       position: relative;
       border: 1px solid #dadce0;
+      -webkit-app-region: no-drag; /* 탭은 클릭 가능 */
       border-bottom: none;
     }
 
@@ -269,6 +271,7 @@
       font-size: 18px;
       color: #3c4043;
       transition: background 0.15s, transform 0.15s;
+      -webkit-app-region: no-drag; /* 버튼은 클릭 가능 */
     }
 
     .new-tab-btn:hover {

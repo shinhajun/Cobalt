@@ -42,6 +42,16 @@ function init() {
   const savedModel = localStorage.getItem('selectedModel') || 'gpt-5-mini';
   modelSelect.value = savedModel;
 
+  // Load saved API keys
+  loadApiKeys();
+
+  // Load saved vision model
+  const savedVisionModel = localStorage.getItem('selectedVisionModel') || 'gpt-5';
+  const visionModelSelect = document.getElementById('visionModelSelect');
+  if (visionModelSelect) {
+    visionModelSelect.value = savedVisionModel;
+  }
+
   // Event listeners
   btnRun.addEventListener('click', runTask);
   btnStop.addEventListener('click', stopTask);
@@ -58,6 +68,8 @@ function init() {
   // Settings Modal
   settingsIconBtn.addEventListener('click', () => {
     settingsModal.style.display = 'flex';
+    // Reload API keys when opening settings
+    loadApiKeys();
   });
 
   closeSettingsBtn.addEventListener('click', () => {
@@ -84,10 +96,23 @@ function init() {
 
   btnCopyLogs.addEventListener('click', copyLogs);
 
+  // Save API Keys button
+  const btnSaveKeys = document.getElementById('btnSaveKeys');
+  if (btnSaveKeys) {
+    btnSaveKeys.addEventListener('click', saveApiKeys);
+  }
+
   // Model selection
   modelSelect.addEventListener('change', () => {
     localStorage.setItem('selectedModel', modelSelect.value);
   });
+
+  // Vision model selection
+  if (visionModelSelect) {
+    visionModelSelect.addEventListener('change', () => {
+      localStorage.setItem('selectedVisionModel', visionModelSelect.value);
+    });
+  }
 
   // Example item clicks
   document.querySelectorAll('.example-item').forEach(item => {
@@ -168,16 +193,20 @@ async function runTask() {
 
   // Get settings
   const settings = {
-    captchaVisionModel: document.getElementById('visionModelSelect').value,
+    visionModel: document.getElementById('visionModelSelect').value,
     syncResultToBrowserView: document.getElementById('syncResultToBrowserView').checked,
     syncCookies: document.getElementById('syncCookies').checked
   };
 
   const model = modelSelect.value;
 
+  // Get current chat room's conversation history
+  const currentRoom = chatRooms.find(r => r.id === activeChatRoomId);
+  const conversationHistory = currentRoom ? currentRoom.messages : [];
+
   try {
     // Step 1: Analyze if this is a simple question or a browser task
-    const analysisResult = await electronAPI.analyzeTask(task, model);
+    const analysisResult = await electronAPI.analyzeTask(task, model, conversationHistory);
 
     if (analysisResult.taskType === 'chat') {
       // Simple question - just get AI response without browser automation
@@ -194,7 +223,7 @@ async function runTask() {
       // Show thinking indicator for browser task
       addThinkingIndicator();
 
-      const result = await electronAPI.runTask(task, model, settings);
+      const result = await electronAPI.runTask(task, model, settings, conversationHistory);
       if (!result.success) {
         addErrorMessage('Failed to start task: ' + result.error);
         isRunning = false;
@@ -272,6 +301,82 @@ function clearMessages() {
       taskInput.focus();
     });
   });
+}
+
+// API Keys Management
+function loadApiKeys() {
+  const openaiKey = localStorage.getItem('openai_api_key');
+  const googleKey = localStorage.getItem('google_api_key');
+
+  const openaiInput = document.getElementById('openaiApiKey');
+  const googleInput = document.getElementById('googleApiKey');
+
+  if (openaiInput && openaiKey) {
+    try {
+      openaiInput.value = atob(openaiKey);
+    } catch (e) {
+      console.error('Failed to decode OpenAI key:', e);
+    }
+  }
+
+  if (googleInput && googleKey) {
+    try {
+      googleInput.value = atob(googleKey);
+    } catch (e) {
+      console.error('Failed to decode Google key:', e);
+    }
+  }
+}
+
+async function saveApiKeys() {
+  const openaiInput = document.getElementById('openaiApiKey');
+  const googleInput = document.getElementById('googleApiKey');
+  const btnSaveKeys = document.getElementById('btnSaveKeys');
+
+  const openaiKey = openaiInput ? openaiInput.value.trim() : '';
+  const googleKey = googleInput ? googleInput.value.trim() : '';
+
+  if (!openaiKey && !googleKey) {
+    alert('⚠️ Please enter at least one API key (OpenAI or Google)');
+    return;
+  }
+
+  // Save to localStorage (base64 encoded)
+  if (openaiKey) {
+    localStorage.setItem('openai_api_key', btoa(openaiKey));
+  } else {
+    localStorage.removeItem('openai_api_key');
+  }
+
+  if (googleKey) {
+    localStorage.setItem('google_api_key', btoa(googleKey));
+  } else {
+    localStorage.removeItem('google_api_key');
+  }
+
+  // Send to Electron main process
+  try {
+    if (electronAPI && electronAPI.updateApiKeys) {
+      await electronAPI.updateApiKeys({
+        openai: openaiKey,
+        google: googleKey
+      });
+    }
+
+    // Visual feedback
+    btnSaveKeys.textContent = '✅ Saved!';
+    btnSaveKeys.style.background = 'linear-gradient(135deg, #34a853 0%, #2d8f47 100%)';
+
+    setTimeout(() => {
+      btnSaveKeys.textContent = '💾 Save API Keys';
+      btnSaveKeys.style.background = 'linear-gradient(135deg, #34a853 0%, #2d8f47 100%)';
+    }, 2000);
+
+    console.log('[Settings] API keys saved successfully');
+  } catch (error) {
+    console.error('[Settings] Failed to save API keys:', error);
+    alert('❌ Failed to save API keys. Please try again.');
+  }
 }
 
 // Log functions

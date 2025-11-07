@@ -761,16 +761,6 @@
       "sameSite": "None"
     },
     {
-      "name": "IDE",
-      "value": "AHWqTUkQyY0jqDPu25eecIvO2RBTTmxRhbfWBtaT_GM53kd079Sq-sJgWXz6myB2",
-      "domain": ".doubleclick.net",
-      "path": "/",
-      "expires": 1795565940.038196,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "XANDR_PANID",
       "value": "zUO-ZFGOnVOi_Xd-2BdzA0NFrvSxDCBj-_jVWuef1dDVm0ZRI3q6osncJyj1xr_yLXzGFevFbVRVVO8sUVEUSGOZ9UUubHOZ4HPe522Rwd4.",
       "domain": ".adnxs.com",
@@ -1361,26 +1351,6 @@
       "sameSite": "None"
     },
     {
-      "name": "rlas3",
-      "value": "FL3s5Hqm/ueyR97eGvQkGDz2Q+/F+VQXJnNILuJbQkY=",
-      "domain": ".rlcdn.com",
-      "path": "/",
-      "expires": 1792546152.055111,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "pxrc",
-      "value": "CPSi28cGEgUI6AcQABIFCOhHEAUSBgjuRxDtBBIFCNtOEAASBgi26gEQHRIGCLrqARAXEgcIuOsBEPQgEgcI6twqEOcEEgYImLsrEBE=",
-      "domain": ".rlcdn.com",
-      "path": "/",
-      "expires": 1766194152.055205,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "ttcsid",
       "value": "1761010151699::TBgP-J1BRxzKDJROjoOx.2.1761010151975.0",
       "domain": ".stonybrook.edu",
@@ -1515,7 +1485,7 @@
       "value": "OT5PJN5UUX5GQ",
       "domain": ".naver.com",
       "path": "/",
-      "expires": 1795822149.23366,
+      "expires": 1795830276.222163,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -1921,16 +1891,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "NID",
-      "value": "525=Obvq1wx7z0GD1Qb07YOA13SBvwQ9qLtVM_ZzwCTk5GFqDmNnMGFg9aRMCv1krF31MBnWIjGsyaOT5pF0QmkAzfWNaUMY4wbUYCAm1twfGBYiCisT2Manc9PyT_kXlosDoK7zLzKcMoSZP2duVJvQd3SrR-qG2m4Uz3MV7vL2lKSCRKm-4ccJf_tCIspNzJg2zxbuslgeT9fgVD4C5Yie7Q6-KnnJ2eG_xS08TGOG5jQ3pvHNNwVp8O_xMe7LOJLD95asARoIksTLMMw9Mzx1f31vCJ79XROTLuqMiTdp1qi-bztcrvBq5tQud3dNikSymXwTL59Hx-AFj0Q-bqjV3PJ8CKKIJyidqfqCY_MlJVl5Ml8lwI2k4XNzgoaMKt7ZFEaRC_sjtMNzsbqnsIbDsvt19dHi8oaRD-E3O165mvKEFV2CP1-318sC1V88qNrJC9i5AVi2u71HRzpUqTSoxb_HY26QlLc2esEEIpydyL9tEWy0X4OIiARcivD1t4oudWz4j18yeLFC4F3HZfH_Q9RWQBADr9WXVEuIOZFER2gbH-ADGeC2jY0BIML5rAJxCr9pK7ZMi_yJ1RbzT-ejudPDIjwjYgJE4jp8OrAXWEkZADdrgGyAlb2omnYhTIPV76QOL7zPqKYRWCLsFL2dHLCmQBPtQVXw6AUjJ394tQn0sAdbaJk_B4zh2mc3L35-cRD7-dYtyk0iHLdLsmVOcfkZ0x9rFnhiJRJlMJLox09kobY6WYKaLDXbk8KRGg",
-      "domain": ".google.com",
-      "path": "/",
-      "expires": 1777066090.965633,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "_ga",
       "value": "GA1.1.266155496.1761262933",
       "domain": ".stonybrook.edu",
@@ -2002,7 +1962,7 @@
     },
     {
       "name": "YSC",
-      "value": "gKXy48pKfdo",
+      "value": "_OLriKuwX8M",
       "domain": ".youtube.com",
       "path": "/",
       "expires": -1,
@@ -2041,51 +2001,181 @@
       "sameSite": "None"
     },
     {
-      "name": "__Secure-1PSIDTS",
-      "value": "sidts-CjABwQ9iI6tmur6E5f_CrImBznYk1KhIcyjuReJdAz95Gf1hsgScAcov4eta7m8SPRoQAA",
+      "name": "NID",
+      "value": "526=PCIEVCmT_qSM5uMeLFsvIcUHYEo5gEn4OIB4nbJCf2enZ8Ebp1YpvJ3Qe52ZLzzvt4ybBWJj2zEwxtiJX28W2m-ohDTdspgao4HWgEMZGL5JBhPjCNCo8j3qMMe7C1mI70sAh83heJF4V5Gn7CSSgs_gAnlEoCFjuHLo5EEA-FSU6Oz8C-t0sT5uwf-xqhLWNjVDJoZHqA-PmIE8e3fU3Du5U6IJ2nIAXs8_1y0eMW3qOj42ICHN4KwtxOlkT9lYg3m3pEQb-rL1wiVtQYwCaXWaqHwL5okojkkR9YhPobEHs02tphEqGX0gIe6KgYtMoJYIvzfmW5aaDP0gkKtA5Mk1Qdlw6yhHod8GpB74eDQqRwwxQ7HebO02FWr8YpCt2hVA9Ru_g2qFwNWQmE2g-adCF126v5DvbCyXJVpBvU2Qv6g1TIrxkNZC-K2iZ4WkkfBGqh3-nRpw6V1faRiUZqkQpkaQLTVwicaGO1EK8evnAknXE32pSNjbGnZRfSvpmZ-poajc4ziHCKhgxRSp6uqyYcX8_e66PkgiKwrqUmIlEkDeyXtBePilcRxH7nTywhJzOPkGQbjlJkhp-7QiKIGtiDqPHC6KjlcseDeInY-nv2bqsQ7jB2WlZzVQknQCDp2dkJ73CwqtAxQkAd2kFAJ8U1dFjuE8UP4SA64ibW9mBcTQeq9_aDNq75VU7A3aXsbmqmmcUDaUxBtl4Wjum4exfjZAWpN57NxWt-YhDLtr__xqVB_YzlrB4f4_MQ",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792803869.651368,
+      "expires": 1777066090.604609,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "SRT30",
+      "value": "1761270103",
+      "domain": ".naver.com",
+      "path": "/",
+      "expires": 1761272076.222275,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "loid",
+      "value": "0000000020hksf03yx.2.1761270252217.Z0FBQUFBQm8tdG5zdzR2NVBxQzZGVEZQYkZEVTQxRDdQS2VUQWxOekllTEJPdF81UzFUY0pKYWloV21Lb0VqWHJ4U1piaGZGTEw5anc4TF9NUHZkTm5NUFUxUUtBOHlqWnlLZ05Wd185VkJPakxVVm4zQ1Bsalp0M1F3YS1uR1Y1ZzN2dEpMbXVQLWo",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1795830252.326374,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "token_v2",
+      "value": "eyJhbGciOiJSUzI1NiIsImtpZCI6IlNIQTI1NjpzS3dsMnlsV0VtMjVmcXhwTU40cWY4MXE2OWFFdWFyMnpLMUdhVGxjdWNZIiwidHlwIjoiSldUIn0.eyJzdWIiOiJsb2lkIiwiZXhwIjoxNzYxMzU2NjUyLjIxNzQ4NSwiaWF0IjoxNzYxMjcwMjUyLjIxNzQ4NSwianRpIjoiSWl0Ry1ESmpTTzl2MmFJcFZ3T1ZjaU1fRFdrV3JBIiwiY2lkIjoiMFItV0FNaHVvby1NeVEiLCJsaWQiOiJ0Ml8yMGhrc2YwM3l4IiwibGNhIjoxNzYxMjcwMjUyMjE3LCJzY3AiOiJlSnhra2RHT3REQUloZC1GYTVfZ2Y1VV9tMDF0Y1lhc0xRYW9rM243RFZvY2s3MDdjRDRwSFA5REtvcUZEQ1pYZ3FuQUJGZ1RyVERCUnVUOW5MbTNnMmlOZTh0WXNabkNCRm13RkRya21MR3NpUVFtZUpJYXl4c21vSUxOeUZ5dXRHTk5MVDBRSnFoY01yZUZIcGMyb2JrYmk1NmRHRlc1ckR5b3NWZmwwdGpHRkxZbnhqY2JxdzJwdUM2bk1rbkxRdmtzWHZUak45VzM5dm16X1NhMEo4T0txdW1CM2hsSkNHNHNmcGltM2Q5VGs1NnRDeGExOTNxUTJ1ZDYzSzU5MWl3ME83ZWY2X2xySXhtWFkyaC1KdnQzMXktaEE0ODhMelBxQUVhczRVY1pkbVFkX2xVSFVMbWdKR01KNHRNSTVNcmwyMzhKdG12VHY4YnRFejk4TS1LbU5feldETlJ6Q2VMUXBfSDFHd0FBX184UTFlVFIiLCJmbG8iOjF9.Uuv5Z3jP6Jd_osluAqS9Q_gZlvSTN1EQYwNniQYHgZ-ylEqeLAvHzOq7IBgRNI21BdLDoFUOEyIAjcdDk8PfrkglQbrO43RvZsOEx3bPsELuJy403uwJisGr2n6D_TAp_oB5BIwuXIZWq3fe8dCtlNwDkgOHrAEQVcpZBNJuDmLXU9DdJr9MB--5k8CUe1QFnRjnAa-dkYV-2-aE1JuNeqDp7dDaFXtULin4WF82bcHHTPmW6SvISEt-fWPdaGtqewcV3bRMkcnt5YyN71iYXemyWYOIc3nkelSE6hkhvjtltBki1bAHWubrkPNUo_GP3kocBiHjjX3oOWH120JmIA",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1761356652.326486,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "seeker_session",
+      "value": "true",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1761281061.554984,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "csv",
+      "value": "2",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1795830252.326547,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "edgebucket",
+      "value": "7lBICbx4awjwM5KP0a",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1795830252.326558,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_gcl_au",
+      "value": "1.1.231843863.1761270253",
+      "domain": ".reddit.com",
+      "path": "/",
+      "expires": 1769046253,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "APC",
+      "value": "AfxxVi4c2z9LF-JHz2MF0kx3w79OmaoOePpCpTuCWgrgzT35LZF1tQ",
+      "domain": ".doubleclick.net",
+      "path": "/",
+      "expires": 1776822253.564487,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "receive-cookie-deprecation",
+      "value": "1",
+      "domain": ".doubleclick.net",
+      "path": "/",
+      "expires": 1776822253.564564,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "IDE",
+      "value": "AHWqTUlLc1c52UVudenj9eu3lT3StOzAlS2oSiU186Mje-lQvLwI4lr86WDphnXQamo",
+      "domain": ".doubleclick.net",
+      "path": "/",
+      "expires": 1795830253.564594,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "rlas3",
+      "value": "6lGCLKOxNY8khxIdoTlDczRFjy9RMFZ1zMmHMqudAd4=",
+      "domain": ".rlcdn.com",
+      "path": "/",
+      "expires": 1792806261.800973,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "pxrc",
+      "value": "COyz68cGEgUI6AcQABIGCNzdKhAJ",
+      "domain": ".rlcdn.com",
+      "path": "/",
+      "expires": 1766454261.801067,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "g_state",
+      "value": "{\"i_l\":0,\"i_ll\":1761270262367,\"i_b\":\"JUFxmyuztkWjgZToj8f3D9XodE4wdUhddO+WiFTSPzM\"}",
+      "domain": "www.reddit.com",
+      "path": "/",
+      "expires": 1776822262,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "__Secure-1PSIDTS",
+      "value": "sidts-CjABwQ9iIzExibRRuzlc6YeeoPcaRGFzyQQflVqOTSj2YqplqQlL0R4BmBvxtgr0ZEkQAA",
+      "domain": ".google.com",
+      "path": "/",
+      "expires": 1792806885.266848,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-3PSIDTS",
-      "value": "sidts-CjABwQ9iI6tmur6E5f_CrImBznYk1KhIcyjuReJdAz95Gf1hsgScAcov4eta7m8SPRoQAA",
+      "value": "sidts-CjABwQ9iIzExibRRuzlc6YeeoPcaRGFzyQQflVqOTSj2YqplqQlL0R4BmBvxtgr0ZEkQAA",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792803869.651464,
+      "expires": 1792806885.266948,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "DV",
-      "value": "s4sSNNH275susLemEEJzl1kguPA7odkPXKUhseNYXgIAAAA",
+      "value": "s4sSNNH275susLemEEJzl1nwQto-odkPXKUhseNY3gEAAAA",
       "domain": "www.google.com",
       "path": "/",
-      "expires": 1761268479,
+      "expires": 1761271533,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
-    },
-    {
-      "name": "__Secure-ROLLOUT_TOKEN",
-      "value": "CP2R-o_S9c_iMhDlzbz9wruQAxiWwNuS0ruQAw%3D%3D",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1776819881.109986,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
     },
     {
       "name": "VISITOR_INFO1_LIVE",
       "value": "P2tgnW3Xn4M",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776819881.110105,
+      "expires": 1776822933.766244,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -2095,47 +2185,57 @@
       "value": "CgJVUxIEGgAgIw%3D%3D",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776819881.11015,
+      "expires": 1776822933.766284,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "__Secure-ROLLOUT_TOKEN",
+      "value": "CP2R-o_S9c_iMhDlzbz9wruQAxjt5ebC3buQAw%3D%3D",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1776822933.766318,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "__Secure-3PSIDCC",
-      "value": "AKEyXzW27QGTPgndgkrV-j6J2NuLzuPigHLTxogg9hzD0YrPFUSuri9WoKiIgL7Qy2-b2VeN",
+      "value": "AKEyXzVW7ZV2cY-Ss3rTDYNvH5q9FKy1YVzm0R0T2knwUKMsO3id6ieCpxAcLeU3USShnQgT",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1792803881.110183,
+      "expires": 1792806933.766373,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "SIDCC",
-      "value": "AKEyXzUAMhVNr1cUZcO5gj-7yytxQz9UpXv0ALI0TWBtigITIj051iRkk2S6bZ-9BkjIbn6xJDU",
+      "value": "AKEyXzWi3ua9Q2S6mddrjW0LlWCIi7YoWyGjaS021twt3JqiP-XLyROhvQTL6C_fiGs2QjH2Ca0",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792803883.200182,
+      "expires": 1792806936.860895,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-1PSIDCC",
-      "value": "AKEyXzXP0n3sqqXULgR0ovBtfjXlfXhv4IB92LrcnZP34CzSudzyfmtchq1D3f47dZ5nS8c4UA",
+      "value": "AKEyXzWtl8mK6Gk-rmOcHWwn4AeNNFeryydtYD78A83BlRhhEnQ98evcF_A2LckVj4NY4YRjmA",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792803883.200219,
+      "expires": 1792806936.86093,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-3PSIDCC",
-      "value": "AKEyXzVYGmBr9hqblyT3u8RRnQ9Pka_a7IMVQFznHsblqAVSuw8H4MKRpR0otORu5kTDVqYc_Q4",
+      "value": "AKEyXzUHc5X_ucLV5S2ZRQlp4jmCJ1x144PVNipObA0IkZz7AUYGbdcutKWI0mH9OvrF-K_A-RI",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792803883.200274,
+      "expires": 1792806936.860964,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -2147,7 +2247,7 @@
       "localStorage": [
         {
           "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[],\"1\":{\"av\":\"-3919156332354227041\",\"q\":\"MO9QFoZZzSQrab9uLMHzTgN3sCQ\"}}"
+          "value": "{\"0\":[],\"1\":{\"av\":\"-3124934835344130195\",\"q\":\"zzJhIvAH4MXijS3Nlmtm5tiPcFo\"}}"
         },
         {
           "name": "udla::lp",
@@ -2155,7 +2255,7 @@
         },
         {
           "name": "udla::last-ei",
-          "value": "[\"uMz6aNOLJorbptQP-IT48AM\"]"
+          "value": "[\"uMz6aNOLJorbptQP-IT48AM\",\"1tH6aKnxCryIptQP8KulyQk\"]"
         },
         {
           "name": "rc::f",
@@ -2179,7 +2279,7 @@
         },
         {
           "name": "sb_wiz.qc",
-          "value": "77"
+          "value": "80"
         }
       ]
     },
@@ -2351,7 +2451,7 @@
       "localStorage": [
         {
           "name": "nextRotationAttemptTs",
-          "value": "1761268469585"
+          "value": "1761271485199"
         }
       ]
     }

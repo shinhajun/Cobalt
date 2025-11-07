@@ -26,11 +26,14 @@ body {
 /* Chat Tabs Header */
 .chat-tabs-header {
   display: flex;
-  background: #fff;
+  background: #f1f3f4; /* 툴바와 같은 회색 */
   border-bottom: 1px solid #e8eaed;
-  padding: 6px 10px;
+  padding: 0 10px;
   gap: 6px;
   align-items: center;
+  height: 32px; /* 타이틀바와 정확히 같은 높이 */
+  flex-shrink: 0;
+  -webkit-app-region: drag; /* 드래그 가능 */
 }
 
 .tabs-container {
@@ -71,6 +74,7 @@ body {
   user-select: none;
   min-width: 100px;
   max-width: 180px;
+  -webkit-app-region: no-drag; /* 탭은 클릭 가능 */
 }
 
 .chat-tab:hover {
@@ -131,6 +135,7 @@ body {
   gap: 6px;
   margin-left: auto;
   flex-shrink: 0;
+  -webkit-app-region: no-drag; /* 버튼들 클릭 가능 */
 }
 
 .header-btn {
@@ -146,6 +151,7 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
+  -webkit-app-region: no-drag; /* 버튼 클릭 가능 */
 }
 
 .header-btn:hover {
@@ -346,29 +352,37 @@ body {
 
 /* Compact Model Selector - Next to Run Button */
 .model-select-compact {
-  padding: 10px 14px;
+  min-height: 44px;
+  padding: 11px 16px;
   background-color: #f8f9fa;
   border: 1px solid #dadce0;
   border-radius: 8px;
   color: #202124;
-  font-size: 0.85rem;
+  font-size: 0.9rem;
+  font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
   flex-shrink: 0;
+  max-width: 220px;
 }
 
 .model-select-compact:hover {
   background-color: #e8eaed;
   border-color: #4285f4;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.2);
 }
 
 .model-select-compact:focus {
-  outline: none;
+  outline: 2px solid #4285f4;
+  outline-offset: 2px;
   border-color: #4285f4;
   box-shadow: 0 1px 6px rgba(32,33,36,.28);
 }
 
 .model-select-compact option {
+  padding: 10px;
+  font-size: 0.9rem;
+  line-height: 1.5;
   background-color: #fff;
   color: #202124;
 }
@@ -552,31 +566,127 @@ body {
 
 .setting-select {
   width: 100%;
-  padding: 10px 14px;
+  min-height: 46px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  background-color: #fff;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  color: #202124;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.setting-select:hover {
+  border-color: #4285f4;
+  box-shadow: 0 2px 8px rgba(66, 133, 244, 0.2);
+}
+
+.setting-select:focus {
+  outline: 2px solid #4285f4;
+  outline-offset: 2px;
+  border-color: #4285f4;
+  box-shadow: 0 1px 6px rgba(32,33,36,.28);
+}
+
+.setting-select option {
+  padding: 12px;
+  font-size: 0.95rem;
+  line-height: 1.6;
+  background-color: #fff;
+  color: #202124;
+}
+
+/* Setting Section */
+.setting-section {
+  margin-bottom: 32px;
+  padding-bottom: 24px;
+  border-bottom: 1px solid #e8eaed;
+}
+
+.setting-section:last-child {
+  border-bottom: none;
+}
+
+.setting-section h3 {
+  font-size: 1.1rem;
+  color: #202124;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+/* Security Warning */
+.security-warning {
+  padding: 12px 16px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 6px;
+  color: #856404;
+  font-size: 0.85rem;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Setting Input (for API keys) */
+.setting-input {
+  width: 100%;
+  padding: 12px 16px;
   margin-top: 8px;
   background-color: #fff;
   border: 1px solid #dadce0;
   border-radius: 8px;
   color: #202124;
   font-size: 0.9rem;
-  cursor: pointer;
+  font-family: monospace;
   transition: all 0.2s;
 }
 
-.setting-select:hover {
-  background-color: #333;
-  border-color: #4361ee;
+.setting-input:hover {
+  border-color: #4285f4;
 }
 
-.setting-select:focus {
-  outline: none;
+.setting-input:focus {
+  outline: 2px solid #4285f4;
+  outline-offset: 2px;
   border-color: #4285f4;
   box-shadow: 0 1px 6px rgba(32,33,36,.28);
 }
 
-.setting-select option {
-  background-color: #fff;
-  color: #202124;
+.setting-input::placeholder {
+  color: #999;
+  font-family: monospace;
+}
+
+/* Save Keys Button */
+.btn-save-keys {
+  margin-top: 16px;
+  padding: 12px 24px;
+  background: linear-gradient(135deg, #34a853 0%, #2d8f47 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.btn-save-keys:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(52, 168, 83, 0.3);
+}
+
+.btn-save-keys:active {
+  transform: translateY(0);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
 }
 
 /* Logs Section in Modal */

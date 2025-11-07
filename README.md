@@ -56,10 +56,10 @@ World’s first **Hybrid AI Browser**! An Electron-based desktop app that lets y
 - `listTabs` - List all open tabs with IDs/URLs
 - `getActiveTabId` - Get currently active tab ID
 
-#### CAPTCHA & Vision Tools (3 tools)
+#### Vision & CAPTCHA Tools (3 tools)
 - `solveCaptcha` - Auto-detect and solve CAPTCHAs
 - `recaptchaGrid` - Solve reCAPTCHA grid challenges
-- `visionInteract` - Vision-guided interaction with any screen element
+- `visionInteract` - Vision-guided interaction with any screen element (button detection, coordinate finding)
 
 #### Utility Tools (17 tools)
 - `calculate` - Mathematical expressions (e.g., "3*5+2")
@@ -119,7 +119,7 @@ Create a `.env` file in the project root:
 ```env
 OPENAI_API_KEY=sk-proj-...
 GOOGLE_API_KEY=AIzaSy...
-CAPTCHA_VISION_MODEL=gpt-5  # Optional: defaults to gpt-5
+VISION_MODEL=gpt-5  # Optional: defaults to gpt-5 (used for image analysis: CAPTCHA, button detection, etc.)
 ```
 
 4. **Build the project**
@@ -205,7 +205,7 @@ See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for comprehensive examples.
 
 ---
 
-### 🔓 CAPTCHA & Vision Tools
+### 🔓 Vision & CAPTCHA Tools
 
 #### Auto CAPTCHA Solver
 ```json
@@ -526,7 +526,7 @@ OPENAI_API_KEY=sk-proj-...
 GOOGLE_API_KEY=AIzaSy...
 
 # Optional
-CAPTCHA_VISION_MODEL=gpt-5  # Model for vision-based CAPTCHA solving (default: gpt-5)
+VISION_MODEL=gpt-5  # Model for image analysis: CAPTCHA solving, button detection, screen analysis (default: gpt-5)
 ```
 
 ---

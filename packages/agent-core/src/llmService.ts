@@ -97,8 +97,8 @@ export class LLMService {
     }
     this.logCallback = logCallback || (() => {}); // 기본값은 아무것도 안 하는 함수
 
-    // Vision model (for image-based captcha). Defaults to gpt-5 if available.
-    const visionModelName = process.env.CAPTCHA_VISION_MODEL || 'gpt-5';
+    // Vision model (for image analysis: CAPTCHA, button detection, screen analysis). Defaults to gpt-5 if available.
+    const visionModelName = process.env.VISION_MODEL || process.env.CAPTCHA_VISION_MODEL || 'gpt-5';
     try {
       if (isGemini(visionModelName)) {
         if (!GOOGLE_API_KEY) {
