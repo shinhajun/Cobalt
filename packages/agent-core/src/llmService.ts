@@ -86,8 +86,12 @@ export class LLMService {
 
   // Choose reCAPTCHA grid tiles via vision model
   private async chooseRecaptchaTiles(instruction: string, tilesBase64: string[]): Promise<number[] | null> {
-    if (!this.visionModel) return null;
+    if (!this.visionModel) {
+      this.emitLog('error', { message: 'Vision model not initialized for reCAPTCHA tile selection.' });
+      return null;
+    }
     try {
+      this.emitLog('system', { message: `Vision model analyzing ${tilesBase64.length} tiles for instruction: "${instruction}"` });
       const systemPrompt = `You are assisting with a Google reCAPTCHA image grid challenge. Read the instruction carefully and choose the tile indexes that match. Respond with JSON only in the form {"indexes":[...]} using 0-based indexing. No explanation.`;
       const content: any[] = [
         { type: 'text', text: systemPrompt },
@@ -97,14 +101,33 @@ export class LLMService {
         content.push({ type: 'text', text: `Tile ${idx}` });
         content.push({ type: 'image_url', image_url: `data:image/png;base64,${b64}` });
       });
-      const res: any = await (this.visionModel as any).invoke(content);
+
+      this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
+      const res: any = await (this.visionModel as any).invoke(content).catch((err: Error) => {
+        this.emitLog('error', { message: `Vision model invoke error: ${err.message}, stack: ${err.stack?.substring(0, 200)}` });
+        throw err;
+      });
+
+      if (!res) {
+        this.emitLog('error', { message: 'Vision model returned null/undefined response.' });
+        return null;
+      }
+
+      this.emitLog('system', { message: `Vision model raw response type: ${typeof res}, keys: ${Object.keys(res || {}).join(', ')}` });
+      this.emitLog('system', { message: `Vision model raw response: ${JSON.stringify(res).substring(0, 500)}` });
+
       let txt: string;
       if (typeof res.content === 'string') txt = res.content;
       else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || ''))).join('\n');
       else txt = JSON.stringify(res.content);
+
+      this.emitLog('system', { message: `Vision model text response: "${txt.substring(0, 300)}"` });
       const cleaned = (txt || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+
+      this.emitLog('system', { message: `Cleaned response for JSON parse: "${cleaned.substring(0, 200)}"` });
       const parsed = JSON.parse(cleaned);
       const indexes: number[] = Array.isArray(parsed.indexes) ? parsed.indexes.filter((n: any) => Number.isInteger(n)) : [];
+      this.emitLog('system', { message: `Parsed tile indexes: [${indexes.join(', ')}]` });
       return indexes.length ? indexes : null;
     } catch (e) {
       this.emitLog('error', { message: `Vision choose tiles failed: ${(e as Error).message}` });
@@ -321,22 +344,34 @@ export class LLMService {
                   const clicked = await browserController.clickRecaptchaAnchor();
                   if (clicked) {
                     this.emitLog('system', { message: 'reCAPTCHA anchor clicked. Waiting for challenge or auto-solve...' });
-                    await browserController.page?.waitForTimeout(3000); // Wait for challenge or auto-pass
+                    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for challenge or auto-pass
 
                     // Check if challenge appeared
                     const challenge = await browserController.getRecaptchaChallenge();
                     if (challenge && challenge.tiles && challenge.tiles.length > 0) {
-                      this.emitLog('system', { message: `reCAPTCHA challenge appeared: ${challenge.instruction}` });
+                      this.emitLog('system', { message: `reCAPTCHA challenge appeared: ${challenge.instruction}, tiles: ${challenge.tiles.length}` });
+                      // Wait extra time for iframe challenge to fully render before screenshot
+                      await new Promise(resolve => setTimeout(resolve, 1000));
+                      await browserController.streamScreenshot('recaptcha-challenge');
+                      await browserController.takeDebugScreenshot('recaptcha-challenge');
+
+                      this.emitLog('system', { message: 'Calling vision model to select tiles...' });
+                      this.emitLog('system', { message: `Tile base64 sizes: ${challenge.tiles.map(t => t.length).join(', ')}` });
                       const indexes = await this.chooseRecaptchaTiles(challenge.instruction, challenge.tiles);
+                      this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
+
                       if (indexes && indexes.length > 0) {
+                        this.emitLog('system', { message: `Clicking tiles: [${indexes.join(', ')}]` });
                         await browserController.selectRecaptchaTiles(indexes);
                         await browserController.submitRecaptchaChallenge();
+                        await browserController.streamScreenshot('recaptcha-submitted');
                         actionObservation = `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`;
                       } else {
                         actionError = true;
                         actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
                       }
                     } else {
+                      this.emitLog('system', { message: `Challenge check: tiles=${challenge?.tiles?.length || 0}, instruction="${challenge?.instruction || 'none'}"` });
                       actionObservation = 'reCAPTCHA anchor clicked. Challenge may have auto-solved or is pending.';
                     }
                   } else {

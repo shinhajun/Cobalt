@@ -453,10 +453,17 @@ export class BrowserController extends EventEmitter {
   async clickRecaptchaAnchor(): Promise<boolean> {
     if (!this.page) return false;
     const { anchorFrame } = this.getRecaptchaFrames();
-    if (!anchorFrame) return false;
+    if (!anchorFrame) {
+      this.emitLog('system', { message: 'reCAPTCHA anchor frame not found.' });
+      return false;
+    }
     try {
+      this.emitLog('system', { message: 'Waiting for #recaptcha-anchor in anchor frame...' });
       const box = await anchorFrame.waitForSelector('#recaptcha-anchor', { timeout: 5000 });
-      if (!box) return false;
+      if (!box) {
+        this.emitLog('system', { message: '#recaptcha-anchor element not found.' });
+        return false;
+      }
       await box.click({ delay: 50 });
       await this.page.waitForTimeout(800);
       return true;
@@ -654,8 +661,11 @@ export class BrowserController extends EventEmitter {
     }
 
     try {
-      // Wait a short moment for paint
-      await this.page.waitForTimeout(300);
+      // Wait longer for iframe-based content (like reCAPTCHA) to render
+      const isCaptchaRelated = action.includes('captcha') || action.includes('recaptcha');
+      const waitTime = isCaptchaRelated ? 1500 : 500;
+      await this.page.waitForTimeout(waitTime);
+
       // Take a screenshot and get it as buffer
       const screenshotBuffer = await this.page.screenshot({
         fullPage: false,
