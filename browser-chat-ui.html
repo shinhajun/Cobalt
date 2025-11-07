@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cobalt AI</title>
+  <link rel="stylesheet" href="browser-chat.css">
+</head>
+<body>
+  <div class="chat-container">
+    <!-- Chat Tabs Header -->
+    <div class="chat-tabs-header">
+      <div class="tabs-container" id="chatTabsContainer">
+        <div class="chat-tab active" data-room-id="0" draggable="true">
+          <span class="tab-title">Chat 1</span>
+          <span class="tab-close">×</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button class="header-btn" id="newChatBtn" title="New Chat">+</button>
+        <button class="header-btn" id="historyBtn" title="History">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/>
+            <polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </button>
+        <button class="header-btn" id="settingsIconBtn" title="Settings">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="3"/>
+            <path d="M12 1v6m0 6v6M5.64 5.64l4.24 4.24m4.24 4.24l4.24 4.24M1 12h6m6 0h6M5.64 18.36l4.24-4.24m4.24-4.24l4.24-4.24"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Messages Area (Enlarged) -->
+    <div class="messages-container" id="messagesContainer">
+      <div class="welcome-message">
+        <div class="welcome-icon">
+          <img src="cobalt_logo.png" alt="Cobalt" style="width: 80px; height: 80px;">
+        </div>
+        <h2>Cobalt AI</h2>
+        <p>Ask me to automate web tasks</p>
+      </div>
+    </div>
+
+    <!-- Input Area -->
+    <div class="input-area">
+      <textarea
+        id="taskInput"
+        placeholder="Ask AI to automate a task... (e.g., 'Search AI on Google')"
+        rows="3"
+      ></textarea>
+      <div class="input-controls">
+        <select id="modelSelect" class="model-select-compact">
+          <option value="gpt-5">GPT-5</option>
+          <option value="gpt-5-mini">GPT-5 Mini</option>
+          <option value="gpt-5-nano">GPT-5 Nano</option>
+          <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+          <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+          <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+          <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+          <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+        </select>
+        <button id="btnRun" class="btn-primary">
+          <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+          <span class="btn-text">Run</span>
+        </button>
+        <button id="btnStop" class="btn-danger" style="display: none;">
+          <svg class="btn-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="6" width="12" height="12"/>
+          </svg>
+          <span class="btn-text">Stop</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Settings</h2>
+        <button class="modal-close" id="closeSettingsBtn">✕</button>
+      </div>
+      <div class="modal-body">
+        <!-- API Keys Section -->
+        <div class="setting-section">
+          <h3>API Keys</h3>
+          <div class="security-warning">
+            ⚠️ API keys are stored locally in your browser. Do not use on shared computers.
+          </div>
+
+          <div class="setting-item">
+            <label for="openaiApiKey">OpenAI API Key:</label>
+            <input
+              type="password"
+              id="openaiApiKey"
+              class="setting-input"
+              placeholder="sk-proj-..."
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Used for GPT-5 models (optional if using Gemini)
+            </small>
+          </div>
+
+          <div class="setting-item">
+            <label for="googleApiKey">Google API Key:</label>
+            <input
+              type="password"
+              id="googleApiKey"
+              class="setting-input"
+              placeholder="AIzaSy..."
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Used for Gemini models (optional if using OpenAI/Claude)
+            </small>
+          </div>
+
+          <div class="setting-item">
+            <label for="claudeApiKey">Claude API Key:</label>
+            <input
+              type="password"
+              id="claudeApiKey"
+              class="setting-input"
+              placeholder="sk-ant-api..."
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Used for Claude models (optional if using OpenAI/Gemini)
+            </small>
+          </div>
+
+          <button class="btn-save-keys" id="btnSaveKeys">Save API Keys</button>
+        </div>
+
+        <!-- Model Configuration Section -->
+        <div class="setting-section">
+          <h3>Model Configuration</h3>
+
+          <div class="setting-item">
+            <label for="visionModelSelect">Vision Model (이미지 분석용):</label>
+            <select id="visionModelSelect" class="setting-select">
+              <option value="gpt-5">GPT-5</option>
+              <option value="gpt-5-mini">GPT-5 Mini</option>
+              <option value="gpt-5-nano">GPT-5 Nano</option>
+              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+              <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite</option>
+              <option value="claude-sonnet-4-5">Claude Sonnet 4.5</option>
+              <option value="claude-haiku-4-5">Claude Haiku 4.5</option>
+            </select>
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Used for CAPTCHA solving, button detection, and screen analysis
+            </small>
+          </div>
+        </div>
+
+        <!-- Browser Behavior Section -->
+        <div class="setting-section">
+          <h3>Browser Behavior</h3>
+
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" id="syncResultToBrowserView" checked />
+              Show results in BrowserView after completion
+            </label>
+            <small style="color: #666; display: block; margin-top: 4px;">
+              The browser will navigate to the results page when the AI task finishes
+            </small>
+          </div>
+
+          <div class="setting-item">
+            <label>
+              <input type="checkbox" id="syncCookies" checked />
+              Sync login state (share cookies)
+            </label>
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Pass the browser login state to AI tasks (recommended)
+            </small>
+          </div>
+        </div>
+
+        <!-- Limits Section -->
+        <div class="setting-section">
+          <h3>Limits</h3>
+
+          <div class="setting-item">
+            <label for="maxIterationsInput">Max Iterations:</label>
+            <input
+              type="number"
+              id="maxIterationsInput"
+              class="setting-input"
+              min="1"
+              max="1000"
+              placeholder="100"
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Maximum reasoning iterations per task (default 100)
+            </small>
+          </div>
+
+          <div class="setting-item">
+            <label for="maxActionsPerStepInput">Max Actions Per Step:</label>
+            <input
+              type="number"
+              id="maxActionsPerStepInput"
+              class="setting-input"
+              min="1"
+              max="20"
+              placeholder="5"
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Maximum tool actions executed per iteration (1–20, default 5)
+            </small>
+          </div>
+
+          <button class="btn-save-keys" id="btnSaveLimits">Save Limits</button>
+        </div>
+
+        <!-- Logs Section (Hidden in Settings) -->
+        <div class="logs-section-modal">
+          <h3>Execution Logs</h3>
+          <div class="logs-header">
+            <button class="btn-copy-logs" id="btnCopyLogs">Copy Logs</button>
+          </div>
+          <div class="logs-content" id="logsContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Modal -->
+  <div class="modal-overlay" id="historyModal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Chat History</h2>
+        <button class="modal-close" id="historyModalClose">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="history-list" id="historyList">
+          <!-- History items will be inserted here -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="browser-chat.js"></script>
+</body>
+</html>

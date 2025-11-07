@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Tab</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      background: white;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .content {
+      text-align: center;
+      width: 100%;
+    }
+
+    .logo-container {
+      margin-bottom: 40px;
+    }
+
+    .logo {
+      width: 200px;
+      height: 200px;
+    }
+
+    .search-container {
+      width: 600px;
+      max-width: 90%;
+      margin: 0 auto;
+      padding: 0;
+    }
+
+    .search-input {
+      width: 100%;
+      padding: 16px 20px;
+      font-size: 16px;
+      border: 2px solid #e0e0e0;
+      border-radius: 24px;
+      outline: none;
+      transition: all 0.2s ease;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+
+    .search-input:hover {
+      border-color: #d0d0d0;
+    }
+
+    .search-input:focus {
+      border-color: #4285f4;
+      box-shadow: 0 1px 6px rgba(66, 133, 244, 0.2);
+    }
+
+    .search-input::placeholder {
+      color: #999;
+    }
+  </style>
+</head>
+<body>
+  <div class="content">
+    <div class="logo-container">
+      <img src="cobalt_logo.png" alt="Cobalt Logo" class="logo">
+    </div>
+    <div class="search-container">
+      <input type="text" class="search-input" placeholder="Ask AI to automate web tasks" id="searchInput">
+    </div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('searchInput');
+
+    searchInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const query = searchInput.value.trim();
+        if (query) {
+          console.log('[Cobalt Home] Search input value:', query);
+          console.log('[Cobalt Home] Query length:', query.length);
+          console.log('[Cobalt Home] Query charCodes:', Array.from(query).map(c => c.charCodeAt(0)));
+
+          // Use the exposed API from preload script
+          if (window.__browserViewAPI && window.__browserViewAPI.executeHomeSearch) {
+            console.log('[Cobalt Home] Calling executeHomeSearch');
+            window.__browserViewAPI.executeHomeSearch(query);
+            // Clear the input
+            searchInput.value = '';
+          } else {
+            console.error('[Cobalt Home] __browserViewAPI not available');
+          }
+        }
+      }
+    });
+
+    // Debug: Check if API is available
+    console.log('[Cobalt Home] __browserViewAPI available:', !!window.__browserViewAPI);
+  </script>
+</body>
+</html>
