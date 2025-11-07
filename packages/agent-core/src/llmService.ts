@@ -13,6 +13,21 @@ export class LLMService {
   private visionModel: any | null = null;
   private isVisionGeminiProvider: boolean = false;
 
+  // Vision 모델 타임아웃 상수 통일
+  private readonly VISION_TIMEOUTS = {
+    CLASSIFY: 20000,
+    INTERACT: 25000,
+    CHOOSE_TILES: 25000,
+    SOLVE_TEXT: 30000,
+  };
+
+  // LLM 설정
+  private readonly LLM_CONFIG = {
+    MAX_ITERATIONS: 15,
+    PROMPT_LOG_LENGTH: 50, // 로그에 표시할 프롬프트 길이
+    RESPONSE_LOG_LENGTH: 300,
+  };
+
   constructor(modelName: string = "gpt-5-mini", logCallback?: AgentLogCallback) {
     // 생성자 실행 시점에 환경변수 읽기 (모듈 로드 시점이 아닌)
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
@@ -111,18 +126,19 @@ export class LLMService {
       if (!imageBase64) return { kind: 'none' } as any;
       const prompt = `You will see a webpage screenshot (viewport ${width}x${height}). Determine if there is a bot-detection challenge present.\n` +
         `Return ONLY JSON in the form {"kind":"recaptcha_grid|checkbox_recaptcha|text_captcha|gate|none","gridSize":3|4|null}.\n` +
-        `- recaptcha_grid: Google image grid challenge (3x3 or 4x4). Set gridSize accordingly.\n` +
-        `- checkbox_recaptcha: only the "I'm not a robot" checkbox is visible.\n` +
+        `- recaptcha_grid: Google image grid challenge (3x3 or 4x4) with tiles to select. Set gridSize accordingly.\n` +
+        `- checkbox_recaptcha: ONLY if you see a checkbox next to "I'm not a robot" text (may be custom or real reCAPTCHA).\n` +
         `- text_captcha: an image with distorted letters/numbers that must be typed.\n` +
-        `- gate: other generic bot or interstitial gate (e.g., continue/verify).\n` +
-        `- none: no challenge.\n` +
+        `- gate: other generic bot or interstitial gate (e.g., Cloudflare, continue/verify buttons).\n` +
+        `- none: no challenge visible.\n` +
+        `IMPORTANT: Even if it looks like reCAPTCHA style, if there's a checkbox, use checkbox_recaptcha.\n` +
         `No explanations. JSON only.`;
       const messages: any[] = [
         new HumanMessage({
           content: this.buildVisionContentParts(prompt, imageBase64, 'image/jpeg') as any
         } as any)
       ];
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Vision classify timeout after 20s')), 20000));
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Vision classify timeout after ${this.VISION_TIMEOUTS.CLASSIFY}ms`)), this.VISION_TIMEOUTS.CLASSIFY));
       const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch(() => null);
       if (!res) return { kind: 'none' } as any;
       let txt: string;
@@ -146,6 +162,17 @@ export class LLMService {
   private async visionInteractViewport(browserController: BrowserController, instruction: string): Promise<{ success: boolean; report: string }> {
     if (!this.visionModel) return { success: false, report: 'Vision model not initialized.' };
     try {
+      // If Cloudflare shows "verification success ... waiting", use common method
+      try {
+        if (await browserController.isCloudflareWaiting()) {
+          const cleared = await browserController.waitForCloudflarePassthrough(15000);
+          if (cleared) {
+            return { success: true, report: 'Cloudflare gate cleared during brief wait.' };
+          }
+          return { success: false, report: 'Cloudflare waiting persists (not solved).' };
+        }
+      } catch (_) {}
+
       // Pre-heuristics: try obvious checkbox/gate clicks before invoking the vision model
       try {
         const checkboxClicked = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
@@ -168,10 +195,18 @@ export class LLMService {
       }
 
       const spec = `You will receive a screenshot (viewport ${width}x${height}).\n`+
+      `Analyze the image and determine what needs to be clicked.\n`+
       `Return ONLY JSON in one of these forms:\n`+
-      `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"..."}\n`+
+      `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"what you clicked"}\n`+
       `or {"action":"grid_click","rect":{"x":<px>,"y":<px>,"width":<px>,"height":<px>}, "gridSize":3|4, "indexes":[...], "note":"..."}\n`+
-      `or {"action":"noop","note":"..."}.`;
+      `or {"action":"noop","note":"reason why no action needed"}.\n`+
+      `IMPORTANT for checkboxes:\n`+
+      `- Look for a small square box (usually 15-30px) next to "I'm not a robot" text\n`+
+      `- The checkbox is typically on the LEFT side of the text\n`+
+      `- Provide the exact center coordinates of the checkbox square\n`+
+      `- Do NOT click on the text, click on the checkbox box itself\n`+
+      `- Measure coordinates very carefully from the top-left corner (0,0) of the image\n`+
+      `Be extremely precise with coordinates.`;
 
       const textPrompt = `Goal: ${instruction}\n${spec}`;
       const messages: any[] = [
@@ -181,7 +216,7 @@ export class LLMService {
       ];
 
       this.emitLog('system', { message: 'Invoking vision model for generic viewport interaction...' });
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Vision interact timeout after 30s')), 30000));
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Vision interact timeout after ${this.VISION_TIMEOUTS.INTERACT}ms`)), this.VISION_TIMEOUTS.INTERACT));
       const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch((e: any) => {
         this.emitLog('error', { message: `Vision interaction error: ${e.message}` });
         return null;
@@ -253,7 +288,7 @@ export class LLMService {
 
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Vision model timeout after 40s')), 40000)
+        setTimeout(() => reject(new Error(`Vision model timeout after ${this.VISION_TIMEOUTS.SOLVE_TEXT}ms`)), this.VISION_TIMEOUTS.SOLVE_TEXT)
       );
 
       const res: any = await Promise.race([
@@ -333,7 +368,7 @@ No explanation, only JSON.`;
 
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Vision model timeout after 30s')), 30000)
+        setTimeout(() => reject(new Error(`Vision model timeout after ${this.VISION_TIMEOUTS.CHOOSE_TILES}ms`)), this.VISION_TIMEOUTS.CHOOSE_TILES)
       );
 
       let res: any;
@@ -487,18 +522,19 @@ No explanation, only JSON.`;
 
   async generateText(prompt: string): Promise<string> {
     try {
-      this.emitLog('system', { message: 'LLM prompt (first 300 chars): ' + prompt.substring(0,300) });
+      // 프롬프트 로깅 최적화 (50자만)
+      this.emitLog('system', { message: 'LLM prompt (first 50 chars): ' + prompt.substring(0, this.LLM_CONFIG.PROMPT_LOG_LENGTH) + '...' });
       const response = await this.model.invoke(prompt);
       if (typeof response.content === 'string') {
-        this.emitLog('system', { message: 'LLM response (first 300 chars): ' + response.content.substring(0,300) });
+        this.emitLog('system', { message: 'LLM response (first 300 chars): ' + response.content.substring(0, this.LLM_CONFIG.RESPONSE_LOG_LENGTH) });
         return response.content;
       } else if (Array.isArray(response.content)) {
         const joinedContent = response.content.map((item: any) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
-        this.emitLog('system', { message: 'LLM array response (joined, first 300 chars): ' + joinedContent.substring(0,300) });
+        this.emitLog('system', { message: 'LLM array response (joined, first 300 chars): ' + joinedContent.substring(0, this.LLM_CONFIG.RESPONSE_LOG_LENGTH) });
         return joinedContent;
       }
       const stringContent = JSON.stringify(response.content);
-      this.emitLog('system', { message: 'LLM unknown response (stringified, first 300 chars): ' + stringContent.substring(0,300) });
+      this.emitLog('system', { message: 'LLM unknown response (stringified, first 300 chars): ' + stringContent.substring(0, this.LLM_CONFIG.RESPONSE_LOG_LENGTH) });
       return stringContent;
     } catch (error) {
       console.error("[LLMService] Error generating text:", error);
@@ -523,9 +559,8 @@ No explanation, only JSON.`;
 
 
     let iterationCount = 0;
-    const maxIterations = 15; // 최대 반복 횟수 증가
 
-    while (iterationCount < maxIterations) {
+    while (iterationCount < this.LLM_CONFIG.MAX_ITERATIONS) {
       if (stopSignal && stopSignal()) {
         this.emitLog('system', { message: 'Stop requested. Aborting task.' });
         return { success: false, message: 'Stopped by user' };
@@ -568,6 +603,13 @@ No explanation, only JSON.`;
         - Choose an appropriate <Action> from the list above.
         - For selectors, use the exact attributes shown in the Interactive Elements section (name, id, aria-label, etc).
         - If a previous action failed (e.g., selector not found), adjust your strategy. Try different selectors from the Interactive Elements list.
+        - **IMPORTANT: If you see captcha_status=cloudflare_waiting:**
+          * This is a Cloudflare security check that the system is handling automatically in the background.
+          * For the FIRST occurrence: wait by using getPageContent and check again.
+          * For the SECOND occurrence: wait again with getPageContent.
+          * For the THIRD occurrence: wait one more time with getPageContent.
+          * For the FOURTH occurrence or more: Use FAIL action as Cloudflare cannot be bypassed.
+          * Count how many times you've seen cloudflare_waiting in your thought process.
         - For web searches, use Google (https://www.google.com) by default.
           * Google search box: Use input/textarea elements with name="q" or aria-label that contains "Search" or localized equivalents (e.g., "검색").
           * Type the query into the box and press Enter to submit.
@@ -833,14 +875,38 @@ No explanation, only JSON.`;
                     }
                   } else {
                     // Fallback: Not a real reCAPTCHA frame (e.g., custom checkbox like neal.fun).
-                    this.emitLog('system', { message: 'reCAPTCHA anchor not found. Fallback to checkbox-left-of-text click, then vision.' });
-                    let ok = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
-                    if (!ok) {
-                      const res = await this.visionInteractViewport(browserController, 'Click the checkbox to the LEFT of the text that says "I\'m not a robot" (or similar). If an image grid appears, select tiles.');
-                      actionObservation = `Fallback visionInteract (no anchor): ${res.report}`;
-                      if (!res.success) actionError = true;
+                    this.emitLog('system', { message: 'reCAPTCHA anchor not found. This is a custom challenge (not real reCAPTCHA). Using direct click approach.' });
+
+                    // 먼저 스크린샷 찍어서 live view 업데이트
+                    await browserController.streamScreenshot('custom-checkbox-challenge');
+
+                    // 1차: Vision 우선 (가장 확실하고 빠름)
+                    let clicked = false;
+                    this.emitLog('system', { message: 'Using vision to find and click checkbox.' });
+                    const res = await this.visionInteractViewport(browserController, 'Find and click the checkbox or clickable area next to "I\'m not a robot" text. Click on the checkbox square or the entire checkbox area.');
+                    clicked = res.success;
+                    if (clicked) {
+                      this.emitLog('system', { message: `Vision click successful: ${res.report}` });
+                    }
+
+                    // 2차: heuristic 방식 (텍스트 왼쪽 영역)
+                    if (!clicked) {
+                      this.emitLog('system', { message: 'Vision failed, trying heuristic click.' });
+                      clicked = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'not a robot', 'checkbox']);
+                    }
+
+                    // 3차: 텍스트 포함 요소 클릭
+                    if (!clicked) {
+                      this.emitLog('system', { message: 'Heuristic failed, trying text-based click.' });
+                      clicked = await browserController.clickFirstVisibleContainingText(["not a robot", "i'm not a robot", "checkbox", "recaptcha"]);
+                    }
+
+                    if (clicked) {
+                      actionObservation = 'Custom checkbox clicked successfully.';
+                      await browserController.waitForPageLoad(3000);
                     } else {
-                      actionObservation = 'Clicked checkbox area left of text via heuristic.';
+                      actionObservation = 'Failed to click checkbox via all methods.';
+                      actionError = true;
                     }
                   }
                 } else if (classified.kind === 'text_captcha') {
@@ -858,10 +924,22 @@ No explanation, only JSON.`;
                     if (!typed) actionError = true;
                   }
                 } else if (classified.kind === 'gate') {
-                  // Generic gate: defer to generic vision interaction
-                  const res = await this.visionInteractViewport(browserController, 'Pass the gate or continue/verify to proceed.');
-                  actionObservation = `Gate handled via vision: ${res.report}`;
-                  if (!res.success) actionError = true;
+                  // Generic gate: use common Cloudflare waiting method
+                  try {
+                    if (await browserController.isCloudflareWaiting()) {
+                      const cleared = await browserController.waitForCloudflarePassthrough(60000);
+                      actionObservation = cleared ? 'Gate waiting pass-through completed.' : 'Gate waiting timed out without clearance.';
+                      if (!cleared) actionError = true;
+                    } else {
+                      const res = await this.visionInteractViewport(browserController, 'Pass the gate or continue/verify to proceed.');
+                      actionObservation = `Gate handled via vision: ${res.report}`;
+                      if (!res.success) actionError = true;
+                    }
+                  } catch (_e) {
+                    const res = await this.visionInteractViewport(browserController, 'Pass the gate or continue/verify to proceed.');
+                    actionObservation = `Gate handled via vision: ${res.report}`;
+                    if (!res.success) actionError = true;
+                  }
                   } else {
                     // Unknown/none: try generic vision interaction; if no progress, try textual click heuristic
                     const res = await this.visionInteractViewport(browserController, 'If a challenge is present, solve it to proceed. Click obvious buttons like I\'m not a robot / Verify / Continue.');

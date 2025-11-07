@@ -6,11 +6,30 @@ import { EventEmitter } from 'events';
 export class BrowserController extends EventEmitter {
   private browser: Browser | null = null;
   private page: Page | null = null;
-  private debugMode: boolean = true;
+  private debugMode: boolean = false; // 기본값 false로 변경
   private debugDir: string = './debug';
   private context: BrowserContext | null = null;
+  private pageContentCache: { content: string; timestamp: number; url: string } | null = null;
 
-  constructor(debugMode: boolean = true) {
+  // 타임아웃 상수 정의 (빠른 응답을 위해 단축)
+  private readonly TIMEOUTS = {
+    NAVIGATION_DOMCONTENTLOADED: 20000,
+    NAVIGATION_LOAD: 25000,
+    NAVIGATION_COMMIT: 15000,
+    CLOUDFLARE_INITIAL_WAIT: 15000,
+    CLOUDFLARE_RELOAD_CHECK: 8000,
+    CLOUDFLARE_SCREENSHOT_INTERVAL: 4,
+    PAGE_LOAD_DEFAULT: 8000,
+    RECAPTCHA_CHALLENGE_WAIT: 3000,
+    RECAPTCHA_TILE_REFRESH: 6000,
+    SELECTOR_WAIT: 5000,
+    STABILIZATION: 500,
+  };
+
+  // 페이지 콘텐츠 캐시 유효 시간 (ms)
+  private readonly PAGE_CONTENT_CACHE_TTL = 2000;
+
+  constructor(debugMode: boolean = false) {
     super();
     this.debugMode = debugMode;
     // Create debug directory if it doesn't exist
@@ -24,65 +43,106 @@ export class BrowserController extends EventEmitter {
   }
 
   async launch(): Promise<void> {
-    // Chromium 채널 우선 시도(설치 환경에 따라 기본 chromium 사용)
+    // Chromium 채널 우선 시도 - Cloudflare 우회를 위한 최적화된 설정
+    const launchArgs = [
+      '--disable-blink-features=AutomationControlled',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins,site-per-process',
+      '--disable-site-isolation-trials',
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-dev-shm-usage',
+      '--disable-accelerated-2d-canvas',
+      '--disable-gpu',
+      '--window-size=1920,1080',
+      '--start-maximized',
+      '--disable-infobars',
+      '--disable-notifications',
+      '--disable-popup-blocking',
+    ];
+
     try {
       this.browser = await chromium.launch({
         channel: 'chrome',
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins,PaintHolding',
-          '--disable-site-isolation-trials',
-          '--disable-renderer-backgrounding',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--no-sandbox',
-          '--disable-gpu',
-          '--use-angle=swiftshader',
-        ],
+        headless: false, // headless 모드는 Cloudflare가 쉽게 감지 - false로 변경
+        args: launchArgs,
         timeout: 60000,
       });
     } catch (_) {
       this.browser = await chromium.launch({
-        headless: true,
-        args: [
-          '--disable-blink-features=AutomationControlled',
-          '--disable-web-security',
-          '--disable-features=IsolateOrigins,PaintHolding',
-          '--disable-site-isolation-trials',
-          '--disable-renderer-backgrounding',
-          '--disable-background-timer-throttling',
-          '--disable-backgrounding-occluded-windows',
-          '--no-sandbox',
-          '--disable-gpu',
-          '--use-angle=swiftshader',
-        ],
+        headless: false,
+        args: launchArgs,
         timeout: 60000,
       });
     }
 
     const storageStatePath = path.join(this.debugDir, 'storageState.json');
     const context = await this.browser.newContext({
-      viewport: { width: 1600, height: 1000 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', // 최신 Chrome
+      viewport: { width: 1920, height: 1080 },
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
       locale: 'ko-KR',
       acceptDownloads: true,
       extraHTTPHeaders: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
       },
       storageState: fs.existsSync(storageStatePath) ? storageStatePath : undefined,
+      // 추가 컨텍스트 옵션
+      bypassCSP: true,
+      ignoreHTTPSErrors: true,
+      javaScriptEnabled: true,
     });
     this.context = context;
 
-    // 간단한 스텔스 스크립트 적용 (자동화 탐지 회피에 도움)
+    // 강화된 스텔스 스크립트 (Cloudflare 우회)
     await context.addInitScript(() => {
       try {
+        // webdriver 속성 제거
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-        // @ts-ignore
-        window.chrome = { runtime: {} };
-        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-        Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        delete (navigator as any).__proto__.webdriver;
+
+        // Chrome 객체 추가
+        (window as any).chrome = {
+          runtime: {},
+          loadTimes: function() {},
+          csi: function() {},
+          app: {}
+        };
+
+        // 언어 설정
+        Object.defineProperty(navigator, 'languages', {
+          get: () => ['ko-KR', 'ko', 'en-US', 'en']
+        });
+
+        // 플러그인 설정
+        Object.defineProperty(navigator, 'plugins', {
+          get: () => [1, 2, 3, 4, 5]
+        });
+
+        // Permission API 우회
+        const originalQuery = window.navigator.permissions.query;
+        window.navigator.permissions.query = (parameters: any) => (
+          parameters.name === 'notifications' ?
+            Promise.resolve({ state: 'denied' } as PermissionStatus) :
+            originalQuery(parameters)
+        );
+
+        // 자동화 감지 우회
+        Object.defineProperty(navigator, 'platform', {
+          get: () => 'Win32'
+        });
+
+        Object.defineProperty(navigator, 'vendor', {
+          get: () => 'Google Inc.'
+        });
       } catch (_) {}
     });
 
@@ -98,30 +158,42 @@ export class BrowserController extends EventEmitter {
       throw new Error('Page is not initialized. Call launch() first.');
     }
     this.emitLog('system', { message: `Navigating to ${url}...` });
+    this.pageContentCache = null; // 캐시 무효화
     let navigated = false;
+
+    // 1차: domcontentloaded로 바로 시작 (networkidle은 너무 느림)
     try {
-      await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
       navigated = true;
+      this.emitLog('system', { message: `Successfully navigated to ${url}.` });
     } catch (e: any) {
-      this.emitLog('system', { message: `Navigation networkidle timed out/failed: ${e.message}. Retrying with domcontentloaded...` });
+      this.emitLog('system', { message: `Navigation domcontentloaded failed: ${e.message}. Trying load...` });
+
+      // 2차: load 시도
       try {
-        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await this.page.goto(url, { waitUntil: 'load', timeout: 25000 });
         navigated = true;
+        this.emitLog('system', { message: `Successfully navigated to ${url} (load).` });
       } catch (e2: any) {
-        this.emitLog('system', { message: `Navigation domcontentloaded failed: ${e2.message}. Retrying with load...` });
+        this.emitLog('system', { message: `Navigation load failed: ${e2.message}. Trying commit...` });
+
+        // 3차: commit (가장 빠름, 최소한의 로딩)
         try {
-          await this.page.goto(url, { waitUntil: 'load', timeout: 60000 });
+          await this.page.goto(url, { waitUntil: 'commit', timeout: 15000 });
           navigated = true;
+          this.emitLog('system', { message: `Successfully navigated to ${url} (commit).` });
+          // commit은 매우 빠르므로 추가 대기
+          await this.page.waitForTimeout(2000);
         } catch (e3: any) {
           this.emitLog('error', { message: `Navigation failed (all strategies): ${e3.message}` });
-          // 마지막으로 페이지 상태 스크린샷
           try { await this.streamScreenshot('navigation-failed'); } catch (_) {}
           throw e3;
         }
       }
     }
-    await this.page.waitForTimeout(1000); // 안정화
-    if (navigated) this.emitLog('system', { message: `Successfully navigated to ${url}.` });
+
+    // 짧은 안정화 대기
+    await this.page.waitForTimeout(500);
 
     // Take screenshot after navigation
     await this.streamScreenshot('navigation');
@@ -135,8 +207,14 @@ export class BrowserController extends EventEmitter {
       }
     } catch (_) {}
 
-    // Cloudflare 인터스티셜 처리 시도
-    try { await this.handleCloudflareGate(); } catch (_) {}
+    // Cloudflare 인터스티셜 처리 - handleCloudflareGate가 이미 모든 재시도 포함
+    try {
+      const hadCloudflare = await this.handleCloudflareGate();
+      // Cloudflare 통과 후 스크린샷 업데이트
+      if (hadCloudflare) {
+        await this.streamScreenshot('cloudflare-passed');
+      }
+    } catch (_) {}
   }
 
   private getSelectorCandidates(original: string): string[] {
@@ -190,52 +268,67 @@ export class BrowserController extends EventEmitter {
       throw new Error('Page is not initialized. Call launch() first.');
     }
 
-    try {
-      this.emitLog('system', { message: `Attempting to click: ${selector}` });
-      const element = await this.findElement(this.getSelectorCandidates(selector));
-      if (element) {
-        await element.hover();
-        await this.page.waitForTimeout(120 + Math.random() * 180);
-        // Pre-capture href and tag for anchor fallback
-        let href: string | null = null;
-        let tagName: string | null = null;
-        try {
-          href = await element.getAttribute('href');
-          tagName = (await element.evaluate((el: any) => el.tagName)).toString().toLowerCase();
-        } catch (_) {}
-        const preUrl = this.page.url();
-        await element.click({ delay: 50 + Math.floor(Math.random() * 120) });
-        await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}); // 클릭 후 페이지 변경 기다림 (오류 무시)
-        await this.page.waitForTimeout(1000);
-        this.emitLog('system', { message: `Clicked on ${selector}.` });
+    // 재시도 로직 추가 (최대 2회)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        this.emitLog('system', { message: `Attempting to click: ${selector}${attempt > 1 ? ` (retry ${attempt-1})` : ''}` });
+        const element = await this.findElement(this.getSelectorCandidates(selector));
+        if (element) {
+          this.pageContentCache = null; // 캐시 무효화
+          await element.hover();
+          await this.page.waitForTimeout(120 + Math.random() * 180);
+          // Pre-capture href and tag for anchor fallback
+          let href: string | null = null;
+          let tagName: string | null = null;
+          try {
+            href = await element.getAttribute('href');
+            tagName = (await element.evaluate((el: any) => el.tagName)).toString().toLowerCase();
+          } catch (_) {}
+          const preUrl = this.page.url();
+          await element.click({ delay: 50 + Math.floor(Math.random() * 120) });
+          await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
+          await this.page.waitForTimeout(500);
+          this.emitLog('system', { message: `Clicked on ${selector}.` });
 
-        // Take screenshot after click
-        await this.streamScreenshot('click');
-        if (this.debugMode) await this.takeDebugScreenshot('after-click');
-        // If it was an anchor and domain didn't change, navigate directly to href to bypass blockers
-        try {
-          const afterUrl = this.page.url();
-          if (tagName === 'a' && href && /^https?:\/\//i.test(href)) {
-            const preHost = new URL(preUrl).host;
-            const afterHost = new URL(afterUrl).host;
-            const destHost = new URL(href).host;
-            if (preHost === afterHost && destHost !== afterHost) {
-              this.emitLog('system', { message: `Anchor navigation fallback to ${href}` });
-              await this.page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-              await this.streamScreenshot('anchor-fallback-goto');
+          // Take screenshot after click
+          await this.streamScreenshot('click');
+          if (this.debugMode) await this.takeDebugScreenshot('after-click');
+          // If it was an anchor and domain didn't change, navigate directly to href to bypass blockers
+          try {
+            const afterUrl = this.page.url();
+            if (tagName === 'a' && href && /^https?:\/\//i.test(href)) {
+              const preHost = new URL(preUrl).host;
+              const afterHost = new URL(afterUrl).host;
+              const destHost = new URL(href).host;
+              if (preHost === afterHost && destHost !== afterHost) {
+                this.emitLog('system', { message: `Anchor navigation fallback to ${href}` });
+                await this.page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+                await this.streamScreenshot('anchor-fallback-goto');
+              }
             }
-          }
-        } catch (_) {}
-        try { await this.handleCloudflareGate(); } catch (_) {}
-        return true;
+          } catch (_) {}
+          try { await this.handleCloudflareGate(); } catch (_) {}
+          return true;
+        }
+
+        // 요소를 찾지 못한 경우 재시도 전 대기
+        if (attempt < 2) {
+          this.emitLog('system', { message: `Element not found, waiting before retry...` });
+          await this.page.waitForTimeout(1000);
+        }
+      } catch (error) {
+        if (attempt === 2) {
+          console.error(`Error clicking element after retries: ${error}`);
+          throw error;
+        }
+        this.emitLog('system', { message: `Click attempt ${attempt} failed: ${(error as Error).message}` });
+        await this.page.waitForTimeout(1000);
       }
-      this.emitLog('error', { message: `Element not found for click: ${selector}` });
-      if (this.debugMode) await this.takeDebugScreenshot('click-error');
-      return false;
-    } catch (error) {
-      console.error(`Error clicking element: ${error}`);
-      throw error;
     }
+
+    this.emitLog('error', { message: `Element not found for click after retries: ${selector}` });
+    if (this.debugMode) await this.takeDebugScreenshot('click-error');
+    return false;
   }
 
   async type(selector: string, text: string): Promise<boolean> {
@@ -243,28 +336,42 @@ export class BrowserController extends EventEmitter {
       throw new Error('Page is not initialized. Call launch() first.');
     }
 
-    try {
-      this.emitLog('system', { message: `Attempting to type '${text}' into: ${selector}` });
-      const element = await this.findElement(this.getSelectorCandidates(selector));
-      if (element) {
-        // 사람처럼 타이핑 (fill 대신 type)
-        await element.click();
-        await this.page.waitForTimeout(150 + Math.random() * 250);
-        await this.page.keyboard.type(text, { delay: 80 + Math.floor(Math.random() * 70) });
-        this.emitLog('system', { message: `Typed '${text}' into ${selector}.` });
+    // 재시도 로직 추가 (최대 2회)
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        this.emitLog('system', { message: `Attempting to type '${text}' into: ${selector}${attempt > 1 ? ` (retry ${attempt-1})` : ''}` });
+        const element = await this.findElement(this.getSelectorCandidates(selector));
+        if (element) {
+          // 사람처럼 타이핑 (fill 대신 type)
+          await element.click();
+          await this.page.waitForTimeout(150 + Math.random() * 250);
+          await this.page.keyboard.type(text, { delay: 80 + Math.floor(Math.random() * 70) });
+          this.emitLog('system', { message: `Typed '${text}' into ${selector}.` });
 
-        // Take screenshot after typing
-        await this.streamScreenshot('type');
-        if (this.debugMode) await this.takeDebugScreenshot('after-type');
-        return true;
+          // Take screenshot after typing
+          await this.streamScreenshot('type');
+          if (this.debugMode) await this.takeDebugScreenshot('after-type');
+          return true;
+        }
+
+        // 요소를 찾지 못한 경우 재시도 전 대기
+        if (attempt < 2) {
+          this.emitLog('system', { message: `Element not found, waiting before retry...` });
+          await this.page.waitForTimeout(1000);
+        }
+      } catch (error) {
+        if (attempt === 2) {
+          console.error(`Error typing text after retries: ${error}`);
+          throw error;
+        }
+        this.emitLog('system', { message: `Type attempt ${attempt} failed: ${(error as Error).message}` });
+        await this.page.waitForTimeout(1000);
       }
-      this.emitLog('error', { message: `Element not found for type: ${selector}` });
-      if (this.debugMode) await this.takeDebugScreenshot('type-error');
-      return false;
-    } catch (error) {
-      console.error(`Error typing text: ${error}`);
-      throw error;
     }
+
+    this.emitLog('error', { message: `Element not found for type after retries: ${selector}` });
+    if (this.debugMode) await this.takeDebugScreenshot('type-error');
+    return false;
   }
 
   async pressKey(selector: string, key: string): Promise<boolean> {
@@ -626,11 +733,9 @@ export class BrowserController extends EventEmitter {
           await (target as any).click({ delay: 50 });
           await this.page!.waitForTimeout(250);
           clicked++;
-          // Stream after each tile click for more frequent Live View updates
-          await this.streamScreenshot('recaptcha-tile-click');
         } catch (_) {}
       }
-      // One more screenshot after finishing all clicks in this round
+      // 라운드당 한 번만 스크린샷 (개별 타일마다 제거)
       if (clicked > 0) {
         await this.streamScreenshot('recaptcha-tiles-clicked');
       }
@@ -676,8 +781,18 @@ export class BrowserController extends EventEmitter {
     if (!this.page) throw new Error('Page is not initialized.');
 
     try {
+      const currentUrl = this.page.url();
+      const now = Date.now();
+
+      // 캐시 유효성 검사
+      if (this.pageContentCache &&
+          this.pageContentCache.url === currentUrl &&
+          now - this.pageContentCache.timestamp < this.PAGE_CONTENT_CACHE_TTL) {
+        return this.pageContentCache.content;
+      }
+
       // Wait a bit for page to stabilize
-      await this.page.waitForTimeout(500);
+      await this.page.waitForTimeout(300);
 
       // Get visible text content instead of full HTML for better LLM understanding
       const visibleText = await this.page.evaluate(() => {
@@ -687,10 +802,10 @@ export class BrowserController extends EventEmitter {
         return clonedBody.innerText || clonedBody.textContent || '';
       }).catch(() => '');
 
-      // Also get input field info with more details
+      // Also get input field info with more details (제한 30 → 15)
       const inputInfo = await this.page.evaluate(() => {
         const inputs = Array.from(document.querySelectorAll('input, textarea, button, a[role="button"]'));
-        return inputs.slice(0, 30).map((el, idx) => {
+        return inputs.slice(0, 15).map((el, idx) => {
           const tag = el.tagName.toLowerCase();
           const type = el.getAttribute('type') || '';
           const name = el.getAttribute('name') || '';
@@ -711,9 +826,28 @@ export class BrowserController extends EventEmitter {
       }).catch(() => 'Could not extract interactive elements');
 
       // Lightweight CAPTCHA status
-      let captchaStatus = 'captcha_status=unknown (vision-driven)';
+      let captchaStatus = 'captcha_status=none';
+      try {
+        const cfWaiting = (/확인\s*성공/i.test(visibleText) && /응답을\s*기다리는\s*중/i.test(visibleText))
+          || (/verification\s*success/i.test(visibleText) && /(waiting|hold)\s*for\s*response/i.test(visibleText));
+        const cfGate = /아래 작업을 완료하여 사람인지 확인/i.test(visibleText)
+          || /보안을\s*검토/i.test(visibleText)
+          || /Checking your browser/i.test(visibleText)
+          || /성능\s*&\s*보안/.test(visibleText)
+          || /확인\s*성공/.test(visibleText);
+        if (cfWaiting) captchaStatus = 'captcha_status=cloudflare_waiting';
+        else if (cfGate) captchaStatus = 'captcha_status=cloudflare_gate';
+      } catch (_) {}
 
       const combined = `=== Visible Text (first 800 chars) ===\n${visibleText.substring(0, 800)}\n\n=== Interactive Elements (visible only) ===\n${inputInfo}\n\n=== Captcha Status ===\n${captchaStatus}`;
+
+      // 캐시 저장
+      this.pageContentCache = {
+        content: combined,
+        timestamp: now,
+        url: currentUrl
+      };
+
       this.emitLog('system', { message: 'Fetched page content (first 800 chars): ' + combined.substring(0, 800) });
       return combined;
     } catch (error) {
@@ -846,87 +980,196 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  // Cloudflare 대기 상태 감지 (중복 로직 통합)
+  async isCloudflareWaiting(): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const text = await this.page.evaluate(() => document.body?.innerText || '');
+      // 더 유연한 패턴 매칭
+      const hasSuccess = /확인\s*성공/i.test(text) || /verification\s*success/i.test(text);
+      const hasWaiting = /기다리는\s*중/i.test(text) || /waiting/i.test(text);
+      const hasRayId = /Ray ID:/i.test(text);
+
+      // 디버깅 로그
+      if (hasRayId) {
+        console.log(`[Cloudflare Waiting Check] success=${hasSuccess}, waiting=${hasWaiting}, rayId=${hasRayId}`);
+        console.log(`[Cloudflare Waiting Check] Text sample: ${text.substring(0, 200)}`);
+      }
+
+      return hasSuccess && hasWaiting && hasRayId;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Cloudflare 대기 상태 처리 (공통 메서드)
+  async waitForCloudflarePassthrough(maxWaitMs: number = 15000): Promise<boolean> {
+    if (!this.page) return false;
+    const start = Date.now();
+    let count = 0;
+    while (Date.now() - start < maxWaitMs) {
+      await new Promise(r => setTimeout(r, 1500));
+      count++;
+      if (count % 3 === 0) {
+        await this.streamScreenshot(`cloudflare-passthrough-wait-${count}`);
+      }
+      const still = await this.isCloudflareWaiting();
+      if (!still) {
+        this.emitLog('system', { message: 'Cloudflare waiting state cleared.' });
+        return true;
+      }
+    }
+    this.emitLog('system', { message: 'Cloudflare waiting state persists after timeout.' });
+    return false;
+  }
+
   async handleCloudflareGate(): Promise<boolean> {
     if (!this.page) return false;
     try {
       const detected = await this.isCloudflareGate();
       if (!detected) return false;
-      this.emitLog('system', { message: 'Cloudflare gate detected. Waiting/assisting pass-through...' });
+
+      this.emitLog('system', { message: 'Cloudflare gate detected. Using aggressive bypass strategy...' });
       await this.streamScreenshot('cloudflare-detected');
 
-      // Try common action buttons if present
+      // 즉시 버튼 클릭 시도
       await this.tryClickSelectors([
         'button:has-text("Verify")',
         'button:has-text("Continue")',
-        'button:has-text("확인")'
+        'button:has-text("확인")',
+        'input[type="button"]',
+        'input[type="submit"]'
       ]);
 
-      // Wait for redirect/clear - increased wait time with more frequent screenshots
+      // 1단계: 초기 대기 (25초로 증가, 2.5초 간격)
+      this.emitLog('system', { message: 'Waiting for Cloudflare to process (up to 25 seconds)...' });
       const start = Date.now();
       let checkCount = 0;
-      while (Date.now() - start < 45000) { // wait up to 45s without reloads
-        await this.page.waitForTimeout(1500);
+      while (Date.now() - start < 25000) {
+        await this.page.waitForTimeout(2500);
         checkCount++;
-
-        // keep assisting: try buttons again occasionally
-        if (checkCount % 3 === 0) {
-          await this.tryClickSelectors([
-            'button:has-text("Verify")',
-            'button:has-text("Continue")',
-            'button:has-text("확인")'
-          ]);
-        }
-
-        // Stream screenshot every 2 checks to show progress
-        if (checkCount % 2 === 0) {
-          await this.streamScreenshot(`cloudflare-waiting-${checkCount}`);
-        }
 
         const ok = !(await this.isCloudflareGate());
         if (ok) {
-          this.emitLog('system', { message: 'Cloudflare gate appears cleared.' });
+          this.emitLog('system', { message: `Cloudflare gate cleared after ${Math.round((Date.now() - start) / 1000)}s!` });
           await this.streamScreenshot('cloudflare-cleared');
           return true;
         }
+
+        if (checkCount % 2 === 0) {
+          this.emitLog('system', { message: `Still waiting... (${Math.round((Date.now() - start) / 1000)}s elapsed)` });
+        }
       }
 
-      // Optional: only if explicitly allowed via env, perform reload/cache-bust fallback
-      if (process.env.CLOUDFLARE_ALLOW_RELOAD === '1') {
-        this.emitLog('system', { message: 'Cloudflare still present; reload/cache-bust allowed by config.' });
-        try {
-          await this.streamScreenshot('cloudflare-before-reload');
-          await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
-          await this.page.waitForTimeout(2500);
-          await this.streamScreenshot('cloudflare-reload');
-        } catch (_) {}
-        // short post-reload check
-        const t0 = Date.now();
-        while (Date.now() - t0 < 8000) {
-          await this.page.waitForTimeout(1000);
+      // 2단계: Reload 시도 (15초 대기로 증가)
+      this.emitLog('system', { message: 'Cloudflare persists after 25s. Forcing reload...' });
+      try {
+        await this.page.reload({ waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+
+        // Reload 후 충분한 시간 대기 (15초, 3초 간격 체크)
+        const reloadStart = Date.now();
+        while (Date.now() - reloadStart < 15000) {
+          await this.page.waitForTimeout(3000);
           const ok = !(await this.isCloudflareGate());
           if (ok) {
-            this.emitLog('system', { message: 'Cloudflare cleared after reload.' });
-            await this.streamScreenshot('cloudflare-cleared-post-reload');
+            this.emitLog('system', { message: `Cloudflare cleared after reload (${Math.round((Date.now() - reloadStart) / 1000)}s)!` });
+            await this.streamScreenshot('cloudflare-cleared-reload');
             return true;
           }
         }
-        // cache-bust try
-        try {
-          const url = this.page.url();
-          const bustUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
-          this.emitLog('system', { message: `Cloudflare still present; cache-bust goto: ${bustUrl}` });
-          await this.streamScreenshot('cloudflare-before-cache-bust');
-          await this.page.goto(bustUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-          await this.page.waitForTimeout(2000);
-          await this.streamScreenshot('cloudflare-cache-bust-goto');
-        } catch (_) {}
-        return true;
+        this.emitLog('system', { message: 'Reload did not clear Cloudflare after 15s.' });
+      } catch (_) {}
+
+      // 3단계: Cache-bust 시도 (15초 대기로 증가)
+      this.emitLog('system', { message: 'Trying cache-bust navigation...' });
+      try {
+        const url = this.page.url();
+        const bustUrl = url + (url.includes('?') ? '&' : '?') + '_=' + Date.now();
+        await this.page.goto(bustUrl, { waitUntil: 'domcontentloaded', timeout: 20000 }).catch(() => {});
+
+        // Cache-bust 후 충분한 시간 대기 (15초, 3초 간격 체크)
+        const bustStart = Date.now();
+        while (Date.now() - bustStart < 15000) {
+          await this.page.waitForTimeout(3000);
+          const ok = !(await this.isCloudflareGate());
+          if (ok) {
+            this.emitLog('system', { message: `Cloudflare cleared after cache-bust (${Math.round((Date.now() - bustStart) / 1000)}s)!` });
+            await this.streamScreenshot('cloudflare-cleared-bust');
+            return true;
+          }
+        }
+        this.emitLog('system', { message: 'Cache-bust did not clear Cloudflare after 15s.' });
+      } catch (_) {}
+
+      // 4단계: Fresh navigation 시도 (20초 대기로 증가)
+      this.emitLog('system', { message: 'Trying fresh navigation (last attempt before extended wait)...' });
+      try {
+        const url = this.page.url().split('?')[0]; // 쿼리 제거
+        await this.page.goto(url, { waitUntil: 'load', timeout: 30000 }).catch(() => {});
+        
+        // Fresh navigation 후 충분한 시간 대기 (20초, 4초 간격 체크)
+        const freshStart = Date.now();
+        while (Date.now() - freshStart < 20000) {
+          await this.page.waitForTimeout(4000);
+          
+          const stillGate = await this.isCloudflareGate();
+          const isWaitingNow = await this.isCloudflareWaiting();
+          
+          this.emitLog('system', { message: `Fresh nav check (${Math.round((Date.now() - freshStart) / 1000)}s): gate=${stillGate}, waiting=${isWaitingNow}` });
+          
+          if (!stillGate && !isWaitingNow) {
+            this.emitLog('system', { message: `Cloudflare cleared after fresh navigation (${Math.round((Date.now() - freshStart) / 1000)}s)!` });
+            await this.streamScreenshot('cloudflare-cleared-fresh');
+            return true;
+          }
+          
+          // waiting 상태면 루프 탈출하고 아래 extended wait로 진행
+          if (isWaitingNow) {
+            this.emitLog('system', { message: 'Detected waiting state, will proceed to extended wait...' });
+            break;
+          }
+        }
+      } catch (_) {}
+
+      // 마지막으로 대기 상태인지 확인
+      const isWaiting = await this.isCloudflareWaiting();
+      this.emitLog('system', { message: `Checking Cloudflare waiting state: ${isWaiting}` });
+
+      if (isWaiting) {
+        this.emitLog('system', { message: 'Cloudflare is in waiting state. This may require manual intervention or more time.' });
+        // 추가로 30초 더 대기
+        this.emitLog('system', { message: 'Waiting additional 30 seconds for Cloudflare to clear...' });
+        const extraStart = Date.now();
+        while (Date.now() - extraStart < 30000) {
+          await this.page.waitForTimeout(3000);
+          const stillGate = await this.isCloudflareGate();
+          const stillWaiting = await this.isCloudflareWaiting();
+          this.emitLog('system', { message: `Extended wait check: gate=${stillGate}, waiting=${stillWaiting}` });
+
+          if (!stillGate) {
+            this.emitLog('system', { message: 'Cloudflare cleared during extended wait!' });
+            await this.streamScreenshot('cloudflare-finally-cleared');
+            return true;
+          }
+        }
       } else {
-        this.emitLog('system', { message: 'Cloudflare gate persisted; skipping reload per config (click+wait only).' });
-        await this.streamScreenshot('cloudflare-skip-reload');
-        return true;
+        // 대기 상태가 아니지만 여전히 Cloudflare gate가 있다면, 추가 대기 시도
+        this.emitLog('system', { message: 'Not in waiting state but gate persists. Trying one more extended wait...' });
+        const extraStart = Date.now();
+        while (Date.now() - extraStart < 20000) {
+          await this.page.waitForTimeout(3000);
+          if (!(await this.isCloudflareGate())) {
+            this.emitLog('system', { message: 'Cloudflare cleared during final wait!' });
+            await this.streamScreenshot('cloudflare-finally-cleared');
+            return true;
+          }
+        }
       }
-    } catch (_) {
+
+      this.emitLog('error', { message: 'Cloudflare bypass failed after all attempts. Manual intervention may be required.' });
+      return false;
+    } catch (e) {
+      this.emitLog('error', { message: `Cloudflare handler error: ${(e as Error).message}` });
       return false;
     }
   }
