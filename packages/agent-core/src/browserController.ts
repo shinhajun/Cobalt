@@ -32,8 +32,11 @@ export class BrowserController extends EventEmitter {
         args: [
           '--disable-blink-features=AutomationControlled',
           '--disable-web-security',
-          '--disable-features=IsolateOrigins',
+          '--disable-features=IsolateOrigins,PaintHolding',
           '--disable-site-isolation-trials',
+          '--disable-renderer-backgrounding',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
           '--no-sandbox',
           '--disable-gpu',
           '--use-angle=swiftshader',
@@ -46,8 +49,11 @@ export class BrowserController extends EventEmitter {
         args: [
           '--disable-blink-features=AutomationControlled',
           '--disable-web-security',
-          '--disable-features=IsolateOrigins',
+          '--disable-features=IsolateOrigins,PaintHolding',
           '--disable-site-isolation-trials',
+          '--disable-renderer-backgrounding',
+          '--disable-background-timer-throttling',
+          '--disable-backgrounding-occluded-windows',
           '--no-sandbox',
           '--disable-gpu',
           '--use-angle=swiftshader',
@@ -58,7 +64,7 @@ export class BrowserController extends EventEmitter {
 
     const storageStatePath = path.join(this.debugDir, 'storageState.json');
     const context = await this.browser.newContext({
-      viewport: { width: 1280, height: 800 },
+      viewport: { width: 1600, height: 1000 },
       userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36', // 최신 Chrome
       locale: 'ko-KR',
       acceptDownloads: true,
@@ -666,9 +672,15 @@ export class BrowserController extends EventEmitter {
       const waitTime = isCaptchaRelated ? 1500 : 500;
       await this.page.waitForTimeout(waitTime);
 
-      // Take a screenshot and get it as buffer
+      // Force a couple of RAF cycles and a resize event to flush paints (helps avoid black frames)
+      try {
+        await this.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await this.page.evaluate(() => window.dispatchEvent(new Event('resize'))).catch(() => {});
+      } catch (_) {}
+
+      // Take a screenshot and get it as buffer (fullPage for CAPTCHA to capture iframes)
       const screenshotBuffer = await this.page.screenshot({
-        fullPage: false,
+        fullPage: isCaptchaRelated,
         omitBackground: false,
         type: 'png'
       });

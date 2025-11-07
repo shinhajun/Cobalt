@@ -66,9 +66,32 @@ export class LLMService {
         { type: 'text', text: instruction },
         { type: 'image_url', image_url: `data:image/png;base64,${imageBase64}` }
       ];
-      // Some LangChain versions accept array content directly
-      const res: any = await (this.visionModel as any).invoke(content);
-      this.emitLog('system', { message: `Vision model raw response: ${JSON.stringify(res).substring(0, 300)}` });
+
+      // Wrap as a user message for maximum compatibility across LangChain versions
+      const messages: any = [
+        { role: 'user', content }
+      ];
+
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Vision model timeout after 30s')), 30000)
+      );
+
+      const res: any = await Promise.race([
+        (this.visionModel as any).invoke(messages),
+        timeoutPromise
+      ]).catch((err: Error) => {
+        this.emitLog('error', { message: `Vision model invoke error: ${err.message}, stack: ${err.stack?.substring(0, 200)}` });
+        return null;
+      });
+
+      if (!res) {
+        this.emitLog('error', { message: 'Vision model returned null/undefined response.' });
+        return null;
+      }
+
+      this.emitLog('system', { message: `Vision model raw response type: ${typeof res}, keys: ${Object.keys(res || {}).join(', ')}` });
+      this.emitLog('system', { message: `Vision model raw response: ${JSON.stringify(res).substring(0, 500)}` });
       let text: string;
       if (typeof res.content === 'string') text = res.content;
       else if (Array.isArray(res.content)) text = res.content.map((x: any) => typeof x === 'string' ? x : (x.text || JSON.stringify(x))).join('\n');
@@ -103,9 +126,23 @@ export class LLMService {
       });
 
       this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
-      const res: any = await (this.visionModel as any).invoke(content).catch((err: Error) => {
+
+      // Wrap as a user message for maximum compatibility
+      const messages: any = [
+        { role: 'user', content }
+      ];
+
+      // Add timeout to prevent hanging
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Vision model timeout after 30s')), 30000)
+      );
+
+      const res: any = await Promise.race([
+        (this.visionModel as any).invoke(messages),
+        timeoutPromise
+      ]).catch((err: Error) => {
         this.emitLog('error', { message: `Vision model invoke error: ${err.message}, stack: ${err.stack?.substring(0, 200)}` });
-        throw err;
+        return null;
       });
 
       if (!res) {
@@ -128,7 +165,8 @@ export class LLMService {
       const parsed = JSON.parse(cleaned);
       const indexes: number[] = Array.isArray(parsed.indexes) ? parsed.indexes.filter((n: any) => Number.isInteger(n)) : [];
       this.emitLog('system', { message: `Parsed tile indexes: [${indexes.join(', ')}]` });
-      return indexes.length ? indexes : null;
+      // Empty array means "skip" (no matching tiles), which is valid
+      return Array.isArray(indexes) ? indexes : null;
     } catch (e) {
       this.emitLog('error', { message: `Vision choose tiles failed: ${(e as Error).message}` });
       return null;
@@ -360,12 +398,18 @@ export class LLMService {
                       const indexes = await this.chooseRecaptchaTiles(challenge.instruction, challenge.tiles);
                       this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
 
-                      if (indexes && indexes.length > 0) {
-                        this.emitLog('system', { message: `Clicking tiles: [${indexes.join(', ')}]` });
-                        await browserController.selectRecaptchaTiles(indexes);
+                      if (indexes !== null) {
+                        if (indexes.length > 0) {
+                          this.emitLog('system', { message: `Clicking tiles: [${indexes.join(', ')}]` });
+                          await browserController.selectRecaptchaTiles(indexes);
+                        } else {
+                          this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
+                        }
                         await browserController.submitRecaptchaChallenge();
                         await browserController.streamScreenshot('recaptcha-submitted');
-                        actionObservation = `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`;
+                        actionObservation = indexes.length > 0
+                          ? `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`
+                          : `reCAPTCHA v2 submitted with skip (no matching tiles).`;
                       } else {
                         actionError = true;
                         actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
