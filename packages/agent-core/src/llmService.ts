@@ -1,4 +1,5 @@
 import { ChatOpenAI } from "@langchain/openai";
+import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController";
 // Vision-based captcha solving (no external captcha providers)
@@ -7,46 +8,132 @@ import path from 'path';
 export type AgentLogCallback = (log: { type: 'thought' | 'observation' | 'system' | 'error', data: any }) => void;
 
 export class LLMService {
-  private model: ChatOpenAI;
+  private model: BaseChatModel;
   private logCallback: AgentLogCallback;
-  private visionModel: ChatOpenAI | null = null;
+  private visionModel: BaseChatModel | null = null;
+  private initPromise: Promise<void>;
 
   constructor(modelName: string = "gpt-5-mini", logCallback?: AgentLogCallback) {
-    // 생성자 실행 시점에 환경변수 읽기 (모듈 로드 시점이 아닌)
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
-    if (!OPENAI_API_KEY) {
-      console.error("[LLMService] OPENAI_API_KEY not found in environment variables");
-      console.error("[LLMService] Available env keys:", Object.keys(process.env).filter(k => k.includes('OPENAI')));
-      throw new Error(
-        "[LLMService] OpenAI API key is not configured. Cannot initialize LLMService."
-      );
-    }
-
     console.log("[LLMService] Initializing with model:", modelName);
-    console.log("[LLMService] API key loaded:", OPENAI_API_KEY.substring(0, 20) + "...");
-
-    // gpt-5-mini는 temperature 커스터마이징을 지원하지 않음 (기본값 1만 사용)
-    this.model = new ChatOpenAI({
-      apiKey: OPENAI_API_KEY,
-      modelName: modelName,
-      timeout: 15000,
-      // temperature 제거 - gpt-5-mini는 기본값(1)만 지원
-    });
     this.logCallback = logCallback || (() => {}); // 기본값은 아무것도 안 하는 함수
 
-    // Vision model (for image-based captcha). Defaults to gpt-5 if available.
-    const visionModelName = process.env.CAPTCHA_VISION_MODEL || 'gpt-5';
-    try {
-      this.visionModel = new ChatOpenAI({
+    // Gemini 모델인지 확인
+    const isGemini = modelName.startsWith('gemini');
+
+    // UI 표시용 모델명을 실제 API 모델명으로 매핑
+    const normalizeGeminiModelName = (name: string): string => {
+      const lower = name.trim().toLowerCase();
+      if (lower === 'gemini 2.5 pro' || lower === 'gemini-2.5-pro') return 'gemini-2.5-pro';
+      if (lower === 'gemini 2.5 flash' || lower === 'gemini-2.5-flash') return 'gemini-2.5-flash';
+      if (lower === 'gemini 2.5 flashlite' || lower === 'gemini-2.5-flash-lite' || lower === 'gemini-2.5-flash lite') return 'gemini-2.5-flash-lite';
+      return name; // 그대로 사용
+    };
+
+    const effectiveModelName = isGemini ? normalizeGeminiModelName(modelName) : modelName;
+
+    if (isGemini) {
+      // Google Gemini 모델 사용 (dynamic import)
+      const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+
+      if (!GOOGLE_API_KEY) {
+        console.error("[LLMService] GOOGLE_API_KEY not found in environment variables");
+        throw new Error(
+          "[LLMService] Google API key is not configured. Cannot initialize Gemini model."
+        );
+      }
+
+      console.log("[LLMService] Using Gemini model");
+      console.log("[LLMService] API key loaded:", GOOGLE_API_KEY.substring(0, 20) + "...");
+
+      // Dynamic import for Gemini - 초기화를 promise로 저장
+      this.initPromise = this.initializeGeminiModel(GOOGLE_API_KEY, effectiveModelName)
+        .then(() => {
+          console.log('[LLMService] Gemini model initialized:', effectiveModelName);
+        })
+        .catch((err) => {
+          console.error('[LLMService] Gemini init failed:', err);
+          // 폴백: OpenAI로 전환 시도 (성공 시 에러를 재던지지 않음)
+          const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+          if (OPENAI_API_KEY) {
+            try {
+              this.model = new ChatOpenAI({
+                apiKey: OPENAI_API_KEY,
+                modelName: 'gpt-5-mini',
+                timeout: 15000,
+              });
+              console.warn('[LLMService] Falling back to OpenAI gpt-5-mini due to Gemini init failure');
+              return; // 성공적으로 폴백했으므로 resolve 처리
+            } catch (e) {
+              console.error('[LLMService] OpenAI fallback init failed:', e);
+            }
+          }
+          // 폴백 불가한 경우에만 에러 전파
+          throw err;
+        });
+
+      // 임시 더미 모델 (초기화 완료될 때까지)
+      this.model = {} as BaseChatModel;
+    } else {
+      // OpenAI 모델 사용
+      const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+
+      if (!OPENAI_API_KEY) {
+        console.error("[LLMService] OPENAI_API_KEY not found in environment variables");
+        console.error("[LLMService] Available env keys:", Object.keys(process.env).filter(k => k.includes('OPENAI')));
+        throw new Error(
+          "[LLMService] OpenAI API key is not configured. Cannot initialize LLMService."
+        );
+      }
+
+      console.log("[LLMService] Using OpenAI model");
+      console.log("[LLMService] API key loaded:", OPENAI_API_KEY.substring(0, 20) + "...");
+
+      this.model = new ChatOpenAI({
         apiKey: OPENAI_API_KEY,
-        modelName: visionModelName,
-        timeout: 20000,
+        modelName: modelName,
+        timeout: 15000,
       });
-      console.log('[LLMService] Vision model initialized:', visionModelName);
-    } catch (e) {
-      this.visionModel = null;
-      console.warn('[LLMService] Vision model is not available. Image-based captcha solving may fail.');
+
+      this.initPromise = Promise.resolve();
+    }
+
+    // Vision model (for image-based captcha). Defaults to gpt-5 if available.
+    const visionModelNameRaw = process.env.CAPTCHA_VISION_MODEL || 'gpt-5';
+    const visionModelName = visionModelNameRaw.startsWith('gemini') ? normalizeGeminiModelName(visionModelNameRaw) : visionModelNameRaw;
+    const isVisionGemini = visionModelName.startsWith('gemini');
+
+    if (isVisionGemini) {
+      // Gemini Vision 모델 사용
+      const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+      if (GOOGLE_API_KEY) {
+        this.initializeGeminiVisionModel(GOOGLE_API_KEY, visionModelName).then(() => {
+          console.log('[LLMService] Gemini Vision model initialized:', visionModelName);
+        }).catch(() => {
+          console.warn('[LLMService] Failed to initialize Gemini Vision model');
+        });
+      } else {
+        this.visionModel = null;
+        console.warn('[LLMService] Google API key not found. Gemini Vision model disabled.');
+      }
+    } else {
+      // OpenAI Vision 모델 사용
+      const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+      if (OPENAI_API_KEY) {
+        try {
+          this.visionModel = new ChatOpenAI({
+            apiKey: OPENAI_API_KEY,
+            modelName: visionModelName,
+            timeout: 20000,
+          });
+          console.log('[LLMService] OpenAI Vision model initialized:', visionModelName);
+        } catch (e) {
+          this.visionModel = null;
+          console.warn('[LLMService] Failed to initialize OpenAI Vision model');
+        }
+      } else {
+        this.visionModel = null;
+        console.warn('[LLMService] OpenAI API key not found. Vision model disabled.');
+      }
     }
   }
 
@@ -54,55 +141,33 @@ export class LLMService {
     this.logCallback({ type, data });
   }
 
-  // Heuristic: decide if we can auto-finish with a report based on URL/content
-  private shouldAutoFinish(taskDescription: string, currentUrl: string, pageContent: string): boolean {
+  private async initializeGeminiModel(apiKey: string, modelName: string): Promise<void> {
     try {
-      const t = (taskDescription || '').toLowerCase();
-      const u = (currentUrl || '').toLowerCase();
-      const c = (pageContent || '').toLowerCase();
-
-      const calendarTerms = ['academic calendar', 'calendar', '학사', '학사일정', '학사 일정'];
-      const taskLooksLikeCalendar = calendarTerms.some(term => t.includes(term));
-      const urlLooksOfficial = /stonybrook\.edu/.test(u) || /registrar/.test(u);
-      const hasYearAndTerm = /(2023|2024|2025|2026)/.test(c) && /(fall|spring|summer|winter|가을|봄|여름|겨울)/.test(c);
-      const contentLongEnough = (pageContent?.length ?? 0) > 1000;
-
-      return taskLooksLikeCalendar && urlLooksOfficial && hasYearAndTerm && contentLongEnough;
-    } catch {
-      return false;
+      // @ts-ignore - Dynamic import for optional Gemini support
+      const { ChatGoogleGenerativeAI } = await import("@langchain/google-genai");
+      this.model = new ChatGoogleGenerativeAI({
+        apiKey: apiKey,
+        modelName: modelName,
+        maxOutputTokens: 8192,
+      }) as BaseChatModel;
+    } catch (e) {
+      console.error("[LLMService] Failed to load Gemini module:", e);
+      throw new Error("Failed to initialize Gemini model. Please ensure @langchain/google-genai is installed.");
     }
   }
 
-  // Generate a Korean report summarizing an academic calendar page
-  private async generateAutoReport(taskDescription: string, currentUrl: string, pageContent: string): Promise<string> {
-    const instruction = `당신은 웹 자동화 에이전트입니다. 아래는 학사 일정 관련 페이지의 텍스트입니다.
-
-작업: "${taskDescription}"
-페이지 URL: ${currentUrl}
-
-요청: 아래 내용을 분석하여 1) 학기 시작/종료, 2) 수강/정정/철회 마감, 3) 휴일/휴강, 4) 기말고사/리딩데이, 5) 졸업/학위 관련 마감, 6) 등록금 환불 구간(있다면), 7) 그 외 중요한 일정 을 구조적으로 한국어 보고서로 정리하세요.
-- 간결하지만 빠짐없이 정리
-- 날짜는 원문 표기를 유지(예: Mon, Aug. 25 / 2025-08-25 등)
-- 불확실하면 '사이트 원문 참조'라고 명기
-- 마지막에 출처(URL)를 명시
-
-출력 형식 예시:
-제목
-요약
-주요 일정
-- 항목: 날짜 — 설명
-환불/등록 관련(있다면)
-휴일/휴강
-시험/리딩데이
-기타
-출처: <URL>`;
-
-    const prompt = `${instruction}\n\n===== 페이지 텍스트 시작 =====\n${pageContent}\n===== 페이지 텍스트 끝 =====`;
+  private async initializeGeminiVisionModel(apiKey: string, modelName: string): Promise<void> {
     try {
-      const report = await this.generateText(prompt);
-      return report || '보고서를 생성하지 못했습니다. 페이지 원문을 참조해 주세요.';
-    } catch (e: any) {
-      return '보고서 생성 중 오류가 발생했습니다: ' + (e.message || String(e));
+      // @ts-ignore - Dynamic import for optional Gemini support
+      const { ChatGoogleGenerativeAI } = await import("@langchain/google-genai");
+      this.visionModel = new ChatGoogleGenerativeAI({
+        apiKey: apiKey,
+        modelName: modelName,
+        maxOutputTokens: 8192,
+      }) as BaseChatModel;
+    } catch (e) {
+      console.error("[LLMService] Failed to load Gemini vision module:", e);
+      this.visionModel = null;
     }
   }
 
@@ -319,6 +384,9 @@ No explanation, only JSON.`;
 
   async generateText(prompt: string): Promise<string> {
     try {
+      // Gemini 모델 초기화 대기
+      await this.initPromise;
+
       this.emitLog('system', { message: 'LLM prompt (first 300 chars): ' + prompt.substring(0,300) });
       const response = await this.model.invoke(prompt);
       if (typeof response.content === 'string') {
@@ -477,15 +545,23 @@ No explanation, only JSON.`;
               case "getText":
                 if (action.selector) {
                   const text = await browserController.getText(action.selector);
-                  actionObservation = text !== null ? `Text from ${action.selector}: ${text}` : `Could not get text from ${action.selector}.`;
-                  if (text === null && action.output_variable) actionObservation += ` (Output variable ${action.output_variable} will be null)`;
-                  else if (text !==null && action.output_variable) actionObservation += ` (Stored in ${action.output_variable})`;
+                  if (text !== null) {
+                    // 텍스트가 너무 길면 처음 3000자만 표시
+                    const textPreview = text.length > 3000 ? text.substring(0, 3000) + `\n... (truncated, total length: ${text.length})` : text;
+                    actionObservation = `Text from ${action.selector}: ${textPreview}`;
+                    if (action.output_variable) actionObservation += ` (Stored in ${action.output_variable})`;
+                  } else {
+                    actionObservation = `Could not get text from ${action.selector}.`;
+                    if (action.output_variable) actionObservation += ` (Output variable ${action.output_variable} will be null)`;
+                  }
                 } else { actionError = true; actionObservation = "Error: Selector missing for getText."; }
                 break;
               case "getPageContent":
                 const content = await browserController.getPageContent();
-                actionObservation = `Page content fetched (length: ${content.length}).`;
-                if (action.output_variable) actionObservation += ` (Stored in ${action.output_variable})`;
+                // LLM이 내용을 볼 수 있도록 충분한 텍스트 포함 (최대 5000자)
+                const contentPreview = content.substring(0, 5000);
+                actionObservation = `Page content fetched (length: ${content.length}).\n\n=== Page Content (first 5000 chars) ===\n${contentPreview}\n=== End of Content Preview ===`;
+                if (action.output_variable) actionObservation += `\n(Full content stored in ${action.output_variable})`;
                 break;
               case "pressKey":
                 if (action.selector && action.key) {
@@ -493,16 +569,6 @@ No explanation, only JSON.`;
                   actionObservation = pressSuccess ? `Pressed key '${action.key}' on ${action.selector}.` : `Failed to press key on ${action.selector}.`;
                    if(!pressSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: Selector or key missing for pressKey."; }
-                break;
-              case "finish":
-                // LLM이 실수로 소문자 finish를 보낸 경우도 마무리 처리
-                if (action.message) {
-                  this.emitLog('system', { message: `Task Finished: ${action.message}` });
-                  observation = `Finished with message.`;
-                  return { success: true, message: action.message };
-                } else {
-                  actionError = true; actionObservation = "Error: message missing for finish.";
-                }
                 break;
               default:
                 actionError = true;
@@ -726,15 +792,6 @@ No explanation, only JSON.`;
 
           case "FAIL":
             this.emitLog('error', { message: `Task Failed: ${action.message}` });
-            // 실패 직전에도 보고서를 생성할 수 있으면 생성해 함께 반환
-            try {
-              const currentUrl = browserController.getCurrentUrl();
-              const currentContent = await browserController.getPageContent();
-              if (this.shouldAutoFinish(taskDescription, currentUrl, currentContent)) {
-                const report = await this.generateAutoReport(taskDescription, currentUrl, currentContent);
-                return { success: false, message: `부분 보고서\n\n${report}` };
-              }
-            } catch (_) {}
             return { success: false, message: action.message || thought };
 
           default:
@@ -749,18 +806,6 @@ No explanation, only JSON.`;
         thought = `The previous action resulted in an error: ${error.message}. I need to re-evaluate the situation and try a different approach or a corrected action.`;
       }
     }
-
-    // 최종 자동 종료 전, 현재 페이지에서 보고서를 생성할 수 있으면 자동 보고 후 FINISH로 간주
-    try {
-      const currentUrl = browserController.getCurrentUrl();
-      const currentContent = await browserController.getPageContent();
-      if (this.shouldAutoFinish(taskDescription, currentUrl, currentContent)) {
-        const report = await this.generateAutoReport(taskDescription, currentUrl, currentContent);
-        const autoMsg = `자동 생성 보고서\n\n${report}`;
-        this.emitLog('system', { message: 'Auto-finish: generated report from current page.' });
-        return { success: true, message: autoMsg };
-      }
-    } catch (_) {}
 
     const finalMessage = "Max iterations reached. Task may not be complete.";
     this.emitLog('error', { message: finalMessage });

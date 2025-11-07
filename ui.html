@@ -348,18 +348,32 @@
           <div class="form-group">
             <label for="modelSelect">AI Model</label>
             <select id="modelSelect">
-              <option value="gpt-5-mini" selected>GPT-5 Mini (Fast & Efficient)</option>
-              <option value="gpt-5-nano">GPT-5 Nano (Ultra Fast)</option>
-              <option value="gpt-5">GPT-5 (Most Capable)</option>
+              <optgroup label="OpenAI Models">
+                <option value="gpt-5-mini" selected>GPT-5 Mini (Fast & Efficient)</option>
+                <option value="gpt-5-nano">GPT-5 Nano (Ultra Fast)</option>
+                <option value="gpt-5">GPT-5 (Most Capable)</option>
+              </optgroup>
+              <optgroup label="Google Gemini Models">
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Most Capable)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Efficient)</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Ultra Fast)</option>
+              </optgroup>
             </select>
           </div>
 
           <div class="form-group">
             <label for="captchaVisionModel">Captcha Vision Model</label>
             <select id="captchaVisionModel">
-              <option value="gpt-5" selected>GPT-5 (Vision)</option>
-              <option value="gpt-5-mini">GPT-5 Mini (Vision-lite)</option>
-              <option value="gpt-5-nano">GPT-5 Nano (Fast, may be limited)</option>
+              <optgroup label="OpenAI Vision Models">
+                <option value="gpt-5" selected>GPT-5 (Vision)</option>
+                <option value="gpt-5-mini">GPT-5 Mini (Vision-lite)</option>
+                <option value="gpt-5-nano">GPT-5 Nano (Fast, may be limited)</option>
+              </optgroup>
+              <optgroup label="Google Gemini Vision Models">
+                <option value="gemini-2.5-pro">Gemini 2.5 Pro (Vision)</option>
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash (Vision)</option>
+                <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Vision)</option>
+              </optgroup>
             </select>
           </div>
 

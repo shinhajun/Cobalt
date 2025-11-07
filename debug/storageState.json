@@ -741,16 +741,6 @@
       "sameSite": "None"
     },
     {
-      "name": "__cf_bm",
-      "value": "FmhSElWDtEzG0tA3vIl0AcWvUa13zkK7kC_ME92Jscc-1761005939-1.0.1.1-4w35blxjYtDc4_bbjrxrWnUDjn5ivtHOf30BwdjNXdNeu6ZTfx4kHpFcLBNbin89FvW3EngiTVsTX7b7sSrYE0OzEfHGExN3mD7Gcfv6z2Y",
-      "domain": ".linkedin.com",
-      "path": "/",
-      "expires": 1761007739.612936,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "sc_at",
       "value": "v2|H4sIAAAAAAAAAE3GwQ0AIQgEwIpIdlEE7IZLjios3q/zGtcRVIQ4vpJJC4laLdb1Z5Z6g4cTm74IWI48T3EBzGLgA0AAAAA=",
       "domain": ".snapchat.com",
@@ -916,16 +906,6 @@
       "domain": ".eyeota.net",
       "path": "/",
       "expires": 1792541939.871832,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "SERVERID",
-      "value": "23843~DM",
-      "domain": ".eyeota.net",
-      "path": "/",
-      "expires": 1761007149.900413,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -1401,16 +1381,6 @@
       "sameSite": "None"
     },
     {
-      "name": "DV",
-      "value": "s_d5P_W9SxwewPhEXvq4VJHujLNCoBk",
-      "domain": "www.google.com",
-      "path": "/",
-      "expires": 1761007133,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
       "name": "cebsp_",
       "value": "2",
       "domain": ".stonybrook.edu",
@@ -1419,16 +1389,6 @@
       "httpOnly": false,
       "secure": false,
       "sameSite": "Strict"
-    },
-    {
-      "name": "_gat_UA-30058444-1",
-      "value": "1",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1761006608,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
     },
     {
       "name": "_scid_r",
@@ -1679,6 +1639,16 @@
       "httpOnly": false,
       "secure": false,
       "sameSite": "Strict"
+    },
+    {
+      "name": "DV",
+      "value": "s_d5P_W9SxweQIF0XFQkBVjNa8pFoBk",
+      "domain": "www.google.com",
+      "path": "/",
+      "expires": 1761010373,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
     }
   ],
   "origins": [
@@ -1686,12 +1656,12 @@
       "origin": "https://www.google.com",
       "localStorage": [
         {
-          "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[[\"stony brook spring 2025 calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar spring 2026\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}]],\"1\":{\"ag\":{\"a\":{\"40009\":[\"최근 검색어와 관련이 있음\"]}},\"av\":\"2083478718788466780\",\"q\":\"0Q_esBrTnY-rC2vq-gBbz8oWEPQ\"}}"
+          "name": "sb_wiz.zpc.gws-wiz-serp.",
+          "value": "{\"0\":[[\"stony brook acceptance rate\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu university\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu solar\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu brightspace\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu business\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu reddit\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu portal\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu acceptance rate\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu undergraduate calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}]],\"1\":{\"ag\":{\"a\":{\"90000\":[\"최근 검색어와 관련이 있음\",\"\",\"\",7]}},\"av\":\"6234016292698926445\",\"q\":\"k7pNAqp10vEv4rfYSfcSYAq0D2I\"}}"
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1761006533494"
+          "value": "1761009772646"
         },
         {
           "name": "rc::f",
@@ -1699,7 +1669,7 @@
         },
         {
           "name": "sb_wiz.pq",
-          "value": "스토니브룩 대학교 2025 학사 일정"
+          "value": "sbu"
         },
         {
           "name": "rc::a",
@@ -1707,19 +1677,19 @@
         },
         {
           "name": "sb_wiz.sr_di",
-          "value": "GOnU6fSWhcOFKxjrm6qKv9uoqe4BGPn35MjGruOPxQEYx_PF5Ny5kvs5GJOvxfWQu7ed-QE"
+          "value": "GL2U9ceK7fPvCBjhl8ito_OT6ekBGLbBo_iglfjmrQEYv6L-tIjyyMJAGJbHqJerp6_GEg"
         },
         {
           "name": "_grecaptcha",
           "value": "09AG7bzvGcTdh9gSu5UJgPPHJWebq16112I7nE1YJux26M7NgoF1HErAJeK2RuchuRK2NhH-ljxItv3Y4TRh1KuQ_J84nndQP8drAfl71kqXlwuFxb7Jog3SIfSgMpZYhx"
         },
         {
-          "name": "sb_wiz.sc_pq",
-          "value": ""
+          "name": "sb_wiz.qc",
+          "value": "29"
         },
         {
-          "name": "sb_wiz.qc",
-          "value": "28"
+          "name": "sb_wiz.sc_pq",
+          "value": ""
         }
       ]
     },

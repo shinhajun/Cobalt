@@ -101,13 +101,13 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       // 이벤트 리스너 설정
       browserController.on('screenshot', (data) => {
-        if (mainWindow && isTaskRunning && !stopRequested) {
+        if (mainWindow) {
           mainWindow.webContents.send('agent-screenshot', data);
         }
       });
 
       browserController.on('log', (log) => {
-        if (mainWindow && isTaskRunning && !stopRequested) {
+        if (mainWindow) {
           mainWindow.webContents.send('agent-log', log);
         }
       });
