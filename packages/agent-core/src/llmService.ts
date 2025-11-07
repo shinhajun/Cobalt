@@ -55,8 +55,12 @@ export class LLMService {
 
   // Solve image captcha via vision model by returning the raw text to type
   private async solveCaptchaImageToText(imageBase64: string): Promise<string | null> {
-    if (!this.visionModel) return null;
+    if (!this.visionModel) {
+      this.emitLog('error', { message: 'Vision model not initialized for CAPTCHA solving.' });
+      return null;
+    }
     try {
+      this.emitLog('system', { message: `Calling vision model to extract CAPTCHA text. Image size: ${imageBase64.length} chars` });
       const instruction = `You are given an image of a text-based CAPTCHA. Read the characters exactly as shown and return only the characters to type. Do not add spaces or explanations. If unreadable, respond with the single word: UNREADABLE.`;
       const content: any = [
         { type: 'text', text: instruction },
@@ -64,16 +68,46 @@ export class LLMService {
       ];
       // Some LangChain versions accept array content directly
       const res: any = await (this.visionModel as any).invoke(content);
+      this.emitLog('system', { message: `Vision model raw response: ${JSON.stringify(res).substring(0, 300)}` });
       let text: string;
       if (typeof res.content === 'string') text = res.content;
       else if (Array.isArray(res.content)) text = res.content.map((x: any) => typeof x === 'string' ? x : (x.text || JSON.stringify(x))).join('\n');
       else text = JSON.stringify(res.content);
       const answer = (text || '').trim();
+      this.emitLog('system', { message: `Vision extracted text: "${answer}"` });
       if (!answer || /^UNREADABLE$/i.test(answer)) return null;
       // Strip any accidental quotes/markdown
       return answer.replace(/^```[a-z]*\n?|```$/g, '').trim();
     } catch (e) {
       this.emitLog('error', { message: `Vision solve failed: ${(e as Error).message}` });
+      return null;
+    }
+  }
+
+  // Choose reCAPTCHA grid tiles via vision model
+  private async chooseRecaptchaTiles(instruction: string, tilesBase64: string[]): Promise<number[] | null> {
+    if (!this.visionModel) return null;
+    try {
+      const systemPrompt = `You are assisting with a Google reCAPTCHA image grid challenge. Read the instruction carefully and choose the tile indexes that match. Respond with JSON only in the form {"indexes":[...]} using 0-based indexing. No explanation.`;
+      const content: any[] = [
+        { type: 'text', text: systemPrompt },
+        { type: 'text', text: `Instruction: ${instruction}` },
+      ];
+      tilesBase64.forEach((b64, idx) => {
+        content.push({ type: 'text', text: `Tile ${idx}` });
+        content.push({ type: 'image_url', image_url: `data:image/png;base64,${b64}` });
+      });
+      const res: any = await (this.visionModel as any).invoke(content);
+      let txt: string;
+      if (typeof res.content === 'string') txt = res.content;
+      else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || ''))).join('\n');
+      else txt = JSON.stringify(res.content);
+      const cleaned = (txt || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+      const parsed = JSON.parse(cleaned);
+      const indexes: number[] = Array.isArray(parsed.indexes) ? parsed.indexes.filter((n: any) => Number.isInteger(n)) : [];
+      return indexes.length ? indexes : null;
+    } catch (e) {
+      this.emitLog('error', { message: `Vision choose tiles failed: ${(e as Error).message}` });
       return null;
     }
   }
@@ -272,13 +306,45 @@ export class LLMService {
             break;
 
           case "TOOL_ACTION":
+            this.emitLog('system', { message: `Executing Tool Action: ${action.tool || '(no tool specified)'}` });
             if (action.tool === 'solveCaptcha') {
+              this.emitLog('system', { message: 'solveCaptcha tool invoked. Detecting captcha type...' });
               // Decide captcha kind using current page (vision-based only)
               const sorry = await browserController.detectGoogleSorryCaptcha({ includeImage: true });
               const rec = await browserController.detectRecaptchaV2();
+              this.emitLog('system', { message: `Captcha detection: google_sorry=${sorry.detected}, recaptcha_v2=${rec.detected}` });
 
               try {
-                if (sorry.detected && sorry.imageBase64) {
+                // Priority: reCAPTCHA v2 (more common on Google Sorry pages)
+                if (rec.detected) {
+                  this.emitLog('system', { message: 'reCAPTCHA v2 detected. Attempting to click anchor checkbox...' });
+                  const clicked = await browserController.clickRecaptchaAnchor();
+                  if (clicked) {
+                    this.emitLog('system', { message: 'reCAPTCHA anchor clicked. Waiting for challenge or auto-solve...' });
+                    await browserController.page?.waitForTimeout(3000); // Wait for challenge or auto-pass
+
+                    // Check if challenge appeared
+                    const challenge = await browserController.getRecaptchaChallenge();
+                    if (challenge && challenge.tiles && challenge.tiles.length > 0) {
+                      this.emitLog('system', { message: `reCAPTCHA challenge appeared: ${challenge.instruction}` });
+                      const indexes = await this.chooseRecaptchaTiles(challenge.instruction, challenge.tiles);
+                      if (indexes && indexes.length > 0) {
+                        await browserController.selectRecaptchaTiles(indexes);
+                        await browserController.submitRecaptchaChallenge();
+                        actionObservation = `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`;
+                      } else {
+                        actionError = true;
+                        actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
+                      }
+                    } else {
+                      actionObservation = 'reCAPTCHA anchor clicked. Challenge may have auto-solved or is pending.';
+                    }
+                  } else {
+                    actionError = true;
+                    actionObservation = 'Failed to click reCAPTCHA anchor checkbox.';
+                  }
+                } else if (sorry.detected && sorry.imageBase64) {
+                  // Fallback: Google Sorry image text captcha
                   this.emitLog('system', { message: 'Solving Google Sorry image captcha via vision model' });
                   const text = await this.solveCaptchaImageToText(sorry.imageBase64);
                   if (!text) {
@@ -289,10 +355,9 @@ export class LLMService {
                     actionObservation = typed ? `Captcha text "${text}" entered and submitted.` : 'Failed to enter/submit captcha text.';
                     if (!typed) actionError = true;
                   }
-                } else if (rec.detected) {
-                  // Placeholder: reCAPTCHA image grid solving would require per-tile capture & clicks
+                } else if (sorry.detected && !sorry.imageBase64) {
                   actionError = true;
-                  actionObservation = 'reCAPTCHA v2 image challenge solving via vision is not implemented yet.';
+                  actionObservation = 'Google Sorry captcha detected but image not captured.';
                 } else {
                   actionError = true;
                   actionObservation = 'No recognizable captcha detected for vision solving.';
@@ -305,6 +370,7 @@ export class LLMService {
               // Update observation after potential page change
               try {
                 await browserController.waitForPageLoad();
+                await browserController.streamScreenshot('post-tool-action');
                 const currentPageContent = await browserController.getPageContent();
                 const currentUrl = browserController.getCurrentUrl();
                 actionObservation += ` Current URL: ${currentUrl}. Page content (first 500 chars): ${currentPageContent.substring(0, 500)}`;
@@ -316,7 +382,7 @@ export class LLMService {
               if (actionError) this.emitLog('error', { message: observation });
               break;
             } else if (action.tool === 'recaptchaGrid') {
-              // Provide tiles to the LLM and let it choose indices based on instruction
+              // Provide tiles to the LLM and let it choose indices based on instruction (vision-based)
               try {
                 const clickedAnchor = await browserController.clickRecaptchaAnchor();
                 if (!clickedAnchor) this.emitLog('system', { message: 'reCAPTCHA anchor not clicked or not present; proceeding.' });
@@ -327,25 +393,16 @@ export class LLMService {
                 } else {
                   const instruction = challenge.instruction || 'Select relevant tiles per instruction';
                   const tiles = challenge.tiles || [];
-                  // Present tiles info to the model to choose indices (0-based)
-                  const choosePrompt = `Instruction: ${instruction}\nThere are ${tiles.length} tiles. Choose the indexes to click as a JSON array (0-based). Respond JSON only: {"indexes":[...]}\n`;
-                  const modelAnswerRaw = await this.generateText(choosePrompt);
-                  let indexes: number[] = [];
-                  try {
-                    const clean = modelAnswerRaw.replace(/^```json\n?/, '').replace(/\n?```$/, '');
-                    const parsed = JSON.parse(clean);
-                    indexes = Array.isArray(parsed.indexes) ? parsed.indexes.filter((n: any) => Number.isInteger(n)) : [];
-                  } catch (_) {}
-                  if (!indexes.length) {
+                  const indexes = await this.chooseRecaptchaTiles(instruction, tiles);
+                  if (!indexes || !indexes.length) {
                     actionError = true;
-                    actionObservation = 'Model did not provide valid tile indexes.';
+                    actionObservation = 'Vision model failed to provide tile indexes.';
                   } else {
                     const clicked = await browserController.selectRecaptchaTiles(indexes);
                     if (!clicked) {
                       actionError = true;
                       actionObservation = `Failed to click tiles: [${indexes.join(',')}]`;
                     } else {
-                      // Optionally submit
                       try { await browserController.submitRecaptchaChallenge(); } catch (_) {}
                       actionObservation = `Clicked tiles: [${indexes.join(',')}]. Submitted.`;
                     }

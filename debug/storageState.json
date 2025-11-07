@@ -352,10 +352,10 @@
     },
     {
       "name": "NID",
-      "value": "525=QDFUjX47UCFzK4E2sPAuO3RLkGq8pLcm7WluJQYbxZCAYwpClPqkZotPgZUNh7KGVZ0WHtb0NaN1GZf7dDsyiFl8c3M0ehoEbtboO-t4gozrtX1_sCKeL8PmspXM37CjLRu0tgcSyVKVH3pz3Gm02fIhBxsqDcbkyuAskiYwxNbZIisvbkNJFJmgatS1M1qgyDerViQHA385s8RJ1acppWev7LhfM9ckv1YAHH8ipPvGqc6QiSENJEOf_EssGbiEOCaEqsFF8T0",
+      "value": "525=VSx_MUnAu4mpOps1-2TzpNSLmxdFi7KeZLw01_WB8nhBBactCZTDlX1EgYOTfcX0VmneK26WIkvSDPpnbsB0v2NAYxCgydKLRN9Zsz9UUeXAALeH4r2ZkKf4PaBA07TP2AhprRpQBdZRCw5va9gSeJqKrinoxT-snvlYaRfuae-3d-OkOYHkZ7jaOE8eCR8qpvvVvGa3F3ikR0YAYlYUxy2yO-sjnKdM9-5uRJ1W_7LOTXmgXDtmYgS5jhcy-GsIc2D2lM9Ck5k",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1776746474.702941,
+      "expires": 1776746474.248294,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -367,7 +367,7 @@
       "localStorage": [
         {
           "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[],\"1\":{\"av\":\"-4112090264857014848\",\"q\":\"CS-NFBWCljf1j9cXsLS1QZHA8fk\"}}"
+          "value": "{\"0\":[],\"1\":{\"av\":\"-1774825096071214968\",\"q\":\"0iqsv0SJcY7enmYsKGvc5eHy6rc\"}}"
         },
         {
           "name": "rc::a",
@@ -375,15 +375,15 @@
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1760978777319"
+          "value": "1760979968358"
         },
         {
           "name": "sb_wiz.qc",
-          "value": "6"
+          "value": "10"
         },
         {
           "name": "sb_wiz.pq",
-          "value": "가나다라"
+          "value": "abcd"
         }
       ]
     },

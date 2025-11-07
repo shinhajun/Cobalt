@@ -35,6 +35,8 @@ export class BrowserController extends EventEmitter {
           '--disable-features=IsolateOrigins',
           '--disable-site-isolation-trials',
           '--no-sandbox',
+          '--disable-gpu',
+          '--use-angle=swiftshader',
         ],
         timeout: 60000,
       });
@@ -47,6 +49,8 @@ export class BrowserController extends EventEmitter {
           '--disable-features=IsolateOrigins',
           '--disable-site-isolation-trials',
           '--no-sandbox',
+          '--disable-gpu',
+          '--use-angle=swiftshader',
         ],
         timeout: 60000,
       });
@@ -257,17 +261,51 @@ export class BrowserController extends EventEmitter {
 
       let imageBase64: string | undefined;
       if (includeImage) {
-        try {
-          const img = await this.page.$('img[src*="captcha"], img[src*="sorry"], img');
-          if (img) {
-            const buf = await img.screenshot();
+        // 1) 시도: 폼 내 캡차 이미지 우선
+        const imgSelectors = [
+          'form[action*="sorry"] img',
+          'img[src*="captcha"]',
+          'img[alt*="captcha" i]',
+          'img[src*="sorry"]',
+          'img'
+        ];
+        for (const sel of imgSelectors) {
+          try {
+            const el = await this.page.$(sel);
+            if (el) {
+              const buf = await el.screenshot();
+              imageBase64 = Buffer.from(buf).toString('base64');
+              this.emitLog('system', { message: `Google Sorry captcha image captured via selector: ${sel}` });
+              break;
+            }
+          } catch (_) {}
+        }
+        // 2) 폼 자체 스크린샷으로 대체
+        if (!imageBase64) {
+          try {
+            const form = await this.page.$('form[action*="sorry"], form#captcha-form, form');
+            if (form) {
+              const buf = await form.screenshot();
+              imageBase64 = Buffer.from(buf).toString('base64');
+              this.emitLog('system', { message: 'Google Sorry captcha form captured as fallback.' });
+            }
+          } catch (_) {}
+        }
+        // 3) 최후 수단: 페이지 전체 스크린샷
+        if (!imageBase64) {
+          try {
+            const buf = await this.page.screenshot({ fullPage: true });
             imageBase64 = Buffer.from(buf).toString('base64');
-          }
-        } catch (_) {}
+            this.emitLog('system', { message: 'Full page captured as captcha fallback.' });
+          } catch (_) {}
+        }
       }
 
       // Input and submit candidates
       const inputSelectorCandidates = [
+        'form[action*="sorry"] input[name="captcha"]',
+        'form[action*="sorry"] input#captcha',
+        'form[action*="sorry"] input[type="text"]',
         'input[name="captcha"]',
         'input#captcha',
         'input[type="text"]',
@@ -278,10 +316,16 @@ export class BrowserController extends EventEmitter {
         if (el) { inputSelector = sel; break; }
       }
       const submitSelectorCandidates = [
+        'form[action*="sorry"] input[type="submit"]',
+        'form[action*="sorry"] button[type="submit"]',
+        'form[action*="sorry"] button:has-text("Submit")',
+        'form[action*="sorry"] button:has-text("확인")',
+        'form[action*="sorry"] button:has-text("Continue")',
         'input[type="submit"]',
         'button[type="submit"]',
         'button:has-text("Submit")',
         'button:has-text("확인")',
+        'button:has-text("Continue")',
         'input[name="submit"]',
       ];
 
@@ -362,6 +406,7 @@ export class BrowserController extends EventEmitter {
         if (el) {
           await el.click({ delay: 50 });
           await this.page.waitForTimeout(500);
+          await this.streamScreenshot('after-captcha-click');
           return true;
         }
       } catch (_) {}
@@ -609,8 +654,14 @@ export class BrowserController extends EventEmitter {
     }
 
     try {
+      // Wait a short moment for paint
+      await this.page.waitForTimeout(300);
       // Take a screenshot and get it as buffer
-      const screenshotBuffer = await this.page.screenshot({ fullPage: false });
+      const screenshotBuffer = await this.page.screenshot({
+        fullPage: false,
+        omitBackground: false,
+        type: 'png'
+      });
 
       // Convert buffer to base64 for sending over WebSocket
       const base64Image = screenshotBuffer.toString('base64');
