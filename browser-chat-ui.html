@@ -8,10 +8,20 @@
 </head>
 <body>
   <div class="chat-container">
-    <!-- Header with Settings Icon -->
-    <div class="chat-header">
-      <h1>🤖 AI Assistant</h1>
-      <button class="settings-icon-btn" id="settingsIconBtn" title="Settings">⚙️</button>
+    <!-- Chat Tabs Header -->
+    <div class="chat-tabs-header">
+      <div class="tabs-container" id="chatTabsContainer">
+        <div class="chat-tab active" data-room-id="0" draggable="true">
+          <span class="tab-title">채팅방 1</span>
+          <span class="tab-close">×</span>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button class="header-btn" id="newChatBtn" title="새 채팅방">+</button>
+        <button class="header-btn" id="historyBtn" title="히스토리">📜</button>
+        <button class="header-btn" id="settingsIconBtn" title="설정">⚙️</button>
+      </div>
     </div>
 
     <!-- Messages Area (Enlarged) -->
@@ -26,26 +36,6 @@
           <div class="example-item">💡 "3개 사이트 열어서 헤드라인 비교해줘"</div>
         </div>
       </div>
-    </div>
-
-    <!-- Quick Actions -->
-    <div class="quick-actions">
-      <button class="quick-btn" id="btnHome" title="Go to Google">
-        <span class="btn-icon">🏠</span>
-        <span class="btn-label">Home</span>
-      </button>
-      <button class="quick-btn" id="btnScreenshot" title="Take Screenshot">
-        <span class="btn-icon">📸</span>
-        <span class="btn-label">Screenshot</span>
-      </button>
-      <button class="quick-btn" id="btnRefresh" title="Refresh Page">
-        <span class="btn-icon">🔄</span>
-        <span class="btn-label">Refresh</span>
-      </button>
-      <button class="quick-btn" id="btnClearHistory" title="Clear Chat">
-        <span class="btn-icon">🗑️</span>
-        <span class="btn-label">Clear</span>
-      </button>
     </div>
 
     <!-- Input Area -->
@@ -117,6 +107,21 @@
             <button class="btn-copy-logs" id="btnCopyLogs">Copy Logs</button>
           </div>
           <div class="logs-content" id="logsContent"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- History Modal -->
+  <div class="modal-overlay" id="historyModal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>📜 채팅 히스토리</h2>
+        <button class="modal-close" id="historyModalClose">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="history-list" id="historyList">
+          <!-- History items will be inserted here -->
         </div>
       </div>
     </div>

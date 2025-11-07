@@ -876,7 +876,24 @@ No explanation, only JSON.`;
         this.emitLog('system', { message: 'LLM response (first 300 chars): ' + response.content.substring(0, this.LLM_CONFIG.RESPONSE_LOG_LENGTH) });
         return response.content;
       } else if (Array.isArray(response.content)) {
-        const joinedContent = response.content.map((item: any) => typeof item === 'string' ? item : JSON.stringify(item)).join('\n');
+        // Handle array responses - extract text from content blocks
+        const textParts: string[] = [];
+        for (const item of response.content) {
+          if (typeof item === 'string') {
+            textParts.push(item);
+          } else if (item && typeof item === 'object') {
+            // Handle structured content blocks like {"type":"text","text":"..."}
+            if (item.type === 'text' && item.text) {
+              textParts.push(item.text);
+            } else if (item.text) {
+              textParts.push(item.text);
+            } else {
+              // Fallback: stringify other object types
+              textParts.push(JSON.stringify(item));
+            }
+          }
+        }
+        const joinedContent = textParts.join('\n');
         this.emitLog('system', { message: 'LLM array response (joined, first 300 chars): ' + joinedContent.substring(0, this.LLM_CONFIG.RESPONSE_LOG_LENGTH) });
         return joinedContent;
       }
@@ -951,22 +968,23 @@ No explanation, only JSON.`;
         7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
         8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
         9.  {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
+        10. {"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<WHAT_TO_FIND_AND_CLICK>"} - Use vision to find and click elements when selectors fail
 
         Utility Tools:
-        10. {"type": "TOOL_ACTION", "tool": "calculate", "expression": "<MATH_EXPRESSION>"} - Calculate math (e.g., "3*5+2")
-        11. {"type": "TOOL_ACTION", "tool": "storeMemory", "key": "<KEY>", "value": "<VALUE>"} - Store info for later
-        12. {"type": "TOOL_ACTION", "tool": "retrieveMemory", "key": "<KEY>"} - Recall stored info
-        13. {"type": "TOOL_ACTION", "tool": "listMemory"} - List all stored keys
-        14. {"type": "TOOL_ACTION", "tool": "getCurrentDateTime", "format": "full|date|time"} - Get current date/time
-        15. {"type": "TOOL_ACTION", "tool": "calculateDateDiff", "date1": "<ISO_DATE>", "date2": "<ISO_DATE>"} - Calculate days between dates
-        16. {"type": "TOOL_ACTION", "tool": "extractNumbers", "text": "<TEXT>"} - Extract all numbers from text
-        17. {"type": "TOOL_ACTION", "tool": "extractEmails", "text": "<TEXT>"} - Extract email addresses
-        18. {"type": "TOOL_ACTION", "tool": "extractURLs", "text": "<TEXT>"} - Extract URLs from text
-        19. {"type": "TOOL_ACTION", "tool": "formatAsTable", "data": [{"col1":"val1"},...]} - Format data as markdown table
-        20. {"type": "TOOL_ACTION", "tool": "formatAsJSON", "data": <ANY>, "pretty": true} - Format as JSON
+        11. {"type": "TOOL_ACTION", "tool": "calculate", "expression": "<MATH_EXPRESSION>"} - Calculate math (e.g., "3*5+2")
+        12. {"type": "TOOL_ACTION", "tool": "storeMemory", "key": "<KEY>", "value": "<VALUE>"} - Store info for later
+        13. {"type": "TOOL_ACTION", "tool": "retrieveMemory", "key": "<KEY>"} - Recall stored info
+        14. {"type": "TOOL_ACTION", "tool": "listMemory"} - List all stored keys
+        15. {"type": "TOOL_ACTION", "tool": "getCurrentDateTime", "format": "full|date|time"} - Get current date/time
+        16. {"type": "TOOL_ACTION", "tool": "calculateDateDiff", "date1": "<ISO_DATE>", "date2": "<ISO_DATE>"} - Calculate days between dates
+        17. {"type": "TOOL_ACTION", "tool": "extractNumbers", "text": "<TEXT>"} - Extract all numbers from text
+        18. {"type": "TOOL_ACTION", "tool": "extractEmails", "text": "<TEXT>"} - Extract email addresses
+        19. {"type": "TOOL_ACTION", "tool": "extractURLs", "text": "<TEXT>"} - Extract URLs from text
+        20. {"type": "TOOL_ACTION", "tool": "formatAsTable", "data": [{"col1":"val1"},...]} - Format data as markdown table
+        21. {"type": "TOOL_ACTION", "tool": "formatAsJSON", "data": <ANY>, "pretty": true} - Format as JSON
 
         Task Completion Actions:
-        21. {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
+        22. {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
         22. {"type": "FAIL", "message": "<MESSAGE_DESCRIBING_FAILURE_REASON>"}
 
         Guidelines:
@@ -1017,11 +1035,18 @@ No explanation, only JSON.`;
         - Type the query into the box and press Enter to submit.
         - Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
 
-        Google Docs:
-        - To create a new blank Google Docs document: Navigate to https://docs.google.com/document/create
-        - The document editor has a textbox with role="textbox" where you can type content
-        - For Google Sheets: https://docs.google.com/spreadsheets/create
-        - For Google Slides: https://docs.google.com/presentation/create
+        Click Verification:
+        - After clicking, the system automatically takes a screenshot and checks if URL changed
+        - If URL unchanged after click, the element may not have been clicked properly - try different selector or coordinates
+        - Check the observation message for "Page changed" or "Page URL unchanged" to verify click success
+        - If a click should open a new page but URL is unchanged, the click likely failed - try alternative approach
+
+        Using findElement Tool:
+        - **CRITICAL: When standard selectors fail to find an element (e.g., "Element not found for click"), use findElement tool**
+        - findElement uses vision AI to locate and click elements based on visual description
+        - Example: If clicking 'a[aria-label="Blank document"]' fails, use {"type":"TOOL_ACTION","tool":"findElement","instruction":"Find and click the Blank document button"}
+        - The tool will take a screenshot, identify the element visually, and click it
+        - Use findElement for complex UIs where DOM selectors don't work (Google Docs, dynamic web apps, etc.)
 
         Task Completion:
         - Keep your thoughts concise but clear.
@@ -1081,16 +1106,52 @@ No explanation, only JSON.`;
                 break;
               case "click":
                 if (action.selector) {
+                  const urlBefore = browserController.getCurrentUrl();
                   const clickSuccess = await browserController.click(action.selector);
-                  actionObservation = clickSuccess ? `Clicked ${action.selector}.` : `Failed to click ${action.selector}.`;
-                  if(!clickSuccess) actionError = true;
+
+                  if (clickSuccess) {
+                    actionObservation = `Clicked ${action.selector}.`;
+
+                    // Wait for potential page change and take screenshot to verify
+                    await browserController.waitForPageLoad(3000);
+                    await browserController.streamScreenshot('after-click');
+
+                    const urlAfter = browserController.getCurrentUrl();
+                    if (urlBefore !== urlAfter) {
+                      actionObservation += ` Page changed: ${urlBefore} → ${urlAfter}`;
+                      this.emitLog('system', { message: `Click caused navigation: ${urlBefore} → ${urlAfter}` });
+                    } else {
+                      actionObservation += ` Page URL unchanged (may be same-page action or modal).`;
+                    }
+                  } else {
+                    actionObservation = `Failed to click ${action.selector}.`;
+                    actionError = true;
+                  }
                 } else { actionError = true; actionObservation = "Error: Selector missing for click."; }
                 break;
               case "clickCoordinates":
                 if (typeof action.x === 'number' && typeof action.y === 'number') {
+                  const urlBefore = browserController.getCurrentUrl();
                   const clickSuccess = await browserController.clickViewport(action.x, action.y);
-                  actionObservation = clickSuccess ? `Clicked at coordinates (${action.x}, ${action.y}).` : `Failed to click at coordinates (${action.x}, ${action.y}).`;
-                  if(!clickSuccess) actionError = true;
+
+                  if (clickSuccess) {
+                    actionObservation = `Clicked at coordinates (${action.x}, ${action.y}).`;
+
+                    // Wait for potential page change and take screenshot to verify
+                    await browserController.waitForPageLoad(3000);
+                    await browserController.streamScreenshot('after-click-coords');
+
+                    const urlAfter = browserController.getCurrentUrl();
+                    if (urlBefore !== urlAfter) {
+                      actionObservation += ` Page changed: ${urlBefore} → ${urlAfter}`;
+                      this.emitLog('system', { message: `Click caused navigation: ${urlBefore} → ${urlAfter}` });
+                    } else {
+                      actionObservation += ` Page URL unchanged (may be same-page action or modal).`;
+                    }
+                  } else {
+                    actionObservation = `Failed to click at coordinates (${action.x}, ${action.y}).`;
+                    actionError = true;
+                  }
                 } else { actionError = true; actionObservation = "Error: x and y coordinates missing for clickCoordinates."; }
                 break;
               case "type":
@@ -1552,6 +1613,31 @@ No explanation, only JSON.`;
                 actionObservation += ` Current URL: ${currentUrl}. Page content (first 500 chars): ${currentPageContent.substring(0, 500)}`;
               } catch (e: any) {
                 actionObservation += ` Could not fetch page content after visionInteract: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'findElement') {
+              // Vision-based element locator for when standard selectors fail
+              try {
+                const instruction = action.instruction || 'Find and click the target element';
+                this.emitLog('system', { message: `[findElement] Instruction: ${instruction}` });
+
+                // Use visionInteractViewport but with simpler instruction format
+                const result = await this.visionInteractViewport(browserController, instruction);
+                actionObservation = `findElement: ${result.report}`;
+                if (!result.success) actionError = true;
+
+                // Wait for potential page change and verify
+                await browserController.waitForPageLoad(3000);
+                const urlAfter = browserController.getCurrentUrl();
+                actionObservation += ` | URL after: ${urlAfter}`;
+
+                // Take screenshot to verify the action
+                await browserController.streamScreenshot('post-findElement');
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error during findElement: ${e.message}`;
               }
               observation = actionObservation;
               if (actionError) this.emitLog('error', { message: observation });
