@@ -520,6 +520,9 @@ export class BrowserController extends EventEmitter {
       const gridContainer = await challengeFrame.$('.rc-imageselect-table-33, .rc-imageselect-table-44, table.rc-imageselect-table-33, table.rc-imageselect-table-44, .rc-imageselect-challenge');
       if (!gridContainer) return { instruction, gridImageBase64: '' };
 
+      // Ensure tiles are mostly loaded before capture to avoid blank/white tiles being analyzed
+      await this.waitForRecaptchaTilesLoaded(0.85, 4000).catch(() => {});
+
       const buf = await gridContainer.screenshot();
       const gridImageBase64 = Buffer.from(buf).toString('base64');
       // Also stream a full-page screenshot so Live View shows the challenge immediately
@@ -543,15 +546,113 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  // Capture lightweight signatures of current tiles to detect refresh/replacement
+  async getRecaptchaTileSignatures(): Promise<string[] | null> {
+    if (!this.page) return null;
+    const { challengeFrame } = this.getRecaptchaFrames();
+    if (!challengeFrame) return null;
+    try {
+      const sigs = await challengeFrame.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper')) as HTMLElement[];
+        return nodes.map((el) => {
+          const img = el.querySelector('img') as HTMLImageElement | null;
+          const bg = (img && img.src) ? img.src : (getComputedStyle(el).backgroundImage || '');
+          // Normalize url("...") strings
+          return bg.replace(/^url\(["']?/, '').replace(/["']?\)$/,'');
+        });
+      });
+      if (!Array.isArray(sigs)) return null;
+      return sigs as string[];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Wait for any tile to refresh/replace (used for 3x3 progressive challenges)
+  async waitForRecaptchaTilesRefresh(prev: string[] | null, timeout: number = 5000): Promise<string[] | null> {
+    if (!this.page) return null;
+    const start = Date.now();
+    let last: string[] | null = null;
+    while (Date.now() - start < timeout) {
+      const sigs = await this.getRecaptchaTileSignatures();
+      if (sigs && prev && sigs.length === prev.length) {
+        let changed = false;
+        for (let i = 0; i < sigs.length; i++) {
+          if (sigs[i] !== prev[i]) { changed = true; break; }
+        }
+        if (changed) {
+          await this.streamScreenshot('recaptcha-tiles-refreshed');
+          return sigs;
+        }
+      }
+      last = sigs;
+      await this.page.waitForTimeout(250);
+    }
+    return last;
+  }
+
+  // Wait until a minimum fraction of tiles report a loaded image (img naturalWidth>0 or background-image present)
+  async waitForRecaptchaTilesLoaded(minLoadedFraction: number = 0.9, timeout: number = 4000): Promise<boolean> {
+    if (!this.page) return false;
+    const { challengeFrame } = this.getRecaptchaFrames();
+    if (!challengeFrame) return false;
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const ratio = await challengeFrame.evaluate(() => {
+        const nodes = Array.from(document.querySelectorAll('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper')) as HTMLElement[];
+        if (nodes.length === 0) return 0;
+        const loaded = nodes.filter((el) => {
+          const img = el.querySelector('img') as HTMLImageElement | null;
+          const bg = getComputedStyle(el).backgroundImage;
+          const hasImg = !!(img && img.complete && img.naturalWidth > 0);
+          const hasBg = bg && bg !== 'none' && /url\(/.test(bg);
+          return hasImg || hasBg;
+        }).length;
+        return loaded / nodes.length;
+      }).catch(() => 0);
+      if (ratio >= minLoadedFraction) return true;
+      await this.page.waitForTimeout(200);
+    }
+    return false;
+  }
+
   async selectRecaptchaTiles(indices: number[]): Promise<boolean> {
     if (!this.page) return false;
     const { challengeFrame } = this.getRecaptchaFrames();
     if (!challengeFrame) return false;
     try {
-      const candidates = await challengeFrame.$$('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper');
+      // Collect unique clickable tiles (avoid duplicates from multiple matching selectors)
+      const tileHandles = await challengeFrame.$$('.rc-imageselect-table-33 td, .rc-imageselect-table-44 td, .rc-image-tile-wrapper, .rc-imageselect-tile');
+      const boxes = await Promise.all(tileHandles.map((h: any) => h.boundingBox()));
+      type Box = { x: number; y: number; width?: number; height?: number };
+      // Build unique list by center point to dedupe wrappers/overlays referring to same cell
+      const byCenterKey = new Map<string, any>();
+      for (let i = 0; i < tileHandles.length; i++) {
+        const box = boxes[i] as Box | null;
+        if (!box) continue;
+        const cx = Math.round((box.x + (box.width || 0) / 2));
+        const cy = Math.round((box.y + (box.height || 0) / 2));
+        const key = `${cx}:${cy}`;
+        if (!byCenterKey.has(key)) byCenterKey.set(key, tileHandles[i]);
+      }
+      const uniqueTiles: any[] = Array.from(byCenterKey.values());
+
+      // Sort by row-major order (top->bottom, left->right)
+      const uniqueBoxes = await Promise.all(uniqueTiles.map((h: any) => h.boundingBox()));
+      const orderedPairs = uniqueTiles
+        .map((el: any, idx: number) => ({ el, box: uniqueBoxes[idx] as Box }))
+        .filter((p) => !!p.box)
+        .sort((a, b) => {
+          const ay = Math.round((a.box!.y) / 10);
+          const by = Math.round((b.box!.y) / 10);
+          if (ay !== by) return ay - by;
+          return (a.box!.x) - (b.box!.x);
+        });
+      const ordered = orderedPairs.map(p => p.el);
+
       let clicked = 0;
       for (const i of indices) {
-        const el = candidates[i];
+        const el = ordered[i];
         if (!el) continue;
         try {
           await el.click({ delay: 50 });

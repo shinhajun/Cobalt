@@ -219,6 +219,12 @@ No explanation, only JSON.`;
       }
 
       this.emitLog('system', { message: `Vision model text response: "${txt.substring(0, 300)}"` });
+
+      // If the model indicates loading/blank tiles, return empty to skip this round
+      if (/loading|blank|white\s*tiles|not\s*loaded/i.test(txt)) {
+        this.emitLog('system', { message: 'Vision indicated tiles not fully loaded; skipping this round.' });
+        return [];
+      }
       const cleaned = (txt || '')
         .replace(/^```json\n?/, '')
         .replace(/^```\n?/, '')
@@ -479,11 +485,17 @@ No explanation, only JSON.`;
                       await browserController.streamScreenshot('recaptcha-challenge');
                       await browserController.takeDebugScreenshot('recaptcha-challenge');
 
-                      // Multiple rounds handling
+                      // Determine mode by grid size: 3x3 => progressive until no matches, 4x4 => one-shot all matches
+                      // Multiple rounds handling (supports progressive 3x3 where tiles refresh)
                       let attempts = 0;
                       let lastIndexes: number[] | null = null;
-                      while (attempts < 5 && challenge && challenge.gridImageBase64) {
+                      let prevSigs: string[] | null = await browserController.getRecaptchaTileSignatures();
+                      while (attempts < 8 && challenge && challenge.gridImageBase64) {
                         attempts++;
+                        // Detect grid size each round to support 3x3 -> 4x4 transitions
+                        const currentGridSize = (challenge as any).gridSize || 3;
+                        const mode = currentGridSize === 4 ? 'ALL_AT_ONCE' : 'PROGRESSIVE';
+                        this.emitLog('system', { message: `reCAPTCHA round ${attempts}: gridSize=${currentGridSize} mode=${mode}` });
                         this.emitLog('system', { message: `Calling vision model to select tiles... (round ${attempts})` });
                         this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
                         const indexes = await this.chooseRecaptchaTiles(
@@ -507,12 +519,20 @@ No explanation, only JSON.`;
                           this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
                         }
 
+                        // 3x3: 새 이미지가 더이상 매칭되지 않을 때까지 반복. 4x4: 한 번에 모두 선택 후 바로 제출
                         await browserController.submitRecaptchaChallenge();
                         await browserController.streamScreenshot('recaptcha-submitted');
                         await browserController.waitForPageLoad(8000);
 
+                        // Wait for any tile refresh (progressive load) then continue (only for 3x3)
+                        if (mode === 'PROGRESSIVE') {
+                          const newSigs = await browserController.waitForRecaptchaTilesRefresh(prevSigs, 6000);
+                          if (newSigs) prevSigs = newSigs;
+                        }
+
                         const next = await browserController.getRecaptchaChallenge();
                         if (!next || !next.gridImageBase64) break;
+                        // 4x4에서는 보통 다음 라운드가 없어야 정상. 만약 또 나오면 추가 라운드 지속
                         this.emitLog('system', { message: 'Another reCAPTCHA round detected; continuing...' });
                         challenge = next;
                         await new Promise(r => setTimeout(r, 800));
