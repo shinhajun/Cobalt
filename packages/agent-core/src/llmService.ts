@@ -146,6 +146,22 @@ export class LLMService {
   private async visionInteractViewport(browserController: BrowserController, instruction: string): Promise<{ success: boolean; report: string }> {
     if (!this.visionModel) return { success: false, report: 'Vision model not initialized.' };
     try {
+      // Pre-heuristics: try obvious checkbox/gate clicks before invoking the vision model
+      try {
+        const checkboxClicked = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
+        if (checkboxClicked) {
+          await browserController.streamScreenshot('pre-vision-checkbox-heuristic');
+          await new Promise(r => setTimeout(r, 400));
+          return { success: true, report: 'Heuristic checkbox-left-of-text click.' };
+        }
+        const textClicked = await browserController.clickFirstVisibleContainingText(['verify', 'continue', '확인', '계속']);
+        if (textClicked) {
+          await browserController.streamScreenshot('pre-vision-text-heuristic');
+          await new Promise(r => setTimeout(r, 400));
+          return { success: true, report: 'Heuristic text click (verify/continue) performed.' };
+        }
+      } catch (_) {}
+
       const { imageBase64, width, height } = await browserController.captureViewportScreenshotBase64();
       if (!imageBase64 || width === 0 || height === 0) {
         return { success: false, report: 'Viewport screenshot unavailable.' };
@@ -188,6 +204,7 @@ export class LLMService {
         for (const p of json.points) {
           if (typeof p?.x === 'number' && typeof p?.y === 'number') {
             await browserController.clickViewport(Math.round(p.x), Math.round(p.y));
+            await browserController.streamScreenshot('post-vision-click');
             await new Promise(r => setTimeout(r, 200));
             n++;
           }
@@ -202,6 +219,7 @@ export class LLMService {
           width: Math.max(10, Math.round(json.rect.width)),
           height: Math.max(10, Math.round(json.rect.height)),
         }, json.gridSize, json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n)));
+        await browserController.streamScreenshot('post-vision-grid-click');
         return { success: true, report: `Grid click gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}` };
       }
 
@@ -535,7 +553,7 @@ No explanation, only JSON.`;
         4.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"} (Result will be in observation)
         5.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} (Result will be in observation)
         6.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} (e.g., Enter, Tab, ArrowDown)
-        7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha", "captchaKind": "google_sorry|recaptcha_v2|hcaptcha"}
+        7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha", "captchaKind": "recaptcha_v2|text|generic"}
         8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>", "tilesVariable": "<VAR_NAME_FOR_TILES_BASE64>", "select": [0,3,4], "submit": true}
         9.  {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
 
@@ -555,7 +573,7 @@ No explanation, only JSON.`;
           * Type the query into the box and press Enter to submit.
           * Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
         - After typing into a search box, always press Enter key to submit the search.
-        - If CAPTCHA is detected (see Captcha Status in observation), use {"type":"TOOL_ACTION","tool":"solveCaptcha"}. For image-grid reCAPTCHA, request tiles using {"type":"TOOL_ACTION","tool":"recaptchaGrid"}.
+        - If a challenge is detected, use {"type":"TOOL_ACTION","tool":"solveCaptcha"} or {"type":"TOOL_ACTION","tool":"visionInteract"}. Do not click iframes directly.
         - Keep your thoughts concise but clear.
         - When the task is complete, use the FINISH action with a comprehensive report in the message field:
           * Include ALL information gathered (dates, schedules, important details, etc.)
@@ -814,11 +832,16 @@ No explanation, only JSON.`;
                       actionObservation = 'reCAPTCHA anchor clicked. Challenge may have auto-solved or is pending.';
                     }
                   } else {
-                    // Fallback: Not a real reCAPTCHA frame (e.g., custom checkbox like neal.fun). Use vision interact to click the visible checkbox/puzzle.
-                    this.emitLog('system', { message: 'reCAPTCHA anchor not found. Falling back to vision-driven interaction on viewport.' });
-                    const res = await this.visionInteractViewport(browserController, 'Click the visible checkbox that says "I\'m not a robot" (or similar) and solve any subsequent challenge to proceed. If an image grid appears, select tiles accordingly.');
-                    actionObservation = `Fallback visionInteract (no anchor): ${res.report}`;
-                    if (!res.success) actionError = true;
+                    // Fallback: Not a real reCAPTCHA frame (e.g., custom checkbox like neal.fun).
+                    this.emitLog('system', { message: 'reCAPTCHA anchor not found. Fallback to checkbox-left-of-text click, then vision.' });
+                    let ok = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
+                    if (!ok) {
+                      const res = await this.visionInteractViewport(browserController, 'Click the checkbox to the LEFT of the text that says "I\'m not a robot" (or similar). If an image grid appears, select tiles.');
+                      actionObservation = `Fallback visionInteract (no anchor): ${res.report}`;
+                      if (!res.success) actionError = true;
+                    } else {
+                      actionObservation = 'Clicked checkbox area left of text via heuristic.';
+                    }
                   }
                 } else if (classified.kind === 'text_captcha') {
                   // Text-based captcha: crop not yet implemented; rely on viewport OCR first

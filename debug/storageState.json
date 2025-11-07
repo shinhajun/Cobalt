@@ -355,7 +355,7 @@
       "value": "_0yNNYdwCWc",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776726913.356007,
+      "expires": 1776730594.822664,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -365,7 +365,7 @@
       "value": "CgJVUxIEGgAgaw%3D%3D",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776726913.356054,
+      "expires": 1776730594.822738,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -1531,21 +1531,61 @@
       "sameSite": "None"
     },
     {
+      "name": "__Host-GAPS",
+      "value": "1:L2hcA_UbKrEgjuU_RYtHZIdkcoLBew:RrmOWiF5-fWX2qeR",
+      "domain": "accounts.google.com",
+      "path": "/",
+      "expires": 1795737320.078386,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "OTZ",
+      "value": "8314555_72_76_104100_72_446760",
+      "domain": "accounts.google.com",
+      "path": "/",
+      "expires": 1763769320,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
       "name": "cf_clearance",
-      "value": "QnaNUoQnbEvDB3RH7V61cAZF9UGi6BsYjbLhFu9Pzeo-1761174945-1.2.1.1-P.qJuph5g.UFt7DOtX5BvzqRnIMRcyXs7iulua6a3HZ1w1OnF8ks_XRU2tzQkk80rHvqGGvVEhs74aZXk5gjQ50FgtmwYy6okY.cMfj4oMmo_wcY.4v71XzbRvGKlae4Pbd9Rq6Z4yxu1RrMCS.7oUNdp4P8cAtREpl8q78zhtop_vwWZ0XUgvtz918plj718cxy8KjXPN5_AlDkC755Ce7KCkvxHukN9QbdDEeUUDk",
+      "value": "jM_iAGRIzYtN6iPlk7iTYS2KgNkPZ42RoFltETDkrJY-1761177824-1.2.1.1-GWrUUB5v3roKGJUst5GjzKJeoq4EbTEWokon3aunCTeeSxSDE247Yj4QqNaqrAzeMCkdGJQUO8kBspa72hyYybuNFVq4Mch8DCs8x2zy17GCDdmsrA8Qmvtqw5JfVqZyf26YB6dNPGpGNDeucKvTOd89gFL0kCx1LtaoEIjjIhseFce8e3d5birwzHs_xLchgBp8.5P3Ndf8Dhi3dIvPJNGUvpBF5ByhYMCbu67iE60",
       "domain": ".neal.fun",
       "path": "/",
-      "expires": 1792710945.118607,
+      "expires": 1792713824.553142,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
+      "name": "DV",
+      "value": "s_d5P_W9Sxw-wPhEXvq4VJEOk8rmoJnkqNWfmvg5S3NEAkCBdFxUJAVYnbK3AQA",
+      "domain": "www.google.com",
+      "path": "/",
+      "expires": 1761179194,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "cf_chl_rc_ni",
+      "value": "1",
+      "domain": "neal.fun",
+      "path": "/",
+      "expires": 1761182208,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
       "name": "cf_clearance",
-      "value": "MfE68ANv0.QtsUGhdzcQqKpuREDbVmP8FS7UtrlWsxs-1761175943-1.2.1.1-XRSGl.9iL1LjBA9UK9ElkmGnYAFuPdiwWf7MZ56c6sFdVH4VxTKvq5ZNHkQn6L2H_xRr.gnyr9qF3aovHL2SQR0qPMWHs8qezeWyq74oIpPxPRKZ_nqz6qxFI9ycL2kWYBIZwbd0l9r66HQWVCLiEOGsYZCRIe0OCsEAQIwGId49aG4Wt8_kQcecA0GFuP7wfQiCTAZYojJxeWaoTpef770h.jCWTOAFAAr4eSlopgM",
+      "value": "kqB10K8V9x2lA4xVc7TrIwBSXtEADRpkLUnmaT6SvWg-1761178913-1.2.1.1-hoSDLah2RHdz2tmFrUlcTOn5.JZJWUCiX60yoCXoOU4TD5_ErG4b..EDlnneZazUWvSE2_zeKpfEwEk9BqubH.c6m01j58MaobJW1pGTHFUaskrB15gCfsIEJ3g2f0Xh9VhDPc_s.Sk9zhOB9EuLeU7mfeG1utDcquSI.rZKso.OnyezBkAtpmiPjTMxkm_WZ.h4VpOIHpLDck.ToZxBzpiRf.R7RR.70u8moL_NdU0",
       "domain": ".neal.fun",
       "path": "/",
-      "expires": 1792711943.304481,
+      "expires": 1792714913.580444,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -1557,11 +1597,11 @@
       "localStorage": [
         {
           "name": "sb_wiz.zpc.gws-wiz-serp.",
-          "value": "{\"0\":[],\"1\":{\"av\":\"7265019520140727419\",\"q\":\"V6eTl8zctobuivOivsUIiZ3U3M8\"}}"
+          "value": "{\"0\":[[\"infinity fun\",0,[512,308,357,439,650,362,394],{\"zl\":90000}],[\"click sim\",0,[512,308,357,439,650,362,394],{\"zl\":90000}],[\"circle games\",0,[512,308,357,439,650,362,394],{\"zl\":90000}],[\"brainrot clicker game\",0,[512,308,357,439,650,362,394],{\"zl\":90000}],[\"clicer\",0,[512,308,357,439,650,362,394],{\"zl\":90000}]],\"1\":{\"ag\":{\"a\":{\"90000\":[\"최근 검색어와 관련이 있음\",\"\",\"\",7]}},\"av\":\"6332529798954969709\",\"q\":\"Z6I53zj3U-BQYdr3b-kabapg8_Y\"}}"
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1761174912667"
+          "value": "1761178594330"
         },
         {
           "name": "rc::f",
@@ -1569,7 +1609,7 @@
         },
         {
           "name": "sb_wiz.pq",
-          "value": "abc"
+          "value": "neal.fun/not-a-robot/"
         },
         {
           "name": "rc::a",
@@ -1577,7 +1617,7 @@
         },
         {
           "name": "sb_wiz.sr_di",
-          "value": "GJvzu9XL8py_sAEYo7_FrsbJzOVSGLjVqanV-cX5DBjy9v74jL3ijPQBGLr5zbHY0Luq3gE"
+          "value": "GKy6qr_v4c_zMxj_tYSw1MOnwgYYuu-WpuO67IvcARjIx_nIsfCE2T0YxvrlrMvUnr_hAQ"
         },
         {
           "name": "_grecaptcha",
@@ -1589,7 +1629,7 @@
         },
         {
           "name": "sb_wiz.qc",
-          "value": "53"
+          "value": "60"
         }
       ]
     },

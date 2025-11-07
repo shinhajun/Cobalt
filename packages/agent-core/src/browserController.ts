@@ -98,9 +98,30 @@ export class BrowserController extends EventEmitter {
       throw new Error('Page is not initialized. Call launch() first.');
     }
     this.emitLog('system', { message: `Navigating to ${url}...` });
-    await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+    let navigated = false;
+    try {
+      await this.page.goto(url, { waitUntil: 'networkidle', timeout: 30000 });
+      navigated = true;
+    } catch (e: any) {
+      this.emitLog('system', { message: `Navigation networkidle timed out/failed: ${e.message}. Retrying with domcontentloaded...` });
+      try {
+        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        navigated = true;
+      } catch (e2: any) {
+        this.emitLog('system', { message: `Navigation domcontentloaded failed: ${e2.message}. Retrying with load...` });
+        try {
+          await this.page.goto(url, { waitUntil: 'load', timeout: 60000 });
+          navigated = true;
+        } catch (e3: any) {
+          this.emitLog('error', { message: `Navigation failed (all strategies): ${e3.message}` });
+          // 마지막으로 페이지 상태 스크린샷
+          try { await this.streamScreenshot('navigation-failed'); } catch (_) {}
+          throw e3;
+        }
+      }
+    }
     await this.page.waitForTimeout(1000); // 안정화
-    this.emitLog('system', { message: `Successfully navigated to ${url}.` });
+    if (navigated) this.emitLog('system', { message: `Successfully navigated to ${url}.` });
 
     // Take screenshot after navigation
     await this.streamScreenshot('navigation');
@@ -113,6 +134,9 @@ export class BrowserController extends EventEmitter {
         await this.handleGoogleConsentIfPresent();
       }
     } catch (_) {}
+
+    // Cloudflare 인터스티셜 처리 시도
+    try { await this.handleCloudflareGate(); } catch (_) {}
   }
 
   private getSelectorCandidates(original: string): string[] {
@@ -172,6 +196,14 @@ export class BrowserController extends EventEmitter {
       if (element) {
         await element.hover();
         await this.page.waitForTimeout(120 + Math.random() * 180);
+        // Pre-capture href and tag for anchor fallback
+        let href: string | null = null;
+        let tagName: string | null = null;
+        try {
+          href = await element.getAttribute('href');
+          tagName = (await element.evaluate((el: any) => el.tagName)).toString().toLowerCase();
+        } catch (_) {}
+        const preUrl = this.page.url();
         await element.click({ delay: 50 + Math.floor(Math.random() * 120) });
         await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}); // 클릭 후 페이지 변경 기다림 (오류 무시)
         await this.page.waitForTimeout(1000);
@@ -180,6 +212,21 @@ export class BrowserController extends EventEmitter {
         // Take screenshot after click
         await this.streamScreenshot('click');
         if (this.debugMode) await this.takeDebugScreenshot('after-click');
+        // If it was an anchor and domain didn't change, navigate directly to href to bypass blockers
+        try {
+          const afterUrl = this.page.url();
+          if (tagName === 'a' && href && /^https?:\/\//i.test(href)) {
+            const preHost = new URL(preUrl).host;
+            const afterHost = new URL(afterUrl).host;
+            const destHost = new URL(href).host;
+            if (preHost === afterHost && destHost !== afterHost) {
+              this.emitLog('system', { message: `Anchor navigation fallback to ${href}` });
+              await this.page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+              await this.streamScreenshot('anchor-fallback-goto');
+            }
+          }
+        } catch (_) {}
+        try { await this.handleCloudflareGate(); } catch (_) {}
         return true;
       }
       this.emitLog('error', { message: `Element not found for click: ${selector}` });
@@ -237,6 +284,7 @@ export class BrowserController extends EventEmitter {
         // Take screenshot after key press
         await this.streamScreenshot('pressKey');
         if (this.debugMode) await this.takeDebugScreenshot('after-key-press');
+        try { await this.handleCloudflareGate(); } catch (_) {}
         return true;
       }
       this.emitLog('error', { message: `Element not found for pressKey: ${selector}` });
@@ -280,6 +328,7 @@ export class BrowserController extends EventEmitter {
         try { await this.page.keyboard.press('Enter'); } catch (_) {}
       }
       await this.waitForPageLoad(8000);
+      try { await this.streamScreenshot('recaptcha-token-injected'); } catch (_) {}
       return true;
     } catch (e) {
       this.emitLog('error', { message: 'Failed to inject reCAPTCHA token: ' + (e as Error).message });
@@ -323,6 +372,7 @@ export class BrowserController extends EventEmitter {
         try { await this.page.keyboard.press('Enter'); } catch (_) {}
       }
       await this.waitForPageLoad(8000);
+      try { await this.streamScreenshot('captcha-text-submitted'); } catch (_) {}
       return true;
     } catch (e) {
       this.emitLog('error', { message: 'Failed to type captcha text: ' + (e as Error).message });
@@ -781,6 +831,106 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  private async isCloudflareGate(): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const text = await this.page.evaluate(() => document.body?.innerText || '');
+      return /cloudflare/i.test(text)
+        || /Ray ID:/i.test(text)
+        || /Checking your browser/i.test(text)
+        || /성능\s*&\s*보안/.test(text)
+        || /확인\s*성공/.test(text)
+        || /보안을\s*검토/.test(text);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async handleCloudflareGate(): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const detected = await this.isCloudflareGate();
+      if (!detected) return false;
+      this.emitLog('system', { message: 'Cloudflare gate detected. Waiting/assisting pass-through...' });
+      await this.streamScreenshot('cloudflare-detected');
+
+      // Try common action buttons if present
+      await this.tryClickSelectors([
+        'button:has-text("Verify")',
+        'button:has-text("Continue")',
+        'button:has-text("확인")'
+      ]);
+
+      // Wait for redirect/clear - increased wait time with more frequent screenshots
+      const start = Date.now();
+      let checkCount = 0;
+      while (Date.now() - start < 45000) { // wait up to 45s without reloads
+        await this.page.waitForTimeout(1500);
+        checkCount++;
+
+        // keep assisting: try buttons again occasionally
+        if (checkCount % 3 === 0) {
+          await this.tryClickSelectors([
+            'button:has-text("Verify")',
+            'button:has-text("Continue")',
+            'button:has-text("확인")'
+          ]);
+        }
+
+        // Stream screenshot every 2 checks to show progress
+        if (checkCount % 2 === 0) {
+          await this.streamScreenshot(`cloudflare-waiting-${checkCount}`);
+        }
+
+        const ok = !(await this.isCloudflareGate());
+        if (ok) {
+          this.emitLog('system', { message: 'Cloudflare gate appears cleared.' });
+          await this.streamScreenshot('cloudflare-cleared');
+          return true;
+        }
+      }
+
+      // Optional: only if explicitly allowed via env, perform reload/cache-bust fallback
+      if (process.env.CLOUDFLARE_ALLOW_RELOAD === '1') {
+        this.emitLog('system', { message: 'Cloudflare still present; reload/cache-bust allowed by config.' });
+        try {
+          await this.streamScreenshot('cloudflare-before-reload');
+          await this.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          await this.page.waitForTimeout(2500);
+          await this.streamScreenshot('cloudflare-reload');
+        } catch (_) {}
+        // short post-reload check
+        const t0 = Date.now();
+        while (Date.now() - t0 < 8000) {
+          await this.page.waitForTimeout(1000);
+          const ok = !(await this.isCloudflareGate());
+          if (ok) {
+            this.emitLog('system', { message: 'Cloudflare cleared after reload.' });
+            await this.streamScreenshot('cloudflare-cleared-post-reload');
+            return true;
+          }
+        }
+        // cache-bust try
+        try {
+          const url = this.page.url();
+          const bustUrl = url + (url.includes('?') ? '&' : '?') + 'r=' + Date.now();
+          this.emitLog('system', { message: `Cloudflare still present; cache-bust goto: ${bustUrl}` });
+          await this.streamScreenshot('cloudflare-before-cache-bust');
+          await this.page.goto(bustUrl, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+          await this.page.waitForTimeout(2000);
+          await this.streamScreenshot('cloudflare-cache-bust-goto');
+        } catch (_) {}
+        return true;
+      } else {
+        this.emitLog('system', { message: 'Cloudflare gate persisted; skipping reload per config (click+wait only).' });
+        await this.streamScreenshot('cloudflare-skip-reload');
+        return true;
+      }
+    } catch (_) {
+      return false;
+    }
+  }
+
   // --- Generic vision-interaction helpers ---
   async getViewportSize(): Promise<{ width: number; height: number }> {
     if (!this.page) return { width: 0, height: 0 };
@@ -803,6 +953,7 @@ export class BrowserController extends EventEmitter {
       await this.page.waitForTimeout(80);
       await this.page.mouse.click(x, y, { delay: 50 });
       await this.streamScreenshot('viewport-click');
+      if (this.debugMode) await this.takeDebugScreenshot('after-viewport-click');
       await this.page.waitForTimeout(200);
       return true;
     } catch (_) {
@@ -827,7 +978,10 @@ export class BrowserController extends EventEmitter {
         if (ok) clicked++;
         await this.page!.waitForTimeout(200);
       }
-      if (clicked > 0) await this.streamScreenshot('grid-tiles-clicked');
+      if (clicked > 0) {
+        await this.streamScreenshot('grid-tiles-clicked');
+        if (this.debugMode) await this.takeDebugScreenshot('after-grid-tiles-clicked');
+      }
       return clicked > 0;
     } catch (_) {
       return false;
@@ -867,10 +1021,62 @@ export class BrowserController extends EventEmitter {
         await this.page.waitForTimeout(80);
         await this.page.mouse.click(x, y, { delay: 50 });
         await this.streamScreenshot('text-click');
+        if (this.debugMode) await this.takeDebugScreenshot('after-text-click');
         await this.page.waitForTimeout(200);
         return true;
       }
       return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async clickCheckboxLeftOfText(patterns: string[]): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const rect = await this.page.evaluate((pats: string[]) => {
+        const toLower = (s: any) => (s || '').toString().toLowerCase();
+        const patterns = pats.map(toLower);
+        const isVisible = (el: Element) => {
+          const r = (el as HTMLElement).getBoundingClientRect();
+          const style = window.getComputedStyle(el as HTMLElement);
+          return r.width > 1 && r.height > 1 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const all = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+        for (const el of all) {
+          try {
+            if (!isVisible(el)) continue;
+            const text = toLower(el.innerText || el.textContent || '');
+            if (!text) continue;
+            for (const pat of patterns) {
+              if (text.includes(pat)) {
+                const r = el.getBoundingClientRect();
+                return { left: r.left, top: r.top, width: r.width, height: r.height };
+              }
+            }
+          } catch (_e) {}
+        }
+        return null;
+      }, patterns);
+
+      if (!rect) return false;
+      const h = Math.max(12, Math.min(40, Math.round(rect.height)));
+      const cx = (dx: number) => Math.max(1, Math.round(rect.left + dx));
+      const cy = Math.max(1, Math.round(rect.top + rect.height / 2));
+      const dxCandidates = [-Math.round(h * 0.7), -Math.round(h * 0.55), -32, -24, -16];
+      let clicked = 0;
+      for (const dx of dxCandidates) {
+        const x = cx(dx);
+        const y = cy;
+        const ok = await this.clickViewport(x, y);
+        if (ok) clicked++;
+        await this.page!.waitForTimeout(180);
+      }
+      if (clicked > 0) {
+        await this.streamScreenshot('checkbox-left-of-text-clicked');
+        if (this.debugMode) await this.takeDebugScreenshot('after-checkbox-left-of-text');
+      }
+      return clicked > 0;
     } catch (_) {
       return false;
     }
