@@ -204,22 +204,32 @@
     .screenshot-area {
       flex: 1;
       position: relative;
-      overflow: hidden;
+      overflow: auto;
       background-color: #000;
-      min-height: 0; /* Important for flex children */
+      min-height: 0;
+      cursor: zoom-in;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .screenshot-area.zoomed {
+      cursor: zoom-out;
+      overflow: auto;
     }
 
     .screenshot-img {
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
       width: 100%;
       height: 100%;
       object-fit: contain;
-      object-position: center center;
+      object-position: center;
       image-rendering: auto;
+      transition: transform 0.3s ease;
+    }
+
+    .screenshot-area.zoomed .screenshot-img {
+      transform: scale(2);
+      transform-origin: center center;
     }
 
     .placeholder {
@@ -497,6 +507,31 @@
       }
     });
 
+    // Zoom toggle for screenshot area (click to toggle 2x zoom)
+    screenshotArea.addEventListener('click', (e) => {
+      if (e.target === screenshotArea || e.target.id === 'liveImage') {
+        screenshotArea.classList.toggle('zoomed');
+      }
+    });
+
+    // Mouse wheel zoom (Ctrl+Wheel for fine control)
+    let zoomLevel = 1;
+    screenshotArea.addEventListener('wheel', (e) => {
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const img = document.getElementById('liveImage');
+        if (!img || img.style.display === 'none') return;
+
+        const delta = e.deltaY < 0 ? 0.1 : -0.1;
+        zoomLevel = Math.min(Math.max(0.5, zoomLevel + delta), 5);
+
+        img.style.transform = `scale(${zoomLevel})`;
+
+        // Update cursor
+        screenshotArea.style.cursor = zoomLevel > 1 ? 'zoom-out' : 'zoom-in';
+      }
+    }, { passive: false });
+
     // Electron event listeners
     if (window.electronAPI) {
       // Task started
@@ -508,42 +543,18 @@
       });
 
       // Screenshot update
-      let lastImageToken = 0;
       window.electronAPI.onAgentScreenshot((data) => {
         const img = document.getElementById('liveImage');
         const placeholder = document.getElementById('placeholder');
-        if (!img || !data || !data.image) return;
-
-        const token = ++lastImageToken; // drop stale frames arriving out of order
-
-        const applyVisible = () => {
-          if (token !== lastImageToken) return; // a newer frame already arrived
+        // Reset zoom when new image arrives
+        screenshotArea.classList.remove('zoomed');
+        zoomLevel = 1;
+        screenshotArea.style.cursor = 'zoom-in';
+        if (img) {
+          img.src = `data:image/png;base64,${data.image}`;
           img.style.display = 'block';
+          img.style.transform = 'scale(1)';
           if (placeholder) placeholder.style.display = 'none';
-          // Force a reflow/repaint to avoid the black/offset rendering issue on some Electron builds
-          requestAnimationFrame(() => {
-            img.style.willChange = 'transform';
-            img.style.transform = 'translateZ(0)';
-            void img.offsetWidth; // trigger reflow
-            img.style.transform = '';
-            img.style.willChange = '';
-          });
-        };
-
-        const src = `data:image/png;base64,${data.image}`;
-        try {
-          img.src = src;
-          if (typeof img.decode === 'function') {
-            img.decode().then(applyVisible).catch(() => {
-              img.onload = applyVisible;
-            });
-          } else {
-            img.onload = applyVisible;
-          }
-        } catch (_) {
-          // Fallback: still try to show the image
-          img.onload = applyVisible;
-          img.src = src;
         }
 
         if (data.url) {

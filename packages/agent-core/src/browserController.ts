@@ -714,16 +714,10 @@ export class BrowserController extends EventEmitter {
       const waitTime = isCaptchaRelated ? 1500 : 500;
       await this.page.waitForTimeout(waitTime);
 
-      // Force RAF cycles and a resize event to flush paints (helps avoid black frames)
+      // Force a couple of RAF cycles and a resize event to flush paints (helps avoid black frames)
       try {
         await this.page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
         await this.page.evaluate(() => window.dispatchEvent(new Event('resize'))).catch(() => {});
-        // Toggle a tiny viewport change to invalidate layout in some Electron builds
-        const size = this.page.viewportSize();
-        if (size) {
-          await this.page.setViewportSize({ width: size.width, height: size.height - 1 });
-          await this.page.setViewportSize({ width: size.width, height: size.height });
-        }
       } catch (_) {}
 
       // Take a screenshot and get it as buffer
@@ -731,9 +725,7 @@ export class BrowserController extends EventEmitter {
       const screenshotBuffer = await this.page.screenshot({
         fullPage: false,
         omitBackground: false,
-        type: 'png',
-        animations: 'disabled',
-        scale: 'device'
+        type: 'png'
       });
 
       // Convert buffer to base64 for sending over WebSocket
