@@ -64,17 +64,19 @@ export class LLMService {
       const instruction = `You are given an image of a text-based CAPTCHA. Read the characters exactly as shown and return only the characters to type. Do not add spaces or explanations. If unreadable, respond with the single word: UNREADABLE.`;
       const content: any = [
         { type: 'text', text: instruction },
-        { type: 'image_url', image_url: `data:image/png;base64,${imageBase64}` }
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${imageBase64}` } }
       ];
 
       // Wrap as a user message for maximum compatibility across LangChain versions
       const messages: any = [
-        { role: 'user', content }
+        { role: 'user', content },
+        // Some LangChain/OpenAI adapters expect a system message first; provide a minimal one.
+        { role: 'system', content: [{ type: 'text', text: 'You are an assistant that outputs strict JSON only.' }] }
       ];
 
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Vision model timeout after 30s')), 30000)
+        setTimeout(() => reject(new Error('Vision model timeout after 40s')), 40000)
       );
 
       const res: any = await Promise.race([
@@ -141,10 +143,12 @@ Examples:
 
 No explanation, only JSON.`;
 
+      // Try both old and new image payload shapes for best compatibility
       const content: any[] = [
         { type: 'text', text: systemPrompt },
         { type: 'text', text: `Instruction: ${instruction}` },
-        { type: 'image_url', image_url: `data:image/png;base64,${gridImageBase64}` }
+        { type: 'image_url', image_url: `data:image/png;base64,${gridImageBase64}` },
+        { type: 'image_url', image_url: { url: `data:image/png;base64,${gridImageBase64}` } }
       ];
 
       this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
@@ -212,7 +216,12 @@ No explanation, only JSON.`;
       }
 
       this.emitLog('system', { message: `Vision model text response: "${txt.substring(0, 300)}"` });
-      const cleaned = (txt || '').replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+      const cleaned = (txt || '')
+        .replace(/^```json\n?/, '')
+        .replace(/^```\n?/, '')
+        .replace(/\n?```$/, '')
+        .replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
+        .trim();
 
       this.emitLog('system', { message: `Cleaned response for JSON parse: "${cleaned.substring(0, 300)}"` });
 
@@ -459,7 +468,11 @@ No explanation, only JSON.`;
 
                       this.emitLog('system', { message: 'Calling vision model to select tiles...' });
                       this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
-                      const indexes = await this.chooseRecaptchaTiles(challenge.instruction, challenge.gridImageBase64, (challenge as any).gridSize || 3);
+                      const indexes = await this.chooseRecaptchaTiles(
+                        challenge.instruction,
+                        challenge.gridImageBase64,
+                        (challenge as any).gridSize || 3
+                      );
                       this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
 
                       if (indexes !== null) {
@@ -469,7 +482,15 @@ No explanation, only JSON.`;
                         } else {
                           this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
                         }
+                        // Submit challenge; if grid wasn't shown (auto-solve), this no-ops
                         await browserController.submitRecaptchaChallenge();
+                        // If anchor shows solved state, try to submit/continue sorry page
+                        try {
+                          const solved = await browserController.isRecaptchaSolved();
+                          if (solved) {
+                            await browserController.submitSorryPageIfPresent();
+                          }
+                        } catch (_) {}
                         await browserController.streamScreenshot('recaptcha-submitted');
                         actionObservation = indexes.length > 0
                           ? `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`

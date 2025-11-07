@@ -478,6 +478,24 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  async isRecaptchaSolved(): Promise<boolean> {
+    if (!this.page) return false;
+    const { anchorFrame } = this.getRecaptchaFrames();
+    if (!anchorFrame) return false;
+    try {
+      const solved = await anchorFrame.evaluate(() => {
+        const a = document.querySelector('#recaptcha-anchor') as HTMLElement | null;
+        if (!a) return false;
+        const aria = a.getAttribute('aria-checked');
+        const cls = a.className || '';
+        return aria === 'true' || /recaptcha-checkbox-checked/.test(cls);
+      });
+      return !!solved;
+    } catch (_) {
+      return false;
+    }
+  }
+
   async getRecaptchaChallenge(): Promise<{ instruction: string; gridImageBase64: string; gridSize?: number } | null> {
     if (!this.page) return null;
     try {
@@ -558,6 +576,21 @@ export class BrowserController extends EventEmitter {
     } catch (_) {
       return false;
     }
+  }
+
+  async submitSorryPageIfPresent(): Promise<boolean> {
+    if (!this.page) return false;
+    // Try common submit/continue buttons on Google Sorry pages
+    return await this.tryClickSelectors([
+      'form[action*="sorry"] button[type="submit"]',
+      'form[action*="sorry"] input[type="submit"]',
+      'button:has-text("확인")',
+      'button:has-text("계속")',
+      'button:has-text("Continue")',
+      'input[name="submit"]',
+      'button[type="submit"]',
+      'input[type="submit"]'
+    ]);
   }
 
   async getPageContent(): Promise<string> {
