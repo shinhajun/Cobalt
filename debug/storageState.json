@@ -22,10 +22,10 @@
     },
     {
       "name": "_GRECAPTCHA",
-      "value": "09AG7bzvHkhXd9rs2CwsFp7_HBnnG1RojUvHqHtWuAwncXzQsUY8TyavpT9l_Dv9I2TG7aa71BikrYwBhyRMxpVoE",
+      "value": "09AG7bzvEs9hz-ujuhui732lUPvUKOavQTPqicxRcpVrK1dqR-TachxU54T7XoZSdwbk5U9jvT9rudJeEvPLJWodg",
       "domain": "www.google.com",
       "path": "/recaptcha",
-      "expires": 1776556973.489379,
+      "expires": 1776564176.013067,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -391,16 +391,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "NID",
-      "value": "525=Rc3p91BXYJyyFzW-Ko71qCGs0jPuilFKD5MO-8eV-9oCu2D47IWT-8leEn5mb1cmhTdQWjIAU6XB8ELdw_-KcXn_5sobP836lveWNAz1KOV7I9L54k0fcTmviSB8LWzDg5mIXXDluF1aEREbkL9bLTOxD7dsKd-5lQIZUIb_yhqW5lwL0Inhym3VkS0w7t2WYwOZsXnXFbasdGslyUxNFUq4eK3bMQBxzJm7uYCTezRIryTPOdn8nz9Vyj_vlpR3RZzY9AjIzw",
-      "domain": ".google.com",
-      "path": "/",
-      "expires": 1776746474.268837,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "YSC",
       "value": "uQ_RNBCI-d8",
       "domain": ".youtube.com",
@@ -495,7 +485,7 @@
       "value": "34Lw0n825iV5NRNSsXbVPXPXvOx",
       "domain": ".tiktok.com",
       "path": "/",
-      "expires": 1794702547.740192,
+      "expires": 1794706151.066015,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -545,7 +535,7 @@
       "value": "GA1.2.2128736150.1761005939",
       "domain": ".stonybrook.edu",
       "path": "/",
-      "expires": 1761092977,
+      "expires": 1761096560,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -615,7 +605,7 @@
       "value": "19e18bcd-0f32-43c0-9a42-38164047865b",
       "domain": ".linkedin.com",
       "path": "/",
-      "expires": 1768782548.735627,
+      "expires": 1768786151.730237,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -675,7 +665,7 @@
       "value": "1",
       "domain": "px.ads.linkedin.com",
       "path": "/",
-      "expires": 1763636294.730273,
+      "expires": 1763639897.7439,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -685,7 +675,7 @@
       "value": "\"v=2&560638cf-76b8-419f-8b90-833d3a8d7989\"",
       "domain": ".linkedin.com",
       "path": "/",
-      "expires": 1792542548.735794,
+      "expires": 1792546151.744057,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -715,7 +705,7 @@
       "value": "6eb18238-fd00-4bf0-bfcf-77021676cdbd",
       "domain": ".adsrvr.org",
       "path": "/",
-      "expires": 1792542554.990664,
+      "expires": 1792546152.281538,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -725,7 +715,7 @@
       "value": "\"f1ac569b13be36c367355dc154893a15\"",
       "domain": ".exelator.com",
       "path": "/",
-      "expires": 1771374549.176153,
+      "expires": 1771378151.862969,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -755,7 +745,7 @@
       "value": "1",
       "domain": ".stonybrook.edu",
       "path": "/",
-      "expires": 1794702548,
+      "expires": 1794706151,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -765,7 +755,7 @@
       "value": "01K8224AX2Z369QKVT68TAP2BT_.tt.1",
       "domain": ".stonybrook.edu",
       "path": "/",
-      "expires": 1794702548,
+      "expires": 1794706151,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -785,7 +775,7 @@
       "value": "\"eJxrXxzq6XKLQSHNMDHZ1MwyydA4KdXYLNnYzNzY1DQl2dDUxMLSONHQdHFZatGCpaXFqSlJh5ZU5JTkNK0uiw91jHdz9PX0iVzmnFGUn5u6AiwU5hq02NDYcEl%252BUWb6otDgxUUpaQyLSopPBZ9lEgQAiC0pMg%253D%253D\"",
       "domain": ".exelator.com",
       "path": "/",
-      "expires": 1771374549.17623,
+      "expires": 1771378151.863072,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -885,7 +875,7 @@
       "value": "fb.1.1761005939724.500576904917931227",
       "domain": ".stonybrook.edu",
       "path": "/",
-      "expires": 1768782549,
+      "expires": 1768786151,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -1375,90 +1365,10 @@
       "value": "79f3a76e-6851-4812-9306-a25a54ec9f2b|1761005963",
       "domain": ".openx.net",
       "path": "/",
-      "expires": 1792542555.113525,
+      "expires": 1792546152.008872,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
-    },
-    {
-      "name": "cebsp_",
-      "value": "2",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": -1,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Strict"
-    },
-    {
-      "name": "_scid_r",
-      "value": "e9Yy7nTo3b739SjWcsD0DWtr_mCFSEp2PbgBTA",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1795224548,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "ab",
-      "value": "0001%3AY4VKDAKrVhB9guA0WFeZwQN0oUiNangvhCajAiTWekebrtnIuEBwvg%3D%3D",
-      "domain": ".agkn.com",
-      "path": "/",
-      "expires": 1792542548.945972,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "hsk_2465",
-      "value": "\"gAAAAAQAAABYKLUv%252FSBYwQIAiKRidWlkoKNoc2ukNjg2N6hkZWxpdmVyeaQ2ODY3o3ZlcgGlYm5hbWWnUzIwNFNIUqV0c2Vnc68yNjkzODUwLDI2Mzg3NzGlYmNvZGXNCaGidHPKU80CFg%253D%253D\"",
-      "domain": ".exelator.com",
-      "path": "/",
-      "expires": 1771374549.020596,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "ttcsid",
-      "value": "1761005939625::OSIVSV7qCONglBt2M-9J.1.1761006549103.0",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1794702549,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "ttcsid_C7OPS5S02NEJ1K9SJ13G",
-      "value": "1761005939624::7oAlHGvutJZzn3o1YrV1.1.1761006549103.0",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1794702549,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "ttcsid_CO26DRJC77U2472OVGA0",
-      "value": "1761005939625::d8MU0WlbcqDJuXDcAavn.1.1761006549104.0",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1794702549,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "_ga",
-      "value": "GA1.2.233555478.1761005939",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1795566577.593657,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
     },
     {
       "name": "CMID",
@@ -1541,16 +1451,6 @@
       "sameSite": "None"
     },
     {
-      "name": "TDCPM",
-      "value": "CAESFgoHcnViaWNvbhILCNDzrPOukMg-EAUSFwoIYXBwbmV4dXMSCwiQm5X0rpDIPhAFEhUKBmdvb2dsZRILCKyIsPSukMg-EAUSFAoFdGFwYWQSCwiCyOPgr5DIPhAFEhcKCGxpdmVyYW1wEgsI0rS92tyQyD4QBRIVCgZjYXNhbGUSCwikiayl3JDIPhAFEhcKCHB1Ym1hdGljEgsIhruspdyQyD4QBRIYCgliaWRzd2l0Y2gSCwj066yl3JDIPhAFGAEgASgCMgsI4KnAh_OQyD4QBTgBWghsaXZlcmFtcGAC",
-      "domain": ".adsrvr.org",
-      "path": "/",
-      "expires": 1792542554.990797,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "IDSYNC",
       "value": "\"19b8~2s4o:19cg~2s4o\"",
       "domain": ".analytics.yahoo.com",
@@ -1581,8 +1481,38 @@
       "sameSite": "None"
     },
     {
+      "name": "cebsp_",
+      "value": "3",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": -1,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Strict"
+    },
+    {
+      "name": "_scid_r",
+      "value": "fNYy7nTo3b739SjWcsD0DWtr_mCFSEp2PbgBTQ",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1795228151,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ce.s",
+      "value": "v~e1c143d1c0a9b83fed0cb246a239f24b79ff6135~lcw~1761010151116~vir~new~lva~1761005938967~vpv~0~v11ls~58885660-ae1d-11f0-82f6-9b8e0ad0fe9c~gtrk.la~mgzturcv~v11.cs~2154~v11.s~58885660-ae1d-11f0-82f6-9b8e0ad0fe9c~v11.vs~e1c143d1c0a9b83fed0cb246a239f24b79ff6135~v11.fsvd~eyJ1cmwiOiJzdG9ueWJyb29rLmVkdS9jb21tY21zL3JlZ2lzdHJhci9jYWxlbmRhcnMvKiIsInJlZiI6Imh0dHBzOi8vd3d3Lmdvb2dsZS5jb20vIiwidXRtIjpbXX0%3D~v11.sla~1761010151113~v11.ss~1761010151116~lcw~1761010151612",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1792546151,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Strict"
+    },
+    {
       "name": "pxcelPage_default_c010_B",
-      "value": "2_0_1761005939548",
+      "value": "3_0_1761005939548",
       "domain": ".t.sharethis.com",
       "path": "/",
       "expires": 1763597939,
@@ -1591,28 +1521,98 @@
       "sameSite": "None"
     },
     {
+      "name": "ab",
+      "value": "0001%3AY4VKDAKrVhB9guA0WFeZwQN0oUiNangvhCajAiTWekcpO%2BoteDhCkl1kPUuufpPewwL8aZLH3%2F0%3D",
+      "domain": ".agkn.com",
+      "path": "/",
+      "expires": 1792546151.80993,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
       "name": "rlas3",
-      "value": "Ts1YQzyMMH1vAGi2BUFyDTz2Q+/F+VQXJnNILuJbQkY=",
+      "value": "FL3s5Hqm/ueyR97eGvQkGDz2Q+/F+VQXJnNILuJbQkY=",
       "domain": ".rlcdn.com",
       "path": "/",
-      "expires": 1792542561.028226,
+      "expires": 1792546152.055111,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "pxrc",
-      "value": "CPSi28cGEgUI6AcQABIFCOhHEAUSBgjuRxDtBBIFCNtOEAASBgi26gEQHRIGCLrqARAXEgcI6twqEOcEEgYImLsrEBE=",
+      "value": "CPSi28cGEgUI6AcQABIFCOhHEAUSBgjuRxDtBBIFCNtOEAASBgi26gEQHRIGCLrqARAXEgcIuOsBEPQgEgcI6twqEOcEEgYImLsrEBE=",
       "domain": ".rlcdn.com",
       "path": "/",
-      "expires": 1766190561.02833,
+      "expires": 1766194152.055205,
+      "httpOnly": false,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "ttcsid",
+      "value": "1761010151699::TBgP-J1BRxzKDJROjoOx.2.1761010151975.0",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1794706151,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ttcsid_C7OPS5S02NEJ1K9SJ13G",
+      "value": "1761010151699::jVZZRWMSHFs1uYGUhhmw.2.1761010151975.0",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1794706151,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "ttcsid_CO26DRJC77U2472OVGA0",
+      "value": "1761010151700::g2crXLMBEXw2Treijr0i.2.1761010151976.0",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1794706151,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga_8YXBWVVFPX",
+      "value": "GS2.1.s1761010151$o2$g1$t1761010152$j59$l0$h0",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1795570152.21156,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga",
+      "value": "GA1.2.233555478.1761005939",
+      "domain": ".stonybrook.edu",
+      "path": "/",
+      "expires": 1795570160.949143,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "TDCPM",
+      "value": "CAESFgoHcnViaWNvbhILCNDzrPOukMg-EAUSFwoIYXBwbmV4dXMSCwiQm5X0rpDIPhAFEhUKBmdvb2dsZRILCKyIsPSukMg-EAUSFAoFdGFwYWQSCwiCyOPgr5DIPhAFEhcKCGxpdmVyYW1wEgsI0rS92tyQyD4QBRIVCgZjYXNhbGUSCwikiayl3JDIPhAFEhcKCHB1Ym1hdGljEgsIhruspdyQyD4QBRIYCgliaWRzd2l0Y2gSCwj066yl3JDIPhAFGAUoBjILCPaNpor_ksg-EAVCDyINCAESCQoFdGllcjEQAVoHNmttbTI0OWAB",
+      "domain": ".adsrvr.org",
+      "path": "/",
+      "expires": 1792546152.28162,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "pxcelBcnLcy",
-      "value": "25",
+      "value": "16",
       "domain": ".t.sharethis.com",
       "path": "/",
       "expires": -1,
@@ -1621,34 +1621,14 @@
       "sameSite": "None"
     },
     {
-      "name": "_ga_8YXBWVVFPX",
-      "value": "GS2.1.s1761005939$o1$g1$t1761006587$j21$l0$h0",
-      "domain": ".stonybrook.edu",
+      "name": "NID",
+      "value": "525=GNLwyRNTjNJpYDynLKiWOSP3-soGCC2e0az6xiRLzs8e-jUsCN03cxTJzd2lxITW23LzxfFbTwk9louiNxsQOB0K4akNuAOPcJafL5mIU4BHVVOqVV8bC2zHXQo-crWFxMgyVFsSTixJYA0u2pPub_7Um5gui-MYnZLBaIlrDz6yYU4KKsVmUu82TiX8AepuQE-am39XxV0YvlDjKIl2NsW-Vgr5jG5H8xcZ7u1rPKiaE_IiNmVmq0NPRs6aNU2xNMbxGH1Qz_g",
+      "domain": ".google.com",
       "path": "/",
-      "expires": 1795566587.645442,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "_ce.s",
-      "value": "v~e1c143d1c0a9b83fed0cb246a239f24b79ff6135~lcw~1761006547852~vir~new~lva~1761005938967~vpv~0~v11.cs~2154~v11.s~8a121d60-ae13-11f0-b3d5-b796eeea7373~v11.vs~e1c143d1c0a9b83fed0cb246a239f24b79ff6135~v11.fsvd~eyJ1cmwiOiJzdG9ueWJyb29rLmVkdS9jb21tY21zL3JlZ2lzdHJhci9jYWxlbmRhcnMvKiIsInJlZiI6Imh0dHBzOi8vd3d3Lmdvb2dsZS5jb20vIiwidXRtIjpbXX0%3D~v11.sla~1761005939257~v11.ss~1761005939260~v11ls~8a121d60-ae13-11f0-b3d5-b796eeea7373~gtrk.la~mgzturcv~lcw~1761006587647",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1792542587,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Strict"
-    },
-    {
-      "name": "DV",
-      "value": "s_d5P_W9SxweQIF0XFQkBVjNa8pFoBk",
-      "domain": "www.google.com",
-      "path": "/",
-      "expires": 1761010373,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
+      "expires": 1776746474.748965,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
     }
   ],
   "origins": [
@@ -1656,20 +1636,20 @@
       "origin": "https://www.google.com",
       "localStorage": [
         {
-          "name": "sb_wiz.zpc.gws-wiz-serp.",
-          "value": "{\"0\":[[\"stony brook acceptance rate\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu university\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu solar\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu brightspace\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu business\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu reddit\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu portal\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu acceptance rate\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}],[\"sbu undergraduate calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":90000}]],\"1\":{\"ag\":{\"a\":{\"90000\":[\"최근 검색어와 관련이 있음\",\"\",\"\",7]}},\"av\":\"6234016292698926445\",\"q\":\"k7pNAqp10vEv4rfYSfcSYAq0D2I\"}}"
+          "name": "sb_wiz.zpc.gws-wiz.",
+          "value": "{\"0\":[[\"stony brook spring 2025 calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar spring 2026\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook winter break 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu academic calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 classes\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}]],\"1\":{\"ag\":{\"a\":{\"40009\":[\"최근 검색어와 관련이 있음\"]}},\"av\":\"-5871423537472056971\",\"q\":\"0EHy8sKo5Nb_tQt5b34_pLyoDso\"}}"
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1761009772646"
+          "value": "1761012169122"
         },
         {
           "name": "rc::f",
-          "value": "0aAE_cEEwjKF4oU-aUvejofSkkxZP70VsfQjAP8F6tTmPvsIJH7TkYpQAI3uWQKPUjzW6Ytpo"
+          "value": "0aAE_cEEwWYBxFBAcVuoBnlQKNkEUzyI7ASEcI8UMeMKLnzsDOH2jJzKOPnRxze25Imtm3zck"
         },
         {
           "name": "sb_wiz.pq",
-          "value": "sbu"
+          "value": "abc"
         },
         {
           "name": "rc::a",
@@ -1677,19 +1657,19 @@
         },
         {
           "name": "sb_wiz.sr_di",
-          "value": "GL2U9ceK7fPvCBjhl8ito_OT6ekBGLbBo_iglfjmrQEYv6L-tIjyyMJAGJbHqJerp6_GEg"
+          "value": "GJOvxfWQu7ed-QEY6dTp9JaFw4UrGJmM8NOP-4K-IxiOnrCxtvm4kYUBGJebmYzh_teXUg"
         },
         {
           "name": "_grecaptcha",
           "value": "09AG7bzvGcTdh9gSu5UJgPPHJWebq16112I7nE1YJux26M7NgoF1HErAJeK2RuchuRK2NhH-ljxItv3Y4TRh1KuQ_J84nndQP8drAfl71kqXlwuFxb7Jog3SIfSgMpZYhx"
         },
         {
-          "name": "sb_wiz.qc",
-          "value": "29"
-        },
-        {
           "name": "sb_wiz.sc_pq",
           "value": ""
+        },
+        {
+          "name": "sb_wiz.qc",
+          "value": "35"
         }
       ]
     },
@@ -1706,11 +1686,11 @@
         },
         {
           "name": "lastExternalReferrerTime",
-          "value": "1761006548627"
+          "value": "1761010151589"
         },
         {
           "name": "u_sclid_r",
-          "value": "y7rD8tCLLdBQWG0v8Dj3h9JOj3Th65qYuyAExnvWMu506N2-9_Uo1nLA9A1ra_5ghUhKdj24AUw"
+          "value": "zLrD8tCLLdBQWG0v8Dj3h9JOj3Th65qYuyAEx3zWMu506N2-9_Uo1nLA9A1ra_5ghUhKdj24AU0"
         },
         {
           "name": "ce_fvd",
@@ -1718,7 +1698,7 @@
         },
         {
           "name": "topicsLastReferenceTime",
-          "value": "1761006549005"
+          "value": "1761010151866"
         },
         {
           "name": "5227a70e-f71e-bb8f-31f0-2a26b51ad06a_pp",

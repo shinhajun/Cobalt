@@ -500,10 +500,25 @@
         word-wrap: break-word;
         font-size: 15px;
       `;
-      content.textContent = reportText;
+      // URL 자동 링크화 (간단한 http/https 패턴)
+      const linkified = (reportText || '').replace(/(https?:\/\/[^\s)]+)|(www\.[^\s)]+)/g, (match) => {
+        const url = match.startsWith('http') ? match : `https://${match}`;
+        return `<a href="${url}" target="_blank" rel="noopener noreferrer">${match}</a>`;
+      });
+      content.innerHTML = linkified;
       reportContainer.appendChild(content);
 
       // Live View에 추가
+      // 마지막 스크린샷도 참고용으로 상단에 썸네일로 표시 (있다면)
+      const lastImg = document.getElementById('liveImage');
+      if (lastImg && lastImg.src && lastImg.style.display !== 'none') {
+        const thumb = document.createElement('img');
+        thumb.src = lastImg.src;
+        thumb.alt = 'Last Screenshot';
+        thumb.style.cssText = 'display:block; max-width:100%; border:1px solid #e5e7eb; border-radius:6px; margin-bottom:16px;';
+        reportContainer.insertBefore(thumb, content);
+      }
+
       screenshotArea.appendChild(reportContainer);
 
       // URL 바 업데이트

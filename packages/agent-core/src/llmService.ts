@@ -164,6 +164,7 @@ export class LLMService {
         apiKey: apiKey,
         modelName: modelName,
         maxOutputTokens: 8192,
+        temperature: 0,
       }) as BaseChatModel;
     } catch (e) {
       console.error("[LLMService] Failed to load Gemini vision module:", e);
@@ -228,8 +229,14 @@ export class LLMService {
   }
 
   // Choose reCAPTCHA grid tiles via vision model (using full grid image)
-  private async chooseRecaptchaTiles(instruction: string, gridImageBase64: string, gridSize: number = 3): Promise<number[] | null> {
-    if (!this.visionModel) {
+  private async chooseRecaptchaTiles(
+    instruction: string,
+    gridImageBase64: string,
+    gridSize: number = 3,
+    modelOverride?: BaseChatModel
+  ): Promise<number[] | null> {
+    const activeModel = (modelOverride as any) || (this.visionModel as any);
+    if (!activeModel) {
       this.emitLog('error', { message: 'Vision model not initialized for reCAPTCHA tile selection.' });
       return null;
     }
@@ -253,7 +260,7 @@ Row 4: [12] [13] [14] [15]
 Read the instruction carefully and identify which tiles contain the requested object.
 Look at the ENTIRE grid to understand context and objects that span multiple tiles.
 
-Respond with JSON only in the form {"indexes":[...]} using 0-based indexing with maximum index ${gridSize === 4 ? 15 : 8}. If no tiles match, return {"indexes":[]}.
+Respond with JSON ONLY. Use this exact schema: {"indexes":[<zero or more integers>]}. Do not include comments or extra keys. Use 0-based indexing with maximum index ${gridSize === 4 ? 15 : 8}. If no tiles match, return {"indexes":[]}.
 
 Examples:
 - If tiles 0, 1, 4 contain the object: {"indexes":[0,1,4]}
@@ -261,8 +268,8 @@ Examples:
 
 No explanation, only JSON.`;
 
-      // Build messages using LangChain message classes for maximum compatibility
-      const messages = [
+      // Message builders (try multiple shapes for cross-provider compatibility)
+      const buildMessagesVariant1 = () => [
         new SystemMessage(systemPrompt),
         new HumanMessage({
           content: [
@@ -272,11 +279,42 @@ No explanation, only JSON.`;
         } as any)
       ];
 
+      const buildMessagesVariant2 = () => [
+        new SystemMessage(systemPrompt),
+        new HumanMessage({
+          content: [
+            { type: 'text', text: `Instruction: ${instruction}` },
+            { type: 'image_url', image_url: `data:image/png;base64,${gridImageBase64}` }
+          ] as any
+        } as any)
+      ];
+
+      // v3: No system message; single human message with text + image_url (object.url)
+      const buildMessagesVariant3 = () => [
+        new HumanMessage({
+          content: [
+            { type: 'text', text: `${systemPrompt}\n\nInstruction: ${instruction}` },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${gridImageBase64}` } }
+          ] as any
+        } as any)
+      ];
+
+      // v4: Google-style inline image bytes (if supported by adapter)
+      const buildMessagesVariant4 = () => [
+        new HumanMessage({
+          content: [
+            { type: 'text', text: `${systemPrompt}\n\nInstruction: ${instruction}` },
+            { type: 'input_image', mime_type: 'image/png', data: gridImageBase64 } as any
+          ] as any
+        } as any)
+      ];
+
       this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
 
       // Add timeout to prevent hanging
+      const timeoutMs = gridSize === 4 ? 45000 : 35000;
       const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Vision model timeout after 30s')), 30000)
+        setTimeout(() => reject(new Error(`Vision model timeout after ${timeoutMs}ms`)), timeoutMs)
       );
 
       let res: any;
@@ -284,12 +322,46 @@ No explanation, only JSON.`;
         this.emitLog('system', { message: 'Calling visionModel.invoke()...' });
         console.log('[LLMService] About to call visionModel.invoke()');
         console.log('[LLMService] Vision model type:', typeof this.visionModel);
-        console.log('[LLMService] Message structure:', JSON.stringify(messages[0].content[0]).substring(0, 200));
-
+        // Try variant 1
+        let messages = buildMessagesVariant1();
+        console.log('[LLMService] Message structure (v1):', JSON.stringify((messages[1] as any).content?.[0] || {}).substring(0, 200));
         res = await Promise.race([
-          (this.visionModel as any).invoke(messages),
+          activeModel.invoke(messages),
           timeoutPromise
         ]);
+
+        // If null/undefined, try variant 2 (image_url as string)
+        if (!res) {
+          this.emitLog('system', { message: 'Primary vision call returned null. Retrying with alternate message shape (v2).' });
+          messages = buildMessagesVariant2();
+          console.log('[LLMService] Message structure (v2):', JSON.stringify((messages[1] as any).content?.[0] || {}).substring(0, 200));
+          res = await Promise.race([
+            activeModel.invoke(messages),
+            timeoutPromise
+          ]);
+        }
+
+        // If still null/undefined, try variant 3 (human only; object.url form)
+        if (!res) {
+          this.emitLog('system', { message: 'Vision call still null. Retrying with alternate message shape (v3 - human only).' });
+          messages = buildMessagesVariant3();
+          console.log('[LLMService] Message structure (v3):', JSON.stringify((messages[0] as any).content?.[0] || {}).substring(0, 200));
+          res = await Promise.race([
+            activeModel.invoke(messages),
+            timeoutPromise
+          ]);
+        }
+
+        // If still null/undefined, try variant 4 (inline bytes)
+        if (!res) {
+          this.emitLog('system', { message: 'Vision call still null. Retrying with alternate message shape (v4 - inline image bytes).' });
+          messages = buildMessagesVariant4();
+          console.log('[LLMService] Message structure (v4):', JSON.stringify((messages[0] as any).content?.[1] || {}).substring(0, 200));
+          res = await Promise.race([
+            activeModel.invoke(messages),
+            timeoutPromise
+          ]);
+        }
 
         console.log('[LLMService] visionModel.invoke() returned:', typeof res);
         this.emitLog('system', { message: 'visionModel.invoke() completed successfully' });
@@ -338,7 +410,7 @@ No explanation, only JSON.`;
       this.emitLog('system', { message: `Vision model text response: "${txt.substring(0, 300)}"` });
 
       // If the model indicates loading/blank tiles, return empty to skip this round
-      if (/loading|blank|white\s*tiles|not\s*loaded/i.test(txt)) {
+      if (/loading|blank|white\s*tiles|not\s*loaded|image\s*not\s*loaded|wait\s*for\s*tiles/i.test(txt)) {
         this.emitLog('system', { message: 'Vision indicated tiles not fully loaded; skipping this round.' });
         return [];
       }
@@ -474,11 +546,15 @@ No explanation, only JSON.`;
         - After typing into a search box, always press Enter key to submit the search.
         - If CAPTCHA is detected (see Captcha Status in observation), use {"type":"TOOL_ACTION","tool":"solveCaptcha"}. For image-grid reCAPTCHA, request tiles using {"type":"TOOL_ACTION","tool":"recaptchaGrid"}.
         - Keep your thoughts concise but clear.
-        - When the task is complete, use the FINISH action with a comprehensive report in the message field:
+        - You ARE allowed to analyze any text included in the <Observation> and previous content previews (e.g., results of getPageContent/getText). Use that text to extract facts and compose the final report without requiring extra actions when sufficient.
+        - If the current page likely contains the needed data but it is not visible yet, first try: clicking the most relevant result link, then use getPageContent or getText on main/content/article containers (e.g., 'main', '#content', 'article').
+        - Never claim you cannot analyze content. If information is insufficient, attempt one more reasonable action to fetch the content; otherwise provide best-effort findings and clearly state limitations.
+        - When the task is complete, use the FINISH action with a comprehensive report in the message field (WRITE THE REPORT IN ENGLISH):
           * Include ALL information gathered (dates, schedules, important details, etc.)
-          * Format the report clearly with proper structure and organization
-          * Use Korean if the task was in Korean, otherwise use English
-          * Make the report detailed and easy to read
+          * Include direct links (full URLs) to sources used so the user can verify
+          * If an image or screenshot was referenced, mention it and include the page URL where it was captured
+          * Organize the report clearly: Summary, Steps Taken, Findings, References
+          * Make the report concise, readable, and professional in English
 
         Your Response (JSON only):
         {
@@ -630,11 +706,57 @@ No explanation, only JSON.`;
                         this.emitLog('system', { message: `reCAPTCHA round ${attempts}: gridSize=${currentGridSize} mode=${mode}` });
                         this.emitLog('system', { message: `Calling vision model to select tiles... (round ${attempts})` });
                         this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
-                        const indexes = await this.chooseRecaptchaTiles(
+                        let indexes = await this.chooseRecaptchaTiles(
                           challenge.instruction,
                           challenge.gridImageBase64,
                           (challenge as any).gridSize || 3
                         );
+                        // If still null after message-shape retries, attempt per-tile analysis with Gemini
+                        if (indexes === null) {
+                          try {
+                            const per = await browserController.getRecaptchaTilesBase64Ordered();
+                            if (per && per.tiles.length > 0) {
+                              this.emitLog('system', { message: `Per-tile analysis path: ${per.tiles.length} tiles captured` });
+                              const perTilePrompt = `You are given ${per.gridSize}x${per.gridSize} reCAPTCHA tiles as separate images (0-based row-major). Instruction: ${challenge.instruction}\nReturn JSON only: {"indexes":[...]} with tiles containing the requested object. If none match, return {"indexes":[]}.`;
+                              // Build messages: interleave text and images
+                              const perMessages: any = [new SystemMessage('Return JSON only as {"indexes":[...]}.')];
+                              const parts: any[] = [{ type: 'text', text: perTilePrompt }];
+                              for (let i = 0; i < per.tiles.length; i++) {
+                                parts.push({ type: 'text', text: `Tile ${i}:` });
+                                parts.push({ type: 'image_url', image_url: { url: `data:image/png;base64,${per.tiles[i]}` } });
+                              }
+                              perMessages.push(new HumanMessage({ content: parts } as any));
+                              const timeoutMs = (per.gridSize === 4) ? 50000 : 40000;
+                              const timeoutPromise2 = new Promise((_, reject) => setTimeout(() => reject(new Error(`Vision model timeout after ${timeoutMs}ms (per-tile)`)), timeoutMs));
+                              let perRes: any = await Promise.race([
+                                (this.visionModel as any).invoke(perMessages),
+                                timeoutPromise2
+                              ]).catch(() => null);
+                              if (perRes) {
+                                let txt2 = typeof perRes.content === 'string' ? perRes.content : JSON.stringify(perRes.content);
+                                const cleaned2 = (txt2 || '')
+                                  .replace(/^```json\n?/, '')
+                                  .replace(/^```\n?/, '')
+                                  .replace(/\n?```$/, '')
+                                  .replace(/^[\s\S]*?(\{[\s\S]*\})[\s\S]*$/, '$1')
+                                  .trim();
+                                try {
+                                  const parsed2 = JSON.parse(cleaned2);
+                                  if (Array.isArray(parsed2.indexes)) {
+                                    const arr = parsed2.indexes.filter((n: any) => Number.isInteger(n));
+                                    indexes = arr as number[];
+                                    this.emitLog('system', { message: `Per-tile parsed indexes: [${arr.join(', ')}]` });
+                                  }
+                                } catch (_) {
+                                  // ignore
+                                }
+                              }
+                            }
+                          } catch (e: any) {
+                            this.emitLog('error', { message: `Per-tile analysis error: ${e.message}` });
+                          }
+                        }
+                        // No OpenAI fallback: user requested Gemini-only. We already try alt message shapes above.
                         this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
 
                         if (indexes === null) {
