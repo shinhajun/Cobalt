@@ -176,7 +176,7 @@
       left: 0;
       width: 100%; /* 전체 너비 */
       height: 32px;
-      background: #d0d2d4;
+      background: #e8eaed;
       display: flex;
       align-items: center;
       gap: 2px;
@@ -571,6 +571,84 @@
 
     ipcRenderer.on('agent-screenshot', (event, data) => {
       chatIframe.contentWindow.postMessage({ type: 'agent-screenshot', data }, '*');
+    });
+
+    // Handle translate-text event
+    ipcRenderer.on('translate-text', async (event, { text }) => {
+      console.log('[Toolbar] Translate text:', text);
+
+      // Show loading notification
+      const notification = document.createElement('div');
+      notification.style.cssText = 'position: fixed; top: 80px; right: 30%; background: #4361ee; color: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px;';
+      notification.textContent = '번역 중...';
+      document.body.appendChild(notification);
+
+      try {
+        const result = await ipcRenderer.invoke('translate-text', { text });
+
+        if (result.success) {
+          notification.style.background = '#06a77d';
+          notification.innerHTML = `<strong>번역 결과:</strong><br>${result.translation}`;
+
+          // Copy to clipboard
+          navigator.clipboard.writeText(result.translation);
+
+          setTimeout(() => {
+            notification.style.opacity = '0';
+            notification.style.transition = 'opacity 0.3s';
+            setTimeout(() => notification.remove(), 300);
+          }, 5000);
+        } else {
+          notification.style.background = '#ef4444';
+          notification.textContent = '번역 실패: ' + result.error;
+          setTimeout(() => notification.remove(), 3000);
+        }
+      } catch (error) {
+        notification.style.background = '#ef4444';
+        notification.textContent = '번역 실패';
+        setTimeout(() => notification.remove(), 3000);
+      }
+    });
+
+    // Handle ai-edit-text event
+    ipcRenderer.on('ai-edit-text', async (event, { text }) => {
+      console.log('[Toolbar] AI edit text:', text);
+
+      // Show prompt dialog
+      const promptText = prompt('어떻게 수정할까요?', '문법 수정');
+      if (!promptText) return;
+
+      // Show loading notification
+      const notification = document.createElement('div');
+      notification.style.cssText = 'position: fixed; top: 80px; right: 30%; background: #4361ee; color: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); z-index: 100000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; max-width: 400px;';
+      notification.textContent = 'AI 수정 중...';
+      document.body.appendChild(notification);
+
+      try {
+        const result = await ipcRenderer.invoke('ai-edit-text', { text, prompt: promptText });
+
+        if (result.success) {
+          notification.style.background = '#06a77d';
+          notification.innerHTML = `<strong>수정 결과:</strong><br>${result.editedText}`;
+
+          // Copy to clipboard
+          navigator.clipboard.writeText(result.editedText);
+
+          setTimeout(() => {
+            notification.style.opacity = '0';
+            notification.style.transition = 'opacity 0.3s';
+            setTimeout(() => notification.remove(), 300);
+          }, 5000);
+        } else {
+          notification.style.background = '#ef4444';
+          notification.textContent = 'AI 수정 실패: ' + result.error;
+          setTimeout(() => notification.remove(), 3000);
+        }
+      } catch (error) {
+        notification.style.background = '#ef4444';
+        notification.textContent = 'AI 수정 실패';
+        setTimeout(() => notification.remove(), 3000);
+      }
     });
 
     // 초기 탭에 드래그 이벤트 설정

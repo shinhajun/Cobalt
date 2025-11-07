@@ -100,6 +100,275 @@ function createWindow() {
     mainWindow.webContents.send('url-changed', url, title);
   });
 
+  // Inject text selection popup script into BrowserView
+  browserView.webContents.on('did-finish-load', () => {
+    browserView.webContents.executeJavaScript(`
+      (function() {
+        if (window.__textSelectionInjected) return;
+        window.__textSelectionInjected = true;
+
+        let popup = null;
+
+        // Listen for messages from injected script
+        window.addEventListener('message', async (event) => {
+          if (event.data.type === 'translate-text-request') {
+            showNotification('번역 중...', true);
+            // Use fetch to call the translation via window context
+            try {
+              const response = await fetch('electron://translate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: event.data.text })
+              }).catch(() => null);
+
+              // Since we can't use fetch with electron://, we'll use a different approach
+              // Store the request in window and check it periodically
+              window.__pendingTranslate = event.data.text;
+            } catch (e) {
+              // Fallback: store in window
+              window.__pendingTranslate = event.data.text;
+            }
+          } else if (event.data.type === 'ai-edit-text-request') {
+            showNotification('AI 수정 중...', true);
+            window.__pendingEdit = { text: event.data.text, prompt: event.data.prompt };
+          } else if (event.data.type === 'translation-result') {
+            // Copy to clipboard
+            const tempInput = document.createElement('textarea');
+            tempInput.value = event.data.result;
+            tempInput.style.position = 'absolute';
+            tempInput.style.left = '-9999px';
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+
+            showNotification('<strong>✅ 번역 완료!</strong> (클립보드에 복사됨)<br><br>' + event.data.result, true);
+          } else if (event.data.type === 'edit-result') {
+            // Copy to clipboard
+            const tempInput = document.createElement('textarea');
+            tempInput.value = event.data.result;
+            tempInput.style.position = 'absolute';
+            tempInput.style.left = '-9999px';
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand('copy');
+            document.body.removeChild(tempInput);
+
+            showNotification('<strong>✅ AI 수정 완료!</strong> (클립보드에 복사됨)<br><br>' + event.data.result, true);
+          }
+        });
+
+        function showNotification(message, isSuccess) {
+          // Remove existing notifications
+          const existingNotifications = document.querySelectorAll('.ai-notification');
+          existingNotifications.forEach(n => n.remove());
+
+          const notification = document.createElement('div');
+          notification.className = 'ai-notification';
+
+          // Determine notification position based on available space
+          const windowHeight = window.innerHeight;
+          const notificationHeight = 150; // Approximate max height
+          const topSpace = 80;
+          const bottomSpace = windowHeight - topSpace - notificationHeight;
+
+          let position = 'top: 80px;';
+          let animationName = 'slideDown';
+
+          // If not enough space at top and more space at bottom, show at bottom
+          if (topSpace < notificationHeight && bottomSpace > topSpace) {
+            position = 'bottom: 80px;';
+            animationName = 'slideUp';
+          }
+
+          notification.style.cssText = 'position: fixed; ' + position + ' left: 50%; transform: translateX(-50%); background: ' + (isSuccess ? '#06a77d' : '#4361ee') + '; color: white; padding: 16px 24px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 1000000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; max-width: 600px; word-wrap: break-word; animation: ' + animationName + ' 0.3s ease-out;';
+          notification.innerHTML = message;
+
+          // Add animations
+          if (!document.getElementById('notification-animation-style')) {
+            const style = document.createElement('style');
+            style.id = 'notification-animation-style';
+            style.textContent = '@keyframes slideDown { from { opacity: 0; transform: translateX(-50%) translateY(-20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } } @keyframes slideUp { from { opacity: 0; transform: translateX(-50%) translateY(20px); } to { opacity: 1; transform: translateX(-50%) translateY(0); } }';
+            document.head.appendChild(style);
+          }
+
+          document.body.appendChild(notification);
+
+          setTimeout(() => {
+            notification.style.transition = 'opacity 0.3s, transform 0.3s';
+            notification.style.opacity = '0';
+            notification.style.transform = 'translateX(-50%) translateY(-20px)';
+            setTimeout(() => notification.remove(), 300);
+          }, 5000);
+        }
+
+        function createPopup(text, x, y, isEditable) {
+          // Remove existing popup
+          if (popup) popup.remove();
+
+          // Create popup container
+          popup = document.createElement('div');
+
+          // Calculate popup position (above or below selection)
+          const popupHeight = 50; // Approximate height
+          const windowHeight = window.innerHeight;
+          const spaceAbove = y;
+          const spaceBelow = windowHeight - y;
+
+          // If not enough space above, show below
+          let popupY = y - popupHeight - 10;
+          if (spaceAbove < popupHeight + 20) {
+            popupY = y + 10; // Show below
+          }
+
+          // Adjust horizontal position to stay within viewport
+          const popupWidth = 200; // Approximate width
+          let popupX = x - popupWidth / 2;
+          if (popupX < 10) popupX = 10;
+          if (popupX + popupWidth > window.innerWidth - 10) {
+            popupX = window.innerWidth - popupWidth - 10;
+          }
+
+          popup.style.cssText = \`
+            position: fixed;
+            left: \${popupX}px;
+            top: \${popupY}px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 8px;
+            padding: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 999999;
+            display: flex;
+            gap: 8px;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            animation: popupFadeIn 0.2s ease-out;
+          \`;
+
+          // Add animation
+          if (!document.getElementById('text-selection-popup-style')) {
+            const style = document.createElement('style');
+            style.id = 'text-selection-popup-style';
+            style.textContent = \`
+              @keyframes popupFadeIn {
+                from { opacity: 0; transform: translateY(10px); }
+                to { opacity: 1; transform: translateY(0); }
+              }
+            \`;
+            document.head.appendChild(style);
+          }
+
+          if (isEditable) {
+            // AI edit button
+            const editBtn = document.createElement('button');
+            editBtn.textContent = '✨ AI로 수정하기';
+            editBtn.style.cssText = \`
+              background: white;
+              color: #667eea;
+              border: none;
+              padding: 8px 16px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-weight: 600;
+              font-size: 13px;
+              transition: all 0.2s;
+            \`;
+            editBtn.onmouseover = () => {
+              editBtn.style.background = '#f3f4f6';
+              editBtn.style.transform = 'scale(1.05)';
+            };
+            editBtn.onmouseout = () => {
+              editBtn.style.background = 'white';
+              editBtn.style.transform = 'scale(1)';
+            };
+            editBtn.onclick = async () => {
+              const promptText = window.prompt('어떻게 수정할까요?', '문법 수정');
+              if (promptText) {
+                popup.remove();
+                window.postMessage({
+                  type: 'ai-edit-text-request',
+                  text: text,
+                  prompt: promptText
+                }, '*');
+              } else {
+                popup.remove();
+              }
+            };
+            popup.appendChild(editBtn);
+          } else {
+            // Translate button
+            const translateBtn = document.createElement('button');
+            translateBtn.textContent = '🌐 영어로 번역';
+            translateBtn.style.cssText = \`
+              background: white;
+              color: #667eea;
+              border: none;
+              padding: 8px 16px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-weight: 600;
+              font-size: 13px;
+              transition: all 0.2s;
+            \`;
+            translateBtn.onmouseover = () => {
+              translateBtn.style.background = '#f3f4f6';
+              translateBtn.style.transform = 'scale(1.05)';
+            };
+            translateBtn.onmouseout = () => {
+              translateBtn.style.background = 'white';
+              translateBtn.style.transform = 'scale(1)';
+            };
+            translateBtn.onclick = () => {
+              popup.remove();
+              window.postMessage({
+                type: 'translate-text-request',
+                text: text
+              }, '*');
+            };
+            popup.appendChild(translateBtn);
+          }
+
+          document.body.appendChild(popup);
+
+          // Remove popup on click outside
+          setTimeout(() => {
+            document.addEventListener('click', function removePopup(e) {
+              if (!popup.contains(e.target)) {
+                popup.remove();
+                document.removeEventListener('click', removePopup);
+              }
+            });
+          }, 100);
+        }
+
+        document.addEventListener('mouseup', (e) => {
+          setTimeout(() => {
+            const selection = window.getSelection();
+            const text = selection.toString().trim();
+
+            if (!text) {
+              if (popup) popup.remove();
+              return;
+            }
+
+            // Check if selection is in editable field
+            const activeElement = document.activeElement;
+            const isEditable = activeElement && (
+              activeElement.tagName === 'INPUT' ||
+              activeElement.tagName === 'TEXTAREA' ||
+              activeElement.isContentEditable
+            );
+
+            // Get selection position
+            const range = selection.getRangeAt(0);
+            const rect = range.getBoundingClientRect();
+
+            createPopup(text, rect.left + rect.width / 2, rect.top, isEditable);
+          }, 10);
+        });
+      })();
+    `);
+  });
+
   // Window resize 시 BrowserView bounds 업데이트
   mainWindow.on('resize', updateBrowserViewBounds);
 
@@ -138,6 +407,71 @@ function updateBrowserViewBounds() {
 
 app.whenReady().then(() => {
   createWindow();
+
+  // Poll BrowserView for pending translation/edit requests
+  setInterval(async () => {
+    if (!browserView) return;
+
+    try {
+      // Check for pending translate request
+      const pendingTranslate = await browserView.webContents.executeJavaScript('window.__pendingTranslate');
+      if (pendingTranslate) {
+        // Clear the pending request
+        await browserView.webContents.executeJavaScript('delete window.__pendingTranslate');
+
+        // Process translation
+        console.log('[Electron] Processing translation request:', pendingTranslate.substring(0, 50) + '...');
+
+        if (!llmService) {
+          const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+          llmService = new LLMService(modelName);
+        }
+
+        const prompt = `Translate the following text to English. Only provide the translation, no explanations:\\n\\n${pendingTranslate}`;
+        const translation = await llmService.chat([{ role: 'user', content: prompt }]);
+
+        // Send result back to BrowserView
+        await browserView.webContents.executeJavaScript(`
+          window.postMessage({
+            type: 'translation-result',
+            result: ${JSON.stringify(translation)}
+          }, '*');
+        `);
+
+        console.log('[Electron] Translation completed');
+      }
+
+      // Check for pending edit request
+      const pendingEdit = await browserView.webContents.executeJavaScript('window.__pendingEdit');
+      if (pendingEdit) {
+        // Clear the pending request
+        await browserView.webContents.executeJavaScript('delete window.__pendingEdit');
+
+        // Process AI edit
+        console.log('[Electron] Processing AI edit request');
+
+        if (!llmService) {
+          const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+          llmService = new LLMService(modelName);
+        }
+
+        const fullPrompt = `${pendingEdit.prompt}\\n\\nOriginal text:\\n${pendingEdit.text}\\n\\nOnly provide the edited text, no explanations:`;
+        const editedText = await llmService.chat([{ role: 'user', content: fullPrompt }]);
+
+        // Send result back to BrowserView
+        await browserView.webContents.executeJavaScript(`
+          window.postMessage({
+            type: 'edit-result',
+            result: ${JSON.stringify(editedText)}
+          }, '*');
+        `);
+
+        console.log('[Electron] AI edit completed');
+      }
+    } catch (error) {
+      // Silently ignore errors (page might be navigating)
+    }
+  }, 500); // Check every 500ms
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -706,6 +1040,78 @@ ipcMain.handle('update-api-keys', async (_event, { openai, google, claude }) => 
     return { success: true };
   } catch (error) {
     console.error('[Electron] Failed to update API keys:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Translate text to English (from BrowserView)
+ipcMain.on('translate-text-request', async (_event, text) => {
+  console.log('[Electron] Translate text requested:', text.substring(0, 50) + '...');
+
+  try {
+    if (!llmService) {
+      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+      llmService = new LLMService(modelName);
+    }
+
+    mainWindow.webContents.send('translate-text', { text });
+  } catch (error) {
+    console.error('[Electron] Translation request failed:', error);
+  }
+});
+
+// IPC: AI edit text (from BrowserView)
+ipcMain.on('ai-edit-text-request', async (_event, text) => {
+  console.log('[Electron] AI edit text requested:', text.substring(0, 50) + '...');
+
+  try {
+    if (!llmService) {
+      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+      llmService = new LLMService(modelName);
+    }
+
+    mainWindow.webContents.send('ai-edit-text', { text });
+  } catch (error) {
+    console.error('[Electron] AI edit request failed:', error);
+  }
+});
+
+// IPC: Translate text to English (from toolbar)
+ipcMain.handle('translate-text', async (_event, { text }) => {
+  console.log('[Electron] Translate text requested:', text.substring(0, 50) + '...');
+
+  try {
+    if (!llmService) {
+      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+      llmService = new LLMService(modelName);
+    }
+
+    const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
+    const response = await llmService.chat([{ role: 'user', content: prompt }]);
+
+    return { success: true, translation: response };
+  } catch (error) {
+    console.error('[Electron] Translation failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: AI edit text with user prompt
+ipcMain.handle('ai-edit-text', async (_event, { text, prompt }) => {
+  console.log('[Electron] AI edit text requested');
+
+  try {
+    if (!llmService) {
+      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
+      llmService = new LLMService(modelName);
+    }
+
+    const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
+    const response = await llmService.chat([{ role: 'user', content: fullPrompt }]);
+
+    return { success: true, editedText: response };
+  } catch (error) {
+    console.error('[Electron] AI edit failed:', error);
     return { success: false, error: error.message };
   }
 });
