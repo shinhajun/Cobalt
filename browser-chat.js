@@ -4,12 +4,13 @@ const taskInput = document.getElementById('taskInput');
 const btnRun = document.getElementById('btnRun');
 const btnStop = document.getElementById('btnStop');
 const modelSelect = document.getElementById('modelSelect');
-const logsContainer = document.getElementById('logsContainer');
 const logsContent = document.getElementById('logsContent');
-const logsToggle = document.getElementById('logsToggle');
-const settingsToggle = document.getElementById('settingsToggle');
-const settingsPanel = document.getElementById('settingsPanel');
 const btnCopyLogs = document.getElementById('btnCopyLogs');
+
+// Settings Modal
+const settingsModal = document.getElementById('settingsModal');
+const settingsIconBtn = document.getElementById('settingsIconBtn');
+const closeSettingsBtn = document.getElementById('closeSettingsBtn');
 
 // Quick action buttons
 const btnHome = document.getElementById('btnHome');
@@ -61,17 +62,20 @@ function init() {
     }
   });
 
-  // Toggles
-  logsToggle.addEventListener('click', () => {
-    const isVisible = logsContainer.style.display !== 'none';
-    logsContainer.style.display = isVisible ? 'none' : 'block';
-    logsToggle.textContent = isVisible ? '📋 Show Logs' : '📋 Hide Logs';
+  // Settings Modal
+  settingsIconBtn.addEventListener('click', () => {
+    settingsModal.style.display = 'flex';
   });
 
-  settingsToggle.addEventListener('click', () => {
-    const isVisible = settingsPanel.style.display !== 'none';
-    settingsPanel.style.display = isVisible ? 'none' : 'block';
-    settingsToggle.textContent = isVisible ? '⚙️ Settings' : '⚙️ Hide Settings';
+  closeSettingsBtn.addEventListener('click', () => {
+    settingsModal.style.display = 'none';
+  });
+
+  // Close modal when clicking outside
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) {
+      settingsModal.style.display = 'none';
+    }
   });
 
   btnCopyLogs.addEventListener('click', copyLogs);

@@ -117,7 +117,7 @@ function updateBrowserViewBounds() {
   const { width, height } = mainWindow.getContentBounds();
   const chatPanelWidth = chatVisible ? Math.floor(width * 0.25) : 0; // 25% for chat when visible
   const browserWidth = width - chatPanelWidth; // 75% or 100% for browser
-  const toolbarHeight = 48; // Toolbar height
+  const toolbarHeight = 40; // Toolbar height (reduced)
   const tabBarHeight = 36; // Tab bar height
   const topOffset = toolbarHeight + tabBarHeight; // Total offset
 

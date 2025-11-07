@@ -906,6 +906,7 @@ No explanation, only JSON.`;
 
 
     let iterationCount = 0;
+    let consecutiveCaptchaFailures = 0; // Track consecutive CAPTCHA solving failures
 
     while (iterationCount < this.LLM_CONFIG.MAX_ITERATIONS) {
       if (stopSignal && stopSignal()) {
@@ -991,6 +992,12 @@ No explanation, only JSON.`;
         - For dynamic pages where elements detach from DOM, always prefer clickCoordinates over click
 
         CAPTCHA/Cloudflare Handling:
+        - **CRITICAL: When you see reCAPTCHA elements or CAPTCHA-related text in the page content:**
+          * IMMEDIATELY use {"type":"TOOL_ACTION","tool":"solveCaptcha"} - DO NOT try manual clicking
+          * The solveCaptcha tool will automatically detect and solve reCAPTCHA, image grids, and text CAPTCHAs
+          * DO NOT click on reCAPTCHA iframes or checkboxes manually - let solveCaptcha handle it
+          * If solveCaptcha fails 3 times in a row, use FAIL action (site has strong bot detection)
+
         - **IMPORTANT: If you see captcha_status=cloudflare_waiting:**
           * This is a Cloudflare security check that the system is handling automatically in the background.
           * For the FIRST occurrence: wait by using getPageContent and check again.
@@ -998,20 +1005,23 @@ No explanation, only JSON.`;
           * For the THIRD occurrence: wait one more time with getPageContent.
           * For the FOURTH occurrence or more: Use FAIL action as Cloudflare cannot be bypassed.
           * Count how many times you've seen cloudflare_waiting in your thought process.
-        - If a challenge is detected, use {"type":"TOOL_ACTION","tool":"solveCaptcha"} or {"type":"TOOL_ACTION","tool":"visionInteract"}. Do not click iframes directly.
 
-        Visual Challenge Solving:
-        - When you see instructions like "Select all squares with [object]", this is an image grid challenge
-        - Use visionInteract to identify and click the matching tiles
-        - **CRITICAL**: After clicking the tiles, you MUST click the Verify/Submit button to check your answer
-        - The Verify button is usually visible in Interactive Elements or can be clicked by coordinates
-        - If visionInteract doesn't advance the page, manually click the Verify button using clickCoordinates
+        Visual Challenge Solving (Advanced):
+        - Only use visionInteract for CUSTOM/non-standard image challenges (not reCAPTCHA)
+        - When you see instructions like "Select all squares with [object]", this is likely reCAPTCHA - use solveCaptcha instead
+        - visionInteract is for unusual challenges on specific websites that solveCaptcha doesn't handle
 
         Web Searching:
         - For web searches, use Google (https://www.google.com) by default.
         - Google search box: Use input/textarea elements with name="q" or aria-label that contains "Search" or localized equivalents (e.g., "검색").
         - Type the query into the box and press Enter to submit.
         - Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
+
+        Google Docs:
+        - To create a new blank Google Docs document: Navigate to https://docs.google.com/document/create
+        - The document editor has a textbox with role="textbox" where you can type content
+        - For Google Sheets: https://docs.google.com/spreadsheets/create
+        - For Google Slides: https://docs.google.com/presentation/create
 
         Task Completion:
         - Keep your thoughts concise but clear.
@@ -1437,12 +1447,43 @@ No explanation, only JSON.`;
                 const currentPageContent = await browserController.getPageContent();
                 const currentUrl = browserController.getCurrentUrl();
                 actionObservation += ` Current URL: ${currentUrl}. Page content (first 500 chars): ${currentPageContent.substring(0, 500)}`;
+
+                // Check if still on CAPTCHA/sorry page after solving attempt
+                const stillOnCaptchaPage = currentUrl.includes('/sorry/index') ||
+                                          currentUrl.includes('sorry?continue') ||
+                                          currentPageContent.includes('비정상적인 트래픽') ||
+                                          currentPageContent.includes('unusual traffic');
+
+                if (stillOnCaptchaPage && !actionError) {
+                  // We tried to solve CAPTCHA but we're still on the CAPTCHA page
+                  actionError = true;
+                  actionObservation += ' | WARNING: Still on CAPTCHA page after solve attempt. CAPTCHA not bypassed.';
+                  this.emitLog('error', { message: 'solveCaptcha did not advance past CAPTCHA page.' });
+                }
               } catch (e: any) {
                 actionObservation += ` Could not fetch page content after captcha solve: ${e.message}`;
               }
 
               observation = actionObservation;
-              if (actionError) this.emitLog('error', { message: observation });
+
+              // Track consecutive CAPTCHA failures
+              if (actionError) {
+                consecutiveCaptchaFailures++;
+                this.emitLog('error', { message: observation });
+                this.emitLog('system', { message: `CAPTCHA failure count: ${consecutiveCaptchaFailures}/3` });
+
+                // If 3 consecutive CAPTCHA failures, stop trying
+                if (consecutiveCaptchaFailures >= 3) {
+                  this.emitLog('error', { message: 'CAPTCHA failed 3 times in a row. Site has strong bot detection. Stopping task.' });
+                  return {
+                    success: false,
+                    message: 'Task failed: Unable to bypass CAPTCHA after 3 attempts. The website has detected automation and is blocking access.'
+                  };
+                }
+              } else {
+                // Reset counter on success
+                consecutiveCaptchaFailures = 0;
+              }
               break;
             } else if (action.tool === 'recaptchaGrid') {
               // Provide tiles to the LLM and let it choose indices based on instruction (vision-based)
