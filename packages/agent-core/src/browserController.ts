@@ -1020,6 +1020,27 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  /**
+   * Capture screenshot and return as base64 (for auto-streaming)
+   */
+  async captureScreenshot(): Promise<string | null> {
+    if (!this.page) {
+      return null;
+    }
+
+    try {
+      const screenshotBuffer = await this.page.screenshot({
+        fullPage: false,
+        omitBackground: false,
+        type: 'png'
+      });
+
+      return screenshotBuffer.toString('base64');
+    } catch (error) {
+      return null;
+    }
+  }
+
   private async isCloudflareGate(): Promise<boolean> {
     if (!this.page) return false;
     try {
