@@ -13,6 +13,9 @@ yarn-error.log
 # TypeScript
 *.tsbuildinfo
 
+# Debug files with sensitive data
+debug/storageState.json
+
 # OS generated files
 .DS_Store
 .DS_Store?

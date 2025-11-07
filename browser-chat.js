@@ -307,9 +307,11 @@ function clearMessages() {
 function loadApiKeys() {
   const openaiKey = localStorage.getItem('openai_api_key');
   const googleKey = localStorage.getItem('google_api_key');
+  const claudeKey = localStorage.getItem('claude_api_key');
 
   const openaiInput = document.getElementById('openaiApiKey');
   const googleInput = document.getElementById('googleApiKey');
+  const claudeInput = document.getElementById('claudeApiKey');
 
   if (openaiInput && openaiKey) {
     try {
@@ -326,18 +328,28 @@ function loadApiKeys() {
       console.error('Failed to decode Google key:', e);
     }
   }
+
+  if (claudeInput && claudeKey) {
+    try {
+      claudeInput.value = atob(claudeKey);
+    } catch (e) {
+      console.error('Failed to decode Claude key:', e);
+    }
+  }
 }
 
 async function saveApiKeys() {
   const openaiInput = document.getElementById('openaiApiKey');
   const googleInput = document.getElementById('googleApiKey');
+  const claudeInput = document.getElementById('claudeApiKey');
   const btnSaveKeys = document.getElementById('btnSaveKeys');
 
   const openaiKey = openaiInput ? openaiInput.value.trim() : '';
   const googleKey = googleInput ? googleInput.value.trim() : '';
+  const claudeKey = claudeInput ? claudeInput.value.trim() : '';
 
-  if (!openaiKey && !googleKey) {
-    alert('⚠️ Please enter at least one API key (OpenAI or Google)');
+  if (!openaiKey && !googleKey && !claudeKey) {
+    alert('⚠️ Please enter at least one API key (OpenAI, Google, or Claude)');
     return;
   }
 
@@ -354,12 +366,19 @@ async function saveApiKeys() {
     localStorage.removeItem('google_api_key');
   }
 
+  if (claudeKey) {
+    localStorage.setItem('claude_api_key', btoa(claudeKey));
+  } else {
+    localStorage.removeItem('claude_api_key');
+  }
+
   // Send to Electron main process
   try {
     if (electronAPI && electronAPI.updateApiKeys) {
       await electronAPI.updateApiKeys({
         openai: openaiKey,
-        google: googleKey
+        google: googleKey,
+        claude: claudeKey
       });
     }
 

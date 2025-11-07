@@ -684,7 +684,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 });
 
 // IPC: API 키 업데이트
-ipcMain.handle('update-api-keys', async (_event, { openai, google }) => {
+ipcMain.handle('update-api-keys', async (_event, { openai, google, claude }) => {
   console.log('[Electron] Updating API keys...');
 
   try {
@@ -696,6 +696,11 @@ ipcMain.handle('update-api-keys', async (_event, { openai, google }) => {
     if (google) {
       process.env.GOOGLE_API_KEY = google;
       console.log('[Electron] Google API key updated');
+    }
+
+    if (claude) {
+      process.env.CLAUDE_API_KEY = claude;
+      console.log('[Electron] Claude API key updated');
     }
 
     return { success: true };

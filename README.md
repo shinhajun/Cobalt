@@ -505,18 +505,30 @@ See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for comprehensive examples.
 
 ### Model Selection
 
+#### OpenAI Models
 | Model | Use Case | Speed | Cost | Accuracy | Vision |
 |-------|----------|-------|------|----------|--------|
-| **gpt-5-mini** | General tasks | ⚡⚡⚡ | 💰 | ⭐⭐⭐⭐ | ✅ |
 | **gpt-5** | Complex reasoning | ⚡⚡ | 💰💰 | ⭐⭐⭐⭐⭐ | ✅ |
+| **gpt-5-mini** | General tasks | ⚡⚡⚡ | 💰 | ⭐⭐⭐⭐ | ✅ |
 | **gpt-5-nano** | Speed-critical | ⚡⚡⚡ | 💰 | ⭐⭐⭐ | ✅ |
+
+#### Google Gemini Models
+| Model | Use Case | Speed | Cost | Accuracy | Vision |
+|-------|----------|-------|------|----------|--------|
 | **gemini-2.5-pro** | Vision tasks | ⚡⚡ | 💰💰 | ⭐⭐⭐⭐⭐ | ✅ |
 | **gemini-2.5-flash** | High-speed | ⚡⚡⚡ | 💰 | ⭐⭐⭐⭐ | ✅ |
+| **gemini-2.5-flash-lite** | Ultra-fast | ⚡⚡⚡⚡ | 💰 | ⭐⭐⭐ | ✅ |
+
+#### Claude (Anthropic) Models
+| Model | Use Case | Speed | Cost | Accuracy | Vision |
+|-------|----------|-------|------|----------|--------|
+| **claude-sonnet-4-5** | Best quality | ⚡⚡ | 💰💰💰 | ⭐⭐⭐⭐⭐ | ✅ |
+| **claude-haiku-4-5** | Fast & affordable | ⚡⚡⚡ | 💰 | ⭐⭐⭐⭐ | ✅ |
 
 **Recommended:**
 - General automation: `gpt-5-mini`
-- CAPTCHA solving: `gpt-5` or `gemini-2.5-pro`
-- High-volume tasks: `gemini-2.5-flash`
+- CAPTCHA solving: `gpt-5`, `gemini-2.5-pro`, or `claude-sonnet-4-5`
+- High-volume tasks: `gemini-2.5-flash` or `claude-haiku-4-5`
 
 ### Environment Variables
 
@@ -608,7 +620,7 @@ VISION_MODEL=gpt-5  # Model for image analysis: CAPTCHA solving, button detectio
 
 **"Vision model returns no tiles"**
 - Grid may not be fully loaded (increase wait time)
-- Try different vision model (gpt-5 vs gemini-2.5-pro)
+- Try different vision model (`gpt-5`, `gemini-2.5-pro`, or `claude-sonnet-4-5`)
 - Check screenshot quality in debug folder
 
 **"Tab switching not working"**

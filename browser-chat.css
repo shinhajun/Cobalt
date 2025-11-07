@@ -26,14 +26,14 @@ body {
 /* Chat Tabs Header */
 .chat-tabs-header {
   display: flex;
-  background: #f1f3f4; /* 툴바와 같은 회색 */
+  background: #fff; /* 흰색 배경 */
   border-bottom: 1px solid #e8eaed;
-  padding: 0 10px;
+  padding: 6px 10px;
   gap: 6px;
   align-items: center;
-  height: 32px; /* 타이틀바와 정확히 같은 높이 */
+  height: 40px; /* 브라우저 툴바와 같은 높이 */
   flex-shrink: 0;
-  -webkit-app-region: drag; /* 드래그 가능 */
+  margin-top: 32px; /* 타이틀바 높이만큼 아래로 */
 }
 
 .tabs-container {

@@ -1,5 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
+import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController";
 import { AgentTools } from "./agentTools";
@@ -62,12 +63,24 @@ export class LLMService {
     // 생성자 실행 시점에 환경변수 읽기 (모듈 로드 시점이 아닌)
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+    const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
 
     const isGemini = (name: string) => /^gemini[-\d\.]/.test(name);
+    const isClaude = (name: string) => /^claude[-\d\.]/.test(name);
 
     console.log("[LLMService] Initializing with model:", modelName);
 
-    if (isGemini(modelName)) {
+    if (isClaude(modelName)) {
+      if (!CLAUDE_API_KEY) {
+        console.error("[LLMService] CLAUDE_API_KEY not found in environment variables");
+        throw new Error("[LLMService] Claude API key is not configured. Cannot initialize Claude model.");
+      }
+      console.log("[LLMService] Using Claude (Anthropic) provider. Model:", modelName);
+      this.model = new ChatAnthropic({
+        apiKey: CLAUDE_API_KEY,
+        modelName: modelName,
+      });
+    } else if (isGemini(modelName)) {
       if (!GOOGLE_API_KEY) {
         console.error("[LLMService] GOOGLE_API_KEY not found in environment variables");
         throw new Error("[LLMService] Google API key is not configured. Cannot initialize Gemini model.");
@@ -100,7 +113,19 @@ export class LLMService {
     // Vision model (for image analysis: CAPTCHA, button detection, screen analysis). Defaults to gpt-5 if available.
     const visionModelName = process.env.VISION_MODEL || process.env.CAPTCHA_VISION_MODEL || 'gpt-5';
     try {
-      if (isGemini(visionModelName)) {
+      if (isClaude(visionModelName)) {
+        if (!CLAUDE_API_KEY) {
+          console.warn('[LLMService] CLAUDE_API_KEY missing. Cannot initialize Claude vision model.');
+          this.visionModel = null;
+        } else {
+          this.visionModel = new ChatAnthropic({
+            apiKey: CLAUDE_API_KEY,
+            modelName: visionModelName,
+          });
+          this.isVisionGeminiProvider = false;
+          console.log('[LLMService] Vision model initialized (Claude):', visionModelName);
+        }
+      } else if (isGemini(visionModelName)) {
         if (!GOOGLE_API_KEY) {
           console.warn('[LLMService] GOOGLE_API_KEY missing. Cannot initialize Gemini vision model.');
           this.visionModel = null;

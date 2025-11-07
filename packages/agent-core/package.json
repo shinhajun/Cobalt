@@ -14,8 +14,11 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@langchain/openai": "^0.5.10",
+    "@anthropic-ai/sdk": "^0.67.0",
+    "@langchain/anthropic": "^1.0.0",
+    "@langchain/core": "^1.0.1",
     "@langchain/google-genai": "^0.1.5",
+    "@langchain/openai": "^0.5.10",
     "cors": "^2.8.5",
     "dotenv": "^16.5.0",
     "express": "^4.21.2",
