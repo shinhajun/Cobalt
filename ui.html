@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      height: 100vh;
+      overflow: hidden;
+      background-color: #1a1a1a;
+      color: #fff;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Left Control Panel */
+    .control-panel {
+      width: 400px;
+      background-color: #2a2a2a;
+      border-right: 1px solid #3a3a3a;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .header {
+      padding: 20px;
+      background-color: #4361ee;
+      text-align: center;
+    }
+
+    .header h1 {
+      font-size: 1.5rem;
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      font-size: 0.9rem;
+      opacity: 0.9;
+    }
+
+    .content {
+      flex: 1;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: #aaa;
+    }
+
+    select {
+      width: 100%;
+      padding: 12px;
+      background-color: #1a1a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    select:focus {
+      outline: none;
+      border-color: #4361ee;
+    }
+
+    select option {
+      background-color: #1a1a1a;
+      color: #fff;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 150px;
+      padding: 12px;
+      background-color: #1a1a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      color: #fff;
+      font-size: 14px;
+      resize: vertical;
+    }
+
+    textarea:focus {
+      outline: none;
+      border-color: #4361ee;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background-color: #4361ee;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .btn:hover:not(:disabled) {
+      background-color: #3a56d4;
+    }
+
+    .btn:disabled {
+      background-color: #555;
+      cursor: not-allowed;
+    }
+
+    .btn-stop {
+      background-color: #f44336;
+      margin-top: 10px;
+    }
+
+    .btn-stop:hover:not(:disabled) {
+      background-color: #d32f2f;
+    }
+
+    .status {
+      margin-top: 15px;
+      padding: 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.success {
+      background-color: rgba(76, 175, 80, 0.2);
+      border: 1px solid #4caf50;
+      color: #4caf50;
+    }
+
+    .status.error {
+      background-color: rgba(244, 67, 54, 0.2);
+      border: 1px solid #f44336;
+      color: #f44336;
+    }
+
+    .status.info {
+      background-color: rgba(33, 150, 243, 0.2);
+      border: 1px solid #2196f3;
+      color: #2196f3;
+    }
+
+    /* Right Live View */
+    .live-view {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background-color: #000;
+    }
+
+    .live-header {
+      padding: 15px 20px;
+      background-color: #2a2a2a;
+      border-bottom: 1px solid #3a3a3a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .live-header h2 {
+      font-size: 1.2rem;
+    }
+
+    .indicator {
+      font-size: 0.9rem;
+      color: #888;
+    }
+
+    .indicator.active {
+      color: #4caf50;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.6; }
+    }
+
+    .screenshot-area {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .screenshot-area img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .placeholder {
+      text-align: center;
+      color: #555;
+    }
+
+    .placeholder h3 {
+      font-size: 2rem;
+      margin-bottom: 10px;
+    }
+
+    .url-bar {
+      padding: 10px 20px;
+      background-color: #2a2a2a;
+      border-top: 1px solid #3a3a3a;
+      font-family: monospace;
+      font-size: 0.85rem;
+      color: #4caf50;
+      display: none;
+    }
+
+    .url-bar.show {
+      display: block;
+    }
+
+    .logs {
+      max-height: 200px;
+      overflow-y: auto;
+      background-color: #1a1a1a;
+      border: 1px solid #3a3a3a;
+      border-radius: 6px;
+      padding: 10px;
+      margin-top: 15px;
+      font-size: 0.85rem;
+      font-family: monospace;
+      transition: max-height 0.3s ease;
+    }
+
+    .logs.expanded {
+      max-height: 600px;
+    }
+
+    .form-inputs {
+      transition: opacity 0.3s ease, max-height 0.3s ease;
+      overflow: hidden;
+    }
+
+    .form-inputs.hidden {
+      opacity: 0;
+      max-height: 0;
+      margin: 0;
+      padding: 0;
+    }
+
+    .log-entry {
+      padding: 5px 0;
+      border-bottom: 1px solid #2a2a2a;
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-time {
+      color: #888;
+    }
+
+    .log-message {
+      color: #aaa;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Left Control Panel -->
+    <div class="control-panel">
+      <div class="header">
+        <h1>🤖 AI Agent</h1>
+        <p>Web Automation with GPT</p>
+      </div>
+
+      <div class="content">
+        <div id="formInputs" class="form-inputs">
+          <div class="form-group">
+            <label for="modelSelect">AI Model</label>
+            <select id="modelSelect">
+              <option value="gpt-5-mini" selected>GPT-5 Mini (Fast & Efficient)</option>
+              <option value="gpt-5-nano">GPT-5 Nano (Ultra Fast)</option>
+              <option value="gpt-5">GPT-5 (Most Capable)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="captchaVisionModel">Captcha Vision Model</label>
+            <select id="captchaVisionModel">
+              <option value="gpt-5" selected>GPT-5 (Vision)</option>
+              <option value="gpt-5-mini">GPT-5 Mini (Vision-lite)</option>
+              <option value="gpt-5-nano">GPT-5 Nano (Fast, may be limited)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label for="taskInput">Task Instructions</label>
+            <textarea
+              id="taskInput"
+              placeholder="Example: Go to Google and search for OpenAI"
+            ></textarea>
+          </div>
+        </div>
+
+        <button id="runBtn" class="btn">Run Task</button>
+        <button id="stopBtn" class="btn btn-stop" style="display: none;">Stop Task</button>
+
+        <div id="status" class="status"></div>
+
+        <div class="logs" id="logs"></div>
+      </div>
+    </div>
+
+    <!-- Right Live View -->
+    <div class="live-view">
+      <div class="live-header">
+        <h2>🌐 Live View</h2>
+        <span id="indicator" class="indicator">○ Idle</span>
+      </div>
+
+      <div class="screenshot-area" id="screenshotArea">
+        <div class="placeholder">
+          <h3>📸</h3>
+          <p>Run a task to see the live browser view</p>
+        </div>
+      </div>
+
+      <div id="urlBar" class="url-bar"></div>
+    </div>
+  </div>
+
+  <script>
+    const modelSelect = document.getElementById('modelSelect');
+    const taskInput = document.getElementById('taskInput');
+    const runBtn = document.getElementById('runBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const formInputs = document.getElementById('formInputs');
+    const status = document.getElementById('status');
+    const indicator = document.getElementById('indicator');
+    const screenshotArea = document.getElementById('screenshotArea');
+    const urlBar = document.getElementById('urlBar');
+    const logs = document.getElementById('logs');
+    const captchaVisionModel = document.getElementById('captchaVisionModel');
+
+    let isRunning = false;
+
+    // Show status message
+    function showStatus(message, type = 'info') {
+      status.textContent = message;
+      status.className = `status show ${type}`;
+    }
+
+    // Add log entry
+    function addLog(message) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      const time = new Date().toLocaleTimeString();
+      entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="log-message">${message}</span>`;
+      logs.appendChild(entry);
+      logs.scrollTop = logs.scrollHeight;
+    }
+
+    // Run task
+    runBtn.addEventListener('click', async () => {
+      const task = taskInput.value.trim();
+      const model = modelSelect.value;
+
+      if (!task) {
+        showStatus('Please enter task instructions', 'error');
+        return;
+      }
+
+      if (isRunning) {
+        showStatus('A task is already running', 'error');
+        return;
+      }
+
+      runBtn.disabled = true;
+      runBtn.style.display = 'none';
+      stopBtn.style.display = 'block';
+      formInputs.classList.add('hidden'); // 입력란 숨김
+      logs.classList.add('expanded'); // 로그 확장
+      isRunning = true;
+
+      try {
+        showStatus(`Starting task with ${model}...`, 'info');
+        const settings = {
+          captchaVisionModel: (captchaVisionModel && captchaVisionModel.value) || undefined
+        };
+        if (settings.captchaVisionModel) addLog(`Captcha Vision Model: ${settings.captchaVisionModel}`);
+        const result = await window.electronAPI.runTask(task, model, settings);
+
+        if (result.success) {
+          showStatus('Task started successfully', 'success');
+        } else {
+          showStatus(`Error: ${result.error}`, 'error');
+          // 에러 시 UI 복구
+          runBtn.disabled = false;
+          runBtn.style.display = 'block';
+          stopBtn.style.display = 'none';
+          formInputs.classList.remove('hidden');
+          logs.classList.remove('expanded');
+          isRunning = false;
+        }
+      } catch (error) {
+        showStatus(`Error: ${error.message}`, 'error');
+        // 에러 시 UI 복구
+        runBtn.disabled = false;
+        runBtn.style.display = 'block';
+        stopBtn.style.display = 'none';
+        formInputs.classList.remove('hidden');
+        logs.classList.remove('expanded');
+        isRunning = false;
+      }
+    });
+
+    // Stop task
+    stopBtn.addEventListener('click', async () => {
+      if (!isRunning) return;
+
+      stopBtn.disabled = true;
+      showStatus('Stopping task...', 'info');
+      addLog('Stop requested by user');
+
+      try {
+        const res = await window.electronAPI.stopTask();
+        if (res && res.success) {
+          // 즉시 UI 복구
+          indicator.textContent = '○ Idle';
+          indicator.classList.remove('active');
+          runBtn.disabled = false;
+          runBtn.style.display = 'block';
+          stopBtn.style.display = 'none';
+          formInputs.classList.remove('hidden');
+          logs.classList.remove('expanded');
+          isRunning = false;
+          showStatus('Task stopped by user', 'success');
+        } else {
+          showStatus('No running task to stop', 'error');
+        }
+      } catch (error) {
+        showStatus(`Error stopping task: ${error.message}`, 'error');
+      } finally {
+        stopBtn.disabled = false;
+      }
+    });
+
+    // Electron event listeners
+    if (window.electronAPI) {
+      // Task started
+      window.electronAPI.onAgentStarted((data) => {
+        indicator.textContent = '● Running';
+        indicator.classList.add('active');
+        showStatus(`Task started: ${data.task}`, 'info');
+        addLog(`Task started: ${data.task}`);
+      });
+
+      // Screenshot update
+      window.electronAPI.onAgentScreenshot((data) => {
+        screenshotArea.innerHTML = `<img src="data:image/png;base64,${data.image}" alt="Screenshot">`;
+
+        if (data.url) {
+          urlBar.textContent = data.url;
+          urlBar.classList.add('show');
+        }
+      });
+
+      // Log
+      window.electronAPI.onAgentLog((log) => {
+        if (log.type === 'system') {
+          addLog(log.data.message || JSON.stringify(log.data));
+        }
+      });
+
+      // Task stopped
+      window.electronAPI.onAgentStopped((data) => {
+        indicator.textContent = '○ Idle';
+        indicator.classList.remove('active');
+        showStatus(`Task stopped: ${data.reason}`, data.reason.includes('Error') ? 'error' : 'success');
+        addLog(`Task stopped: ${data.reason}`);
+
+        // UI 리셋
+        runBtn.disabled = false;
+        runBtn.style.display = 'block';
+        stopBtn.style.display = 'none';
+        formInputs.classList.remove('hidden'); // 입력란 다시 표시
+        logs.classList.remove('expanded'); // 로그 축소
+        isRunning = false;
+      });
+
+      showStatus('Ready', 'success');
+    } else {
+      showStatus('Electron API not found', 'error');
+    }
+  </script>
+</body>
+</html>
+

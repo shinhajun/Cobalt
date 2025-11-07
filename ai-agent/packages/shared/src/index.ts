@@ -1,1 +1,0 @@
-export const sharedLog = () => console.log('Hello from shared'); 

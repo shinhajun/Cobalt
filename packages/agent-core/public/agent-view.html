@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent Browser View</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; background-color: #f0f2f5; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .header { background-color: #4CAF50; color: white; padding: 10px 15px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    .header h1 { font-size: 1.2em; margin: 0; }
+    .status { font-size: 0.9em; display: flex; align-items: center; }
+    .status-indicator { width: 10px; height: 10px; border-radius: 50%; background-color: #f44336; margin-right: 8px; transition: background-color 0.3s; }
+    .status-indicator.active { background-color: #8BC34A; }
+    .main-content { display: flex; flex: 1; overflow: hidden; padding: 15px; gap: 15px; }
+    .browser-area { flex: 3; display: flex; flex-direction: column; background-color: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); overflow: hidden;}
+    .browser-controls { padding: 10px; background-color: #f7f7f7; border-bottom: 1px solid #ddd; text-align: center; }
+    .browser-controls input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; width: 60%; }
+    .browser-viewport { flex: 1; position: relative; background-color: #e0e0e0; display: flex; align-items: center; justify-content: center; overflow: hidden; padding: 10px; }
+    #browserViewImg { max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid #ccc; box-shadow: 0 0 10px rgba(0,0,0,0.1); display: none;}
+    .placeholder-text { color: #777; font-size: 1.2em; }
+    .logs-area { flex: 1; background-color: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24); display: flex; flex-direction: column; overflow: hidden; }
+    .logs-header { padding: 10px 15px; background-color: #607D8B; color: white; font-size: 1em; border-bottom: 1px solid #455A64; }
+    #actionLog { flex: 1; padding: 15px; overflow-y: auto; font-size: 0.85em; line-height: 1.6; }
+    .log-entry { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #eee; word-wrap: break-word; }
+    .log-entry:last-child { border-bottom: none; }
+    .log-time { color: #999; font-size: 0.9em; margin-right: 8px; }
+    .log-action { color: #333; }
+    .log-thought { color: #00796B; font-style: italic; margin-top: 4px; display: block; padding-left: 15px; border-left: 2px solid #00796B;}
+    .log-observation { color: #5D4037; margin-top: 4px; display: block; padding-left: 15px; border-left: 2px solid #5D4037; white-space: pre-wrap; max-height: 150px; overflow-y: auto;}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>AI Agent Live View</h1>
+    <div class="status">
+      <div id="statusIndicator" class="status-indicator"></div>
+      <span id="statusText">Idle</span>
+    </div>
+  </div>
+  <div class="main-content">
+    <div class="browser-area">
+      <!-- <div class="browser-controls"><input type="text" id="urlBar" placeholder="Current URL" readonly></div> -->
+      <div class="browser-viewport">
+        <img id="browserViewImg" src="" alt="Agent Browser View">
+        <div id="placeholderText" class="placeholder-text">Agent not running. Submit a task to start.</div>
+      </div>
+    </div>
+    <div class="logs-area">
+      <div class="logs-header">Agent Logs & Thoughts</div>
+      <div id="actionLog">
+         <div class="log-entry"><span class="log-time">System:</span><span class="log-action">Waiting for agent to start...</span></div>
+      </div>
+    </div>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const browserViewImg = document.getElementById('browserViewImg');
+    const placeholderText = document.getElementById('placeholderText');
+    const statusIndicator = document.getElementById('statusIndicator');
+    const statusText = document.getElementById('statusText');
+    const actionLog = document.getElementById('actionLog');
+    // const urlBar = document.getElementById('urlBar');
+
+    function updateStatus(isActive, text) {
+      statusIndicator.classList.toggle('active', isActive);
+      statusText.textContent = text;
+    }
+
+    function addLog(type, data) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      const time = new Date().toLocaleTimeString();
+      
+      let content = '';
+      if (type === 'system') {
+        content = `<span class="log-time">System:</span><span class="log-action">${data.message}</span>`;
+      } else if (type === 'screenshot') {
+        content = `<span class="log-time">${time}</span><span class="log-action">Action: ${data.action} (Screenshot updated)</span>`;
+      } else if (type === 'thought') {
+        content = `<span class="log-time">${time}</span><span class="log-action">AI Thought Process:</span><span class="log-thought">${data.thought}</span>`;
+         if(data.actionDetail) content += `<span class="log-action" style="margin-left:0; display:block; margin-top:4px;">Action: ${data.actionDetail}</span>`;
+      } else if (type === 'observation') {
+        content = `<span class="log-time">${time}</span><span class="log-action">Observation:</span><span class="log-observation">${data.observation}</span>`;
+      }
+      entry.innerHTML = content;
+      actionLog.appendChild(entry);
+      actionLog.scrollTop = actionLog.scrollHeight;
+    }
+
+    socket.on('connect', () => addLog('system', {message: 'Connected to agent server.'}));
+    socket.on('disconnect', () => addLog('system', {message: 'Disconnected from agent server.'}));
+
+    socket.on('agent-started', (data) => {
+      updateStatus(true, 'Running');
+      placeholderText.style.display = 'none';
+      browserViewImg.style.display = 'block';
+      addLog('system', {message: `Agent started for task: ${data.task}`});
+    });
+
+    socket.on('agent-stopped', (data) => {
+      updateStatus(false, data.reason || 'Stopped');
+      addLog('system', {message: `Agent stopped. Reason: ${data.reason || 'Task completed or error'}`});
+    });
+
+    socket.on('screenshot', (data) => {
+      browserViewImg.src = 'data:image/png;base64,' + data.image;
+      // if(data.url) urlBar.value = data.url;
+      addLog('screenshot', data);
+    });
+    
+    socket.on('agent-log', (log) => {
+      if (log.type === 'thought') addLog('thought', log.data);
+      else if (log.type === 'observation') addLog('observation', log.data);
+      else addLog('system', { message: log.data.message || JSON.stringify(log.data) });
+    });
+
+    updateStatus(false, 'Initializing...');
+  </script>
+</body>
+</html> 
