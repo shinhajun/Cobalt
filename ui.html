@@ -329,6 +329,10 @@
 
         <div id="status" class="status"></div>
 
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 15px;">
+          <h3 style="font-size: 0.9rem; color: #aaa; margin: 0;">Logs</h3>
+          <button id="copyLogsBtn" class="btn" style="width: auto; padding: 6px 12px; font-size: 0.85rem; background-color: #555;">Copy Logs</button>
+        </div>
         <div class="logs" id="logs"></div>
       </div>
     </div>
@@ -434,6 +438,20 @@
         logs.classList.remove('expanded');
         isRunning = false;
       }
+    });
+
+    // Copy logs
+    const copyLogsBtn = document.getElementById('copyLogsBtn');
+    copyLogsBtn.addEventListener('click', () => {
+      const logText = Array.from(logs.children)
+        .map(entry => entry.textContent)
+        .join('\n');
+      navigator.clipboard.writeText(logText).then(() => {
+        showStatus('Logs copied to clipboard', 'success');
+        setTimeout(() => showStatus('Ready', 'success'), 2000);
+      }).catch(err => {
+        showStatus('Failed to copy logs', 'error');
+      });
     });
 
     // Stop task

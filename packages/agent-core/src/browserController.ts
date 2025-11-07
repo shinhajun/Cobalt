@@ -478,7 +478,7 @@ export class BrowserController extends EventEmitter {
     }
   }
 
-  async getRecaptchaChallenge(): Promise<{ instruction: string; tiles: string[] } | null> {
+  async getRecaptchaChallenge(): Promise<{ instruction: string; gridImageBase64: string; gridSize?: number } | null> {
     if (!this.page) return null;
     try {
       // Wait for challenge frame to appear briefly
@@ -496,17 +496,26 @@ export class BrowserController extends EventEmitter {
         return text || '';
       });
 
-      const candidates = await challengeFrame.$$('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper');
-      if (!candidates || candidates.length === 0) return { instruction, tiles: [] };
-      const tiles: string[] = [];
-      for (const el of candidates) {
-        try {
-          const buf = await el.screenshot();
-          tiles.push(Buffer.from(buf).toString('base64'));
-          if (tiles.length >= 9) break; // typical 3x3
-        } catch (_) {}
-      }
-      return { instruction, tiles };
+      // Capture the entire grid as a single image for better context
+      const gridContainer = await challengeFrame.$('.rc-imageselect-table-33, .rc-imageselect-table-44, table.rc-imageselect-table-33, table.rc-imageselect-table-44, .rc-imageselect-challenge');
+      if (!gridContainer) return { instruction, gridImageBase64: '' };
+
+      const buf = await gridContainer.screenshot();
+      const gridImageBase64 = Buffer.from(buf).toString('base64');
+
+      // Try to infer grid size (3x3 or 4x4) for better indexing guidance
+      let gridSize: number | undefined = undefined;
+      try {
+        const tileCount = await challengeFrame.evaluate(() => {
+          const nodes = document.querySelectorAll('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper');
+          return nodes ? nodes.length : 0;
+        });
+        if (typeof tileCount === 'number' && tileCount > 0) {
+          gridSize = tileCount >= 16 ? 4 : 3;
+        }
+      } catch (_) {}
+
+      return { instruction, gridImageBase64, gridSize };
     } catch (e) {
       return null;
     }
@@ -678,9 +687,10 @@ export class BrowserController extends EventEmitter {
         await this.page.evaluate(() => window.dispatchEvent(new Event('resize'))).catch(() => {});
       } catch (_) {}
 
-      // Take a screenshot and get it as buffer (fullPage for CAPTCHA to capture iframes)
+      // Take a screenshot and get it as buffer
+      // For Live View, always use viewport screenshot (not fullPage) for better performance
       const screenshotBuffer = await this.page.screenshot({
-        fullPage: isCaptchaRelated,
+        fullPage: false,
         omitBackground: false,
         type: 'png'
       });
