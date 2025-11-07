@@ -154,38 +154,96 @@ ipcMain.handle('analyze-task', async (event, { task, model }) => {
   console.log('[Electron] Analyzing task type:', task);
 
   try {
-    // LLM으로 작업 유형 분석
+    // LLM이 tool을 선택하도록 함
     const tempLLM = new LLMService(model || 'gpt-5-mini');
 
-    const analysisPrompt = `You are a task classifier. Analyze if the user's request requires browser automation or is just a simple question/conversation.
+    const analysisPrompt = `You are a helpful AI assistant. The user has asked: "${task}"
 
-User request: "${task}"
+You have two options:
+1. If you can answer this question directly without needing to browse the web, use the "answer_directly" tool
+2. If you need to browse the web, search for information, or interact with websites, use the "needs_browser" tool
 
-Classify as:
-- "chat": Simple question, general knowledge, calculation, explanation, or conversation that doesn't require web browsing
-- "browser": Requires web browsing, clicking buttons, filling forms, searching websites, extracting data from websites, etc.
+Examples:
+- "What is 1+1?" → use answer_directly (you know math)
+- "What day is today?" → use answer_directly (use current date)
+- "오늘 몇일이야?" → use answer_directly (use current date)
+- "Explain how React works" → use answer_directly (you know programming)
+- "Search Google for AI news" → use needs_browser (explicitly needs web search)
+- "Go to Amazon and find laptops" → use needs_browser (needs web browsing)
+- "What's the weather today?" → use needs_browser (needs real-time weather data)
 
-Respond in JSON format:
-{
-  "taskType": "chat" or "browser",
-  "reason": "brief explanation",
-  "response": "if taskType is chat, provide a helpful answer here. If browser, leave empty"
-}`;
+Choose the appropriate tool now.`;
 
-    const response = await tempLLM.chat([{ role: 'user', content: analysisPrompt }]);
-    console.log('[Electron] Task analysis response:', response);
+    const tools = [
+      {
+        type: 'function',
+        function: {
+          name: 'answer_directly',
+          description: 'Use this when you can answer the user\'s question directly without browsing the web. Provide your answer as the response parameter.',
+          parameters: {
+            type: 'object',
+            properties: {
+              response: {
+                type: 'string',
+                description: 'Your direct answer to the user\'s question'
+              }
+            },
+            required: ['response']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'needs_browser',
+          description: 'Use this when you need to browse the web, search for information, or interact with websites to answer the question.',
+          parameters: {
+            type: 'object',
+            properties: {
+              reason: {
+                type: 'string',
+                description: 'Brief explanation of why browser automation is needed'
+              }
+            },
+            required: ['reason']
+          }
+        }
+      }
+    ];
 
-    // Parse JSON response
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const analysis = JSON.parse(jsonMatch[0]);
-      console.log('[Electron] Task classified as:', analysis.taskType);
-      return analysis;
-    } else {
-      // Fallback: treat as browser task if parsing fails
-      console.log('[Electron] Failed to parse analysis, defaulting to browser task');
-      return { taskType: 'browser', reason: 'Unable to classify' };
+    const response = await tempLLM.chatWithTools(
+      [{ role: 'user', content: analysisPrompt }],
+      tools
+    );
+
+    console.log('[Electron] Task analysis response:', JSON.stringify(response));
+
+    // Check if tool was called
+    if (response.toolCalls && response.toolCalls.length > 0) {
+      const toolCall = response.toolCalls[0];
+      const toolName = toolCall.function.name;
+      const toolArgs = JSON.parse(toolCall.function.arguments);
+
+      console.log('[Electron] Tool selected:', toolName, 'Args:', toolArgs);
+
+      if (toolName === 'answer_directly') {
+        return {
+          taskType: 'chat',
+          reason: 'AI chose to answer directly',
+          response: toolArgs.response
+        };
+      } else if (toolName === 'needs_browser') {
+        return {
+          taskType: 'browser',
+          reason: toolArgs.reason || 'Needs browser automation'
+        };
+      }
     }
+
+    // Fallback: if no tool call, treat as browser task
+    console.log('[Electron] No tool call detected, defaulting to browser task');
+    return { taskType: 'browser', reason: 'No tool selected' };
+
   } catch (error) {
     console.error('[Electron] Error analyzing task:', error);
     // Fallback: treat as browser task on error

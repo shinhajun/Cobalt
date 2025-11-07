@@ -1852,4 +1852,53 @@ No explanation, only JSON.`;
     this.emitLog('error', { message: finalMessage });
     return { success: false, message: finalMessage };
   }
+
+  // Simple chat method for direct questions
+  async chat(messages: Array<{ role: string; content: string }>): Promise<string> {
+    try {
+      const response = await this.model.invoke(messages.map(m => {
+        if (m.role === 'user') {
+          return new HumanMessage(m.content);
+        }
+        return m;
+      }));
+
+      return response.content;
+    } catch (error: any) {
+      console.error('[LLMService] Error in chat:', error);
+      throw error;
+    }
+  }
+
+  // Chat with tool calling support
+  async chatWithTools(messages: Array<{ role: string; content: string }>, tools: any[]): Promise<any> {
+    try {
+      const modelWithTools = this.model.bind({ tools });
+
+      const response = await modelWithTools.invoke(messages.map(m => {
+        if (m.role === 'user') {
+          return new HumanMessage(m.content);
+        }
+        return m;
+      }));
+
+      // Parse tool calls from response
+      const toolCalls = response.tool_calls || response.additional_kwargs?.tool_calls || [];
+
+      return {
+        content: response.content,
+        toolCalls: toolCalls.map((tc: any) => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.name || tc.function?.name,
+            arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args || tc.function?.arguments || {})
+          }
+        }))
+      };
+    } catch (error: any) {
+      console.error('[LLMService] Error in chatWithTools:', error);
+      throw error;
+    }
+  }
 }

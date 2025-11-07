@@ -159,13 +159,10 @@ async function runTask() {
   // Add user message
   addUserMessage(task);
 
-  // Show thinking indicator
-  addThinkingIndicator();
+  // Show analyzing indicator (lightweight)
+  addSystemMessage('Analyzing request...');
 
-  // UI state
-  isRunning = true;
-  btnRun.style.display = 'none';
-  btnStop.style.display = 'flex';
+  // Temporarily disable input
   taskInput.disabled = true;
   taskInput.value = '';
 
@@ -184,15 +181,19 @@ async function runTask() {
 
     if (analysisResult.taskType === 'chat') {
       // Simple question - just get AI response without browser automation
-      removeThinkingIndicator();
       addAssistantMessage(analysisResult.response);
 
-      isRunning = false;
-      btnRun.style.display = 'flex';
-      btnStop.style.display = 'none';
+      // Re-enable input
       taskInput.disabled = false;
     } else {
-      // Browser task - run full automation
+      // Browser task - NOW start the automation UI
+      isRunning = true;
+      btnRun.style.display = 'none';
+      btnStop.style.display = 'flex';
+
+      // Show thinking indicator for browser task
+      addThinkingIndicator();
+
       const result = await electronAPI.runTask(task, model, settings);
       if (!result.success) {
         addErrorMessage('Failed to start task: ' + result.error);
@@ -406,9 +407,17 @@ function deleteChatRoom(roomId) {
     return;
   }
 
-  if (!confirm('Are you sure you want to delete this chat room?')) {
+  const room = chatRooms.find(r => r.id === roomId);
+  if (!room) {
+    console.error('Room not found:', roomId);
     return;
   }
+
+  if (!confirm(`Delete "${room.title}"?`)) {
+    return;
+  }
+
+  console.log('Deleting chat room:', roomId);
 
   chatRooms = chatRooms.filter(r => r.id !== roomId);
 
@@ -420,6 +429,7 @@ function deleteChatRoom(roomId) {
 
   saveChatRooms();
   renderChatTabs();
+  renderHistory(); // Update history modal if open
 }
 
 function switchChatRoom(roomId) {
@@ -567,14 +577,18 @@ function updateTabActiveState(roomId) {
 
 function renameChatRoom(roomId) {
   const room = chatRooms.find(r => r.id === roomId);
-  if (!room) return;
+  if (!room) {
+    console.error('Room not found:', roomId);
+    return;
+  }
 
-  const newName = prompt('Rename chat room:', room.title);
+  const newName = prompt('Enter new chat room name:', room.title);
   if (newName && newName.trim()) {
+    console.log('Renaming chat room:', roomId, 'to', newName.trim());
     room.title = newName.trim();
     saveChatRooms();
     renderChatTabs();
-    renderHistory();
+    renderHistory(); // Update history modal if open
   }
 }
 
@@ -599,9 +613,9 @@ function renderHistory() {
   chatRooms.forEach(room => {
     const preview = room.messages.length > 0
       ? room.messages[0].text.substring(0, 50)
-    : 'No conversation history';
+      : 'No conversation history';
 
-  const date = new Date(room.createdAt).toLocaleDateString('en-US');
+    const date = new Date(room.createdAt).toLocaleDateString('en-US');
 
     const item = document.createElement('div');
     item.className = 'history-item';
@@ -611,10 +625,10 @@ function renderHistory() {
         ${room.id === activeChatRoomId ? '<span style="color: #4285f4;">●</span>' : ''}
       </div>
       <div class="history-preview">${preview}</div>
-    <div class="history-date">${date} · ${room.messages.length} messages</div>
+      <div class="history-date">${date} · ${room.messages.length} messages</div>
       <div class="history-actions">
-      <button class="btn-rename" data-room-id="${room.id}">Rename</button>
-      <button class="btn-delete" data-room-id="${room.id}">Delete</button>
+        <button class="btn-rename" data-room-id="${room.id}">Rename</button>
+        <button class="btn-delete" data-room-id="${room.id}">Delete</button>
       </div>
     `;
 
@@ -627,16 +641,22 @@ function renderHistory() {
     });
 
     // Rename button
-    item.querySelector('.btn-rename').addEventListener('click', (e) => {
-      e.stopPropagation();
-      renameChatRoom(room.id);
-    });
+    const renameBtn = item.querySelector('.btn-rename');
+    if (renameBtn) {
+      renameBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        renameChatRoom(room.id);
+      });
+    }
 
     // Delete button
-    item.querySelector('.btn-delete').addEventListener('click', (e) => {
-      e.stopPropagation();
-      deleteChatRoom(room.id);
-    });
+    const deleteBtn = item.querySelector('.btn-delete');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        deleteChatRoom(room.id);
+      });
+    }
 
     historyList.appendChild(item);
   });
