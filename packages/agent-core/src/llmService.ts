@@ -2,6 +2,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { HumanMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController";
+import { AgentTools } from "./agentTools";
 // Vision-based captcha solving (no external captcha providers)
 import path from 'path';
 
@@ -12,6 +13,7 @@ export class LLMService {
   private logCallback: AgentLogCallback;
   private visionModel: any | null = null;
   private isVisionGeminiProvider: boolean = false;
+  private tools: AgentTools;
 
   // Vision 모델 타임아웃 상수 통일
   private readonly VISION_TIMEOUTS = {
@@ -29,6 +31,9 @@ export class LLMService {
   };
 
   constructor(modelName: string = "gpt-5-mini", logCallback?: AgentLogCallback) {
+    // Initialize tools first
+    this.tools = new AgentTools();
+
     // 생성자 실행 시점에 환경변수 읽기 (모듈 로드 시점이 아닌)
     const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
     const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
@@ -198,15 +203,26 @@ export class LLMService {
       `Analyze the image and determine what needs to be clicked.\n`+
       `Return ONLY JSON in one of these forms:\n`+
       `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"what you clicked"}\n`+
-      `or {"action":"grid_click","rect":{"x":<px>,"y":<px>,"width":<px>,"height":<px>}, "gridSize":3|4, "indexes":[...], "note":"..."}\n`+
+      `or {"action":"grid_click","rect":{"x":<px>,"y":<px>,"width":<px>,"height":<px>}, "gridSize":3|4|5, "indexes":[...], "note":"..."}\n`+
       `or {"action":"noop","note":"reason why no action needed"}.\n`+
+
+      `IMPORTANT for image grids (like "Select all squares with Stop Sign"):\n`+
+      `- Identify the grid of images/squares on the page\n`+
+      `- Measure the exact position and size of the entire grid area\n`+
+      `- Count how many rows and columns (3x3, 4x4, or 5x5)\n`+
+      `- Identify which squares contain the requested object (e.g., stop signs, traffic lights)\n`+
+      `- Return indexes in 0-based row-major order (left-to-right, top-to-bottom)\n`+
+      `- Example for 3x3: top-left=0, top-middle=1, top-right=2, middle-left=3, etc.\n`+
+      `- Be very careful to identify ALL matching squares\n`+
+
       `IMPORTANT for checkboxes:\n`+
       `- Look for a small square box (usually 15-30px) next to "I'm not a robot" text\n`+
       `- The checkbox is typically on the LEFT side of the text\n`+
       `- Provide the exact center coordinates of the checkbox square\n`+
       `- Do NOT click on the text, click on the checkbox box itself\n`+
-      `- Measure coordinates very carefully from the top-left corner (0,0) of the image\n`+
-      `Be extremely precise with coordinates.`;
+
+      `Measure coordinates very carefully from the top-left corner (0,0) of the image.\n`+
+      `Be extremely precise with coordinates and grid measurements.`;
 
       const textPrompt = `Goal: ${instruction}\n${spec}`;
       const messages: any[] = [
@@ -247,7 +263,7 @@ export class LLMService {
         return { success: n > 0, report: `Clicked ${n} points.` };
       }
 
-      if (json.action === 'grid_click' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4)) {
+      if (json.action === 'grid_click' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4 || json.gridSize === 5)) {
         await browserController.clickRectGrid({
           x: Math.max(0, Math.round(json.rect.x)),
           y: Math.max(0, Math.round(json.rect.y)),
@@ -255,7 +271,9 @@ export class LLMService {
           height: Math.max(10, Math.round(json.rect.height)),
         }, json.gridSize, json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n)));
         await browserController.streamScreenshot('post-vision-grid-click');
-        return { success: true, report: `Grid click gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}` };
+        // Wait a bit after clicking grid tiles
+        await new Promise(r => setTimeout(r, 500));
+        return { success: true, report: `Grid click gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}. Note: ${json.note || 'N/A'}` };
       }
 
       if (json.action === 'noop') {
@@ -582,27 +600,61 @@ No explanation, only JSON.`;
         (Observation contains information about the current page state, results of previous actions, or errors.)
 
         Available Browser/Tool Actions (strictly follow this JSON format for the 'action' field):
+
+        Browser Actions:
         1.  {"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL_TO_NAVIGATE_TO>"}
         2.  {"type": "BROWSER_ACTION", "command": "click", "selector": "<CSS_SELECTOR>"}
-        3.  {"type": "BROWSER_ACTION", "command": "type", "selector": "<CSS_SELECTOR>", "text": "<TEXT_TO_TYPE>"}
-        4.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"} (Result will be in observation)
-        5.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} (Result will be in observation)
-        6.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} (e.g., Enter, Tab, ArrowDown)
-        7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha", "captchaKind": "recaptcha_v2|text|generic"}
-        8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>", "tilesVariable": "<VAR_NAME_FOR_TILES_BASE64>", "select": [0,3,4], "submit": true}
+        3.  {"type": "BROWSER_ACTION", "command": "clickCoordinates", "x": <X_PIXEL>, "y": <Y_PIXEL>} - Click at specific coordinates (use when elements have position info)
+        4.  {"type": "BROWSER_ACTION", "command": "type", "selector": "<CSS_SELECTOR>", "text": "<TEXT_TO_TYPE>"}
+        5.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"}
+        6.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"}
+        7.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"}
+
+        CAPTCHA/Challenge Tools:
+        7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
+        8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
         9.  {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
 
+        Utility Tools:
+        10. {"type": "TOOL_ACTION", "tool": "calculate", "expression": "<MATH_EXPRESSION>"} - Calculate math (e.g., "3*5+2")
+        11. {"type": "TOOL_ACTION", "tool": "storeMemory", "key": "<KEY>", "value": "<VALUE>"} - Store info for later
+        12. {"type": "TOOL_ACTION", "tool": "retrieveMemory", "key": "<KEY>"} - Recall stored info
+        13. {"type": "TOOL_ACTION", "tool": "listMemory"} - List all stored keys
+        14. {"type": "TOOL_ACTION", "tool": "getCurrentDateTime", "format": "full|date|time"} - Get current date/time
+        15. {"type": "TOOL_ACTION", "tool": "calculateDateDiff", "date1": "<ISO_DATE>", "date2": "<ISO_DATE>"} - Calculate days between dates
+        16. {"type": "TOOL_ACTION", "tool": "extractNumbers", "text": "<TEXT>"} - Extract all numbers from text
+        17. {"type": "TOOL_ACTION", "tool": "extractEmails", "text": "<TEXT>"} - Extract email addresses
+        18. {"type": "TOOL_ACTION", "tool": "extractURLs", "text": "<TEXT>"} - Extract URLs from text
+        19. {"type": "TOOL_ACTION", "tool": "formatAsTable", "data": [{"col1":"val1"},...]} - Format data as markdown table
+        20. {"type": "TOOL_ACTION", "tool": "formatAsJSON", "data": <ANY>, "pretty": true} - Format as JSON
+
         Task Completion Actions:
-        9.  {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
-        10.  {"type": "FAIL", "message": "<MESSAGE_DESCRIBING_FAILURE_REASON>"}
+        21. {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
+        22. {"type": "FAIL", "message": "<MESSAGE_DESCRIBING_FAILURE_REASON>"}
 
         Guidelines:
         - Analyze the <Observation> carefully to understand the current browser state and results of previous actions.
         - The observation shows you visible interactive elements with their attributes - use this to find the right selectors.
         - Formulate a <Thought> explaining your reasoning for the next step.
         - Choose an appropriate <Action> from the list above.
+
+        Smart Tool Usage:
+        - Use utility tools to process information (calculate, extract, format)
+        - Store important information in memory using storeMemory so you don't lose it
+        - Retrieve stored info when needed instead of re-navigating
+        - Use getCurrentDateTime for any time-related tasks
+        - Use calculate for any math instead of trying to do it yourself
+        - Use extract tools (extractNumbers, extractEmails, extractURLs) to parse text efficiently
+        - Format final reports using formatAsTable or formatAsJSON for better readability
+
+        Browser Actions:
         - For selectors, use the exact attributes shown in the Interactive Elements section (name, id, aria-label, etc).
-        - If a previous action failed (e.g., selector not found), adjust your strategy. Try different selectors from the Interactive Elements list.
+        - **IMPORTANT: When Interactive Elements show position info (x=..., y=...), use clickCoordinates instead of click for better reliability**
+        - If a previous action failed (e.g., selector not found), try clickCoordinates with the x,y values from Interactive Elements
+        - After typing into a search box, always press Enter key to submit the search.
+        - For dynamic pages where elements detach from DOM, always prefer clickCoordinates over click
+
+        CAPTCHA/Cloudflare Handling:
         - **IMPORTANT: If you see captcha_status=cloudflare_waiting:**
           * This is a Cloudflare security check that the system is handling automatically in the background.
           * For the FIRST occurrence: wait by using getPageContent and check again.
@@ -610,16 +662,26 @@ No explanation, only JSON.`;
           * For the THIRD occurrence: wait one more time with getPageContent.
           * For the FOURTH occurrence or more: Use FAIL action as Cloudflare cannot be bypassed.
           * Count how many times you've seen cloudflare_waiting in your thought process.
-        - For web searches, use Google (https://www.google.com) by default.
-          * Google search box: Use input/textarea elements with name="q" or aria-label that contains "Search" or localized equivalents (e.g., "검색").
-          * Type the query into the box and press Enter to submit.
-          * Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
-        - After typing into a search box, always press Enter key to submit the search.
         - If a challenge is detected, use {"type":"TOOL_ACTION","tool":"solveCaptcha"} or {"type":"TOOL_ACTION","tool":"visionInteract"}. Do not click iframes directly.
+
+        Visual Challenge Solving:
+        - When you see instructions like "Select all squares with [object]", this is an image grid challenge
+        - Use visionInteract to identify and click the matching tiles
+        - **CRITICAL**: After clicking the tiles, you MUST click the Verify/Submit button to check your answer
+        - The Verify button is usually visible in Interactive Elements or can be clicked by coordinates
+        - If visionInteract doesn't advance the page, manually click the Verify button using clickCoordinates
+
+        Web Searching:
+        - For web searches, use Google (https://www.google.com) by default.
+        - Google search box: Use input/textarea elements with name="q" or aria-label that contains "Search" or localized equivalents (e.g., "검색").
+        - Type the query into the box and press Enter to submit.
+        - Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
+
+        Task Completion:
         - Keep your thoughts concise but clear.
         - When the task is complete, use the FINISH action with a comprehensive report in the message field:
           * Include ALL information gathered (dates, schedules, important details, etc.)
-          * Format the report clearly with proper structure and organization
+          * Use tools like formatAsTable or formatAsJSON to make the report well-structured
           * Use Korean if the task was in Korean, otherwise use English
           * Make the report detailed and easy to read
 
@@ -677,6 +739,13 @@ No explanation, only JSON.`;
                   actionObservation = clickSuccess ? `Clicked ${action.selector}.` : `Failed to click ${action.selector}.`;
                   if(!clickSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: Selector missing for click."; }
+                break;
+              case "clickCoordinates":
+                if (typeof action.x === 'number' && typeof action.y === 'number') {
+                  const clickSuccess = await browserController.clickViewport(action.x, action.y);
+                  actionObservation = clickSuccess ? `Clicked at coordinates (${action.x}, ${action.y}).` : `Failed to click at coordinates (${action.x}, ${action.y}).`;
+                  if(!clickSuccess) actionError = true;
+                } else { actionError = true; actionObservation = "Error: x and y coordinates missing for clickCoordinates."; }
                 break;
               case "type":
                 if (action.selector && action.text !== undefined) {
@@ -1043,6 +1112,184 @@ No explanation, only JSON.`;
                 actionObservation += ` Current URL: ${currentUrl}. Page content (first 500 chars): ${currentPageContent.substring(0, 500)}`;
               } catch (e: any) {
                 actionObservation += ` Could not fetch page content after visionInteract: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            }
+            // NEW UTILITY TOOLS
+            else if (action.tool === 'calculate') {
+              try {
+                const result = await this.tools.calculate(action.expression);
+                if (result.success) {
+                  actionObservation = `Calculation result: ${action.expression} = ${result.result}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Calculation failed: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error during calculation: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'storeMemory') {
+              try {
+                const result = await this.tools.storeMemory(action.key, action.value);
+                if (result.success) {
+                  actionObservation = `Memory stored: ${action.key} = ${JSON.stringify(action.value).substring(0, 100)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to store memory: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error storing memory: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'retrieveMemory') {
+              try {
+                const result = await this.tools.retrieveMemory(action.key);
+                if (result.success) {
+                  actionObservation = `Memory retrieved: ${action.key} = ${JSON.stringify(result.result)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to retrieve memory: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error retrieving memory: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'listMemory') {
+              try {
+                const result = await this.tools.listMemory();
+                if (result.success) {
+                  actionObservation = `Stored memory keys: ${JSON.stringify(result.result)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to list memory: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error listing memory: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'getCurrentDateTime') {
+              try {
+                const result = await this.tools.getCurrentDateTime(action.format);
+                if (result.success) {
+                  actionObservation = `Current date/time: ${result.result.formatted} (ISO: ${result.result.iso})`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to get date/time: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error getting date/time: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'calculateDateDiff') {
+              try {
+                const result = await this.tools.calculateDateDiff(action.date1, action.date2);
+                if (result.success) {
+                  actionObservation = `Date difference: ${result.result.days} days, ${result.result.hours} hours (total: ${result.result.totalHours} hours)`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to calculate date difference: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error calculating date difference: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'extractNumbers') {
+              try {
+                const result = await this.tools.extractNumbers(action.text);
+                if (result.success) {
+                  actionObservation = `Extracted numbers: ${JSON.stringify(result.result)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to extract numbers: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error extracting numbers: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'extractEmails') {
+              try {
+                const result = await this.tools.extractEmails(action.text);
+                if (result.success) {
+                  actionObservation = `Extracted emails: ${JSON.stringify(result.result)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to extract emails: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error extracting emails: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'extractURLs') {
+              try {
+                const result = await this.tools.extractURLs(action.text);
+                if (result.success) {
+                  actionObservation = `Extracted URLs: ${JSON.stringify(result.result)}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to extract URLs: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error extracting URLs: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'formatAsTable') {
+              try {
+                const result = await this.tools.formatAsTable(action.data, action.columns);
+                if (result.success) {
+                  actionObservation = `Formatted as table:\n${result.result}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to format as table: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error formatting as table: ${e.message}`;
+              }
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'formatAsJSON') {
+              try {
+                const result = await this.tools.formatAsJSON(action.data, action.pretty !== false);
+                if (result.success) {
+                  actionObservation = `Formatted as JSON:\n${result.result}`;
+                } else {
+                  actionError = true;
+                  actionObservation = `Failed to format as JSON: ${result.error}`;
+                }
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error formatting as JSON: ${e.message}`;
               }
               observation = actionObservation;
               if (actionError) this.emitLog('error', { message: observation });

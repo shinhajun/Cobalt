@@ -7,6 +7,7 @@ export class BrowserController extends EventEmitter {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private debugMode: boolean = false; // 기본값 false로 변경
+  private headless: boolean = true; // 기본값 headless
   private debugDir: string = './debug';
   private context: BrowserContext | null = null;
   private pageContentCache: { content: string; timestamp: number; url: string } | null = null;
@@ -29,9 +30,10 @@ export class BrowserController extends EventEmitter {
   // 페이지 콘텐츠 캐시 유효 시간 (ms)
   private readonly PAGE_CONTENT_CACHE_TTL = 2000;
 
-  constructor(debugMode: boolean = false) {
+  constructor(debugMode: boolean = false, headless: boolean = true) {
     super();
     this.debugMode = debugMode;
+    this.headless = headless;
     // Create debug directory if it doesn't exist
     if (this.debugMode && !fs.existsSync(this.debugDir)) {
       fs.mkdirSync(this.debugDir, { recursive: true });
@@ -64,13 +66,13 @@ export class BrowserController extends EventEmitter {
     try {
       this.browser = await chromium.launch({
         channel: 'chrome',
-        headless: false, // headless 모드는 Cloudflare가 쉽게 감지 - false로 변경
+        headless: this.headless,
         args: launchArgs,
         timeout: 60000,
       });
     } catch (_) {
       this.browser = await chromium.launch({
-        headless: false,
+        headless: this.headless,
         args: launchArgs,
         timeout: 60000,
       });
@@ -802,10 +804,28 @@ export class BrowserController extends EventEmitter {
         return clonedBody.innerText || clonedBody.textContent || '';
       }).catch(() => '');
 
-      // Also get input field info with more details (제한 30 → 15)
+      // Also get input field info with more details (제한 30 → 25, 더 많은 셀렉터, onclick도 포함)
       const inputInfo = await this.page.evaluate(() => {
-        const inputs = Array.from(document.querySelectorAll('input, textarea, button, a[role="button"]'));
-        return inputs.slice(0, 15).map((el, idx) => {
+        // 더 광범위한 셀렉터: 클릭 가능한 모든 요소
+        const selectors = [
+          'input', 'textarea', 'button',
+          'a[role="button"]', 'div[role="button"]', 'span[role="button"]',
+          '[onclick]', '[role="checkbox"]',
+          'div[class*="checkbox"]', 'div[class*="button"]', 'span[class*="checkbox"]',
+          'div[class*="clickable"]', '[tabindex]', 'a[href]',
+          // Shadow DOM 내부 요소도 시도
+          'div[class*="check"]', 'svg', 'canvas'
+        ];
+
+        const allElements = new Set<Element>();
+        selectors.forEach(sel => {
+          try {
+            document.querySelectorAll(sel).forEach(el => allElements.add(el));
+          } catch (_) {}
+        });
+
+        const inputs = Array.from(allElements);
+        return inputs.slice(0, 25).map((el, idx) => {
           const tag = el.tagName.toLowerCase();
           const type = el.getAttribute('type') || '';
           const name = el.getAttribute('name') || '';
@@ -815,13 +835,29 @@ export class BrowserController extends EventEmitter {
           const className = el.getAttribute('class') || '';
           const role = el.getAttribute('role') || '';
           const title = el.getAttribute('title') || '';
+          const onclick = el.getAttribute('onclick') ? 'has-onclick' : '';
           const text = (el as HTMLElement).innerText?.substring(0, 50) || '';
 
           // Check if visible
           const rect = el.getBoundingClientRect();
           const isVisible = rect.width > 0 && rect.height > 0;
 
-          return `[${idx}] <${tag} ${type ? `type="${type}"` : ''} ${name ? `name="${name}"` : ''} ${id ? `id="${id}"` : ''} ${ariaLabel ? `aria-label="${ariaLabel}"` : ''} ${placeholder ? `placeholder="${placeholder}"` : ''} ${role ? `role="${role}"` : ''} ${title ? `title="${title}"` : ''} ${className ? `class="${className.substring(0, 30)}"` : ''} visible="${isVisible}">${text}</${tag}>`;
+          // Build attribute string more carefully
+          const attrs = [];
+          if (type) attrs.push(`type="${type}"`);
+          if (name) attrs.push(`name="${name}"`);
+          if (id) attrs.push(`id="${id}"`);
+          if (ariaLabel) attrs.push(`aria-label="${ariaLabel}"`);
+          if (placeholder) attrs.push(`placeholder="${placeholder}"`);
+          if (role) attrs.push(`role="${role}"`);
+          if (title) attrs.push(`title="${title}"`);
+          if (onclick) attrs.push('onclick');
+          if (className) attrs.push(`class="${className.substring(0, 40)}"`);
+
+          // Get position for fallback coordinate-based clicks
+          const posInfo = `x=${Math.round(rect.left + rect.width/2)} y=${Math.round(rect.top + rect.height/2)} w=${Math.round(rect.width)} h=${Math.round(rect.height)}`;
+
+          return `[${idx}] <${tag} ${attrs.join(' ')} visible="${isVisible}" ${posInfo}>${text}</${tag}>`;
         }).filter(s => s.includes('visible="true"')).join('\n');
       }).catch(() => 'Could not extract interactive elements');
 
@@ -1106,23 +1142,23 @@ export class BrowserController extends EventEmitter {
       try {
         const url = this.page.url().split('?')[0]; // 쿼리 제거
         await this.page.goto(url, { waitUntil: 'load', timeout: 30000 }).catch(() => {});
-        
+
         // Fresh navigation 후 충분한 시간 대기 (20초, 4초 간격 체크)
         const freshStart = Date.now();
         while (Date.now() - freshStart < 20000) {
           await this.page.waitForTimeout(4000);
-          
+
           const stillGate = await this.isCloudflareGate();
           const isWaitingNow = await this.isCloudflareWaiting();
-          
+
           this.emitLog('system', { message: `Fresh nav check (${Math.round((Date.now() - freshStart) / 1000)}s): gate=${stillGate}, waiting=${isWaitingNow}` });
-          
+
           if (!stillGate && !isWaitingNow) {
             this.emitLog('system', { message: `Cloudflare cleared after fresh navigation (${Math.round((Date.now() - freshStart) / 1000)}s)!` });
             await this.streamScreenshot('cloudflare-cleared-fresh');
             return true;
           }
-          
+
           // waiting 상태면 루프 탈출하고 아래 extended wait로 진행
           if (isWaitingNow) {
             this.emitLog('system', { message: 'Detected waiting state, will proceed to extended wait...' });

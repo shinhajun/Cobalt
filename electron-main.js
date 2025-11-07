@@ -86,7 +86,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
   console.log('[Electron] Model:', model || 'gpt-5-mini');
   if (settings) {
     console.log('[Electron] Settings:', {
-      captchaVisionModel: settings.captchaVisionModel || '(default)'
+      captchaVisionModel: settings.captchaVisionModel || '(default)',
+      headless: settings.headless !== undefined ? settings.headless : true
     });
   }
 
@@ -117,7 +118,9 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       }
 
       // 새 인스턴스 생성
-      browserController = new BrowserController(true);
+      const debugMode = true;
+      const headless = settings && settings.headless !== undefined ? settings.headless : true;
+      browserController = new BrowserController(debugMode, headless);
       llmService = new LLMService(model || 'gpt-5-mini');
 
       // 이벤트 리스너 설정
