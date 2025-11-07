@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -30,6 +30,7 @@ const { BrowserController } = require('./packages/agent-core/dist/browserControl
 const { LLMService } = require('./packages/agent-core/dist/llmService');
 
 let mainWindow;
+let browserView = null;
 let browserController = null;
 let llmService = null;
 let isTaskRunning = false;
@@ -48,8 +49,28 @@ function createWindow() {
     }
   });
 
-  // HTML UI 로드
-  mainWindow.loadFile(path.join(__dirname, 'ui.html'));
+  // BrowserView 생성 (왼쪽 70% - 실제 브라우저)
+  browserView = new BrowserView({
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    }
+  });
+
+  mainWindow.addBrowserView(browserView);
+
+  // Initial layout (70% for browser, 30% for chat)
+  updateBrowserViewBounds();
+
+  // Load Google as default page
+  browserView.webContents.loadURL('https://www.google.com');
+
+  // Chat UI 로드 (오른쪽 30%)
+  mainWindow.loadFile(path.join(__dirname, 'browser-chat-ui.html'));
+
+  // Window resize 시 BrowserView bounds 업데이트
+  mainWindow.on('resize', updateBrowserViewBounds);
 
   // 개발 모드에서 DevTools 열기
   if (process.env.NODE_ENV === 'development') {
@@ -57,7 +78,27 @@ function createWindow() {
   }
 
   mainWindow.on('closed', () => {
+    if (browserView) {
+      mainWindow.removeBrowserView(browserView);
+      browserView = null;
+    }
     mainWindow = null;
+  });
+}
+
+function updateBrowserViewBounds() {
+  if (!mainWindow || !browserView) return;
+
+  const { width, height } = mainWindow.getContentBounds();
+  const chatPanelWidth = Math.floor(width * 0.3); // 30% for chat
+  const browserWidth = width - chatPanelWidth; // 70% for browser
+
+  // BrowserView는 왼쪽 70%에 배치
+  browserView.setBounds({
+    x: 0,
+    y: 0,
+    width: browserWidth,
+    height: height
   });
 }
 
@@ -87,7 +128,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
   if (settings) {
     console.log('[Electron] Settings:', {
       captchaVisionModel: settings.captchaVisionModel || '(default)',
-      headless: settings.headless !== undefined ? settings.headless : true
+      syncResultToBrowserView: settings.syncResultToBrowserView !== undefined ? settings.syncResultToBrowserView : true,
+      syncCookies: settings.syncCookies || false
     });
   }
 
@@ -102,6 +144,23 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
   (async () => {
     let prevEnv;
     try {
+      // === HYBRID MODE: Step 1 - Save current BrowserView state ===
+      const currentURL = browserView ? browserView.webContents.getURL() : '';
+      const currentTitle = browserView ? browserView.webContents.getTitle() : '';
+      console.log('[Hybrid] Current BrowserView URL:', currentURL);
+      console.log('[Hybrid] Current BrowserView Title:', currentTitle);
+
+      // Get cookies from BrowserView (for syncing to Playwright)
+      let browserViewCookies = [];
+      if (browserView && settings && settings.syncCookies) {
+        try {
+          browserViewCookies = await browserView.webContents.session.cookies.get({});
+          console.log('[Hybrid] Retrieved', browserViewCookies.length, 'cookies from BrowserView');
+        } catch (error) {
+          console.error('[Hybrid] Failed to get BrowserView cookies:', error);
+        }
+      }
+
       // 이전 인스턴스 정리
       if (browserController) {
         await browserController.close();
@@ -117,27 +176,128 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
         console.log('[Electron] Setting CAPTCHA_VISION_MODEL to:', settings.captchaVisionModel);
       }
 
-      // 새 인스턴스 생성
+      // === HYBRID MODE: Step 2 - Launch Playwright in headless, stream screenshots to BrowserView ===
+      console.log('[Hybrid] Launching Playwright in headless mode, will stream screenshots to BrowserView');
+
       const debugMode = true;
-      const headless = settings && settings.headless !== undefined ? settings.headless : true;
+      const headless = true; // Headless mode
       browserController = new BrowserController(debugMode, headless);
       llmService = new LLMService(model || 'gpt-5-mini');
 
+      console.log('[Hybrid] Will stream AI screenshots to BrowserView');
+
       // 이벤트 리스너 설정
       browserController.on('screenshot', (data) => {
+        // Send to Chat UI
         if (mainWindow) {
           mainWindow.webContents.send('agent-screenshot', data);
+        }
+
+        // === STREAM SCREENSHOT TO BROWSERVIEW ===
+        // Display AI's current screen in BrowserView
+        if (browserView && data.screenshot) {
+          try {
+            browserView.webContents.executeJavaScript(`
+              (function() {
+                // Create or update screenshot overlay
+                let overlay = document.getElementById('ai-screenshot-overlay');
+                if (!overlay) {
+                  overlay = document.createElement('div');
+                  overlay.id = 'ai-screenshot-overlay';
+                  overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 999998; display: flex; flex-direction: column;';
+                  document.body.appendChild(overlay);
+
+                  // Add header
+                  const header = document.createElement('div');
+                  header.style.cssText = 'background: linear-gradient(135deg, #4361ee 0%, #3730a3 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
+                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI 작업 중...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">작업 진행 중</span></div>';
+                  overlay.appendChild(header);
+
+                  // Add spinner animation
+                  const style = document.createElement('style');
+                  style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                  document.head.appendChild(style);
+
+                  // Add image container
+                  const imgContainer = document.createElement('div');
+                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; background: #1a1a1a;';
+                  imgContainer.id = 'ai-screenshot-container';
+                  overlay.appendChild(imgContainer);
+                }
+
+                // Update screenshot image
+                const container = document.getElementById('ai-screenshot-container');
+                if (container) {
+                  container.innerHTML = '<img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />';
+                }
+              })();
+            `).catch(() => {});
+          } catch (error) {
+            // Ignore errors
+          }
         }
       });
 
       browserController.on('log', (log) => {
+        // Send to Chat UI
         if (mainWindow) {
           mainWindow.webContents.send('agent-log', log);
+        }
+
+        // Update status text in BrowserView screenshot overlay
+        if (browserView && log.data && log.data.message) {
+          try {
+            const message = typeof log.data === 'string' ? log.data : log.data.message || '';
+            const safeMessage = message.replace(/'/g, "\\'").substring(0, 100);
+
+            browserView.webContents.executeJavaScript(`
+              (function() {
+                const statusText = document.getElementById('ai-status-text');
+                if (statusText) statusText.textContent = '${safeMessage}';
+              })();
+            `).catch(() => {});
+          } catch (error) {
+            // Ignore errors
+          }
         }
       });
 
       // 브라우저 시작
       await browserController.launch();
+
+      // === HYBRID MODE: Step 3 - Sync cookies to Playwright ===
+      if (settings && settings.syncCookies && browserViewCookies.length > 0) {
+        console.log('[Hybrid] Syncing cookies to Playwright...');
+        try {
+          const playwrightCookies = browserViewCookies.map(cookie => ({
+            name: cookie.name,
+            value: cookie.value,
+            domain: cookie.domain,
+            path: cookie.path,
+            expires: cookie.expirationDate || -1,
+            httpOnly: cookie.httpOnly,
+            secure: cookie.secure,
+            sameSite: cookie.sameSite === 'unspecified' ? 'Lax' :
+                      cookie.sameSite === 'no_restriction' ? 'None' : cookie.sameSite
+          }));
+          await browserController.setCookies(playwrightCookies);
+          console.log('[Hybrid] Synced', playwrightCookies.length, 'cookies to Playwright');
+        } catch (error) {
+          console.error('[Hybrid] Failed to sync cookies to Playwright:', error);
+        }
+      }
+
+      // === HYBRID MODE: Step 4 - Handle "이 페이지에서" commands ===
+      const isCurrentPageCommand =
+        taskPlan.includes('이 페이지') ||
+        taskPlan.includes('현재 페이지') ||
+        taskPlan.includes('this page') ||
+        taskPlan.includes('current page');
+
+      if (isCurrentPageCommand && currentURL && currentURL !== 'about:blank' && !currentURL.startsWith('chrome://')) {
+        console.log('[Hybrid] Current page command detected, navigating to:', currentURL);
+        await browserController.goTo(currentURL);
+      }
 
       if (mainWindow) {
         mainWindow.webContents.send('agent-started', { task: taskPlan });
@@ -152,6 +312,70 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       console.log('[Electron] Task completed:', result);
 
+      // === HYBRID MODE: Step 5 - Restore BrowserView and sync result ===
+      const syncResult = settings && settings.syncResultToBrowserView !== false; // default true
+      if (syncResult && browserView) {
+        try {
+          const finalURL = browserController.getCurrentUrl();
+          console.log('[Hybrid] Final URL from Playwright:', finalURL);
+
+          if (finalURL && finalURL !== 'about:blank' && !finalURL.startsWith('chrome://')) {
+            console.log('[Hybrid] Syncing result to BrowserView...');
+            await browserView.webContents.loadURL(finalURL);
+            console.log('[Hybrid] BrowserView navigated to:', finalURL);
+
+            // === HYBRID MODE: Step 6 - Sync cookies back to BrowserView ===
+            if (settings && settings.syncCookies) {
+              console.log('[Hybrid] Syncing cookies back to BrowserView...');
+              try {
+                const playwrightCookies = await browserController.getCookies();
+
+                for (const cookie of playwrightCookies) {
+                  try {
+                    await browserView.webContents.session.cookies.set({
+                      url: `https://${cookie.domain}${cookie.path}`,
+                      name: cookie.name,
+                      value: cookie.value,
+                      domain: cookie.domain,
+                      path: cookie.path,
+                      secure: cookie.secure,
+                      httpOnly: cookie.httpOnly,
+                      expirationDate: cookie.expires > 0 ? cookie.expires : undefined,
+                      sameSite: cookie.sameSite || 'lax'
+                    });
+                  } catch (cookieError) {
+                    // Ignore individual cookie errors
+                  }
+                }
+
+                console.log('[Hybrid] Synced', playwrightCookies.length, 'cookies back to BrowserView');
+              } catch (error) {
+                console.error('[Hybrid] Failed to sync cookies to BrowserView:', error);
+              }
+            }
+          } else {
+            console.log('[Hybrid] No valid URL to sync (URL:', finalURL, ')');
+          }
+        } catch (error) {
+          console.error('[Hybrid] Failed to sync result to BrowserView:', error);
+        }
+      }
+
+      // === HYBRID MODE: Remove screenshot overlay ===
+      if (browserView) {
+        try {
+          await browserView.webContents.executeJavaScript(`
+            (function() {
+              const overlay = document.getElementById('ai-screenshot-overlay');
+              if (overlay) overlay.remove();
+            })();
+          `);
+          console.log('[Hybrid] Screenshot overlay removed');
+        } catch (error) {
+          // Ignore errors if page changed
+        }
+      }
+
       if (mainWindow && isTaskRunning) {
         mainWindow.webContents.send('agent-stopped', {
           reason: result.success ? 'Task Completed' : 'Task Failed',
@@ -160,8 +384,22 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
         });
       }
 
+      console.log('[Hybrid] Task execution completed, switched back to BrowserView mode');
+
     } catch (error) {
       console.error('[Electron] Task error:', error);
+
+      // Remove screenshot overlay on error
+      if (browserView) {
+        try {
+          await browserView.webContents.executeJavaScript(`
+            (function() {
+              const overlay = document.getElementById('ai-screenshot-overlay');
+              if (overlay) overlay.remove();
+            })();
+          `);
+        } catch (_) {}
+      }
 
       if (mainWindow && isTaskRunning) {
         mainWindow.webContents.send('agent-stopped', {
@@ -198,6 +436,18 @@ ipcMain.handle('stop-task', async (event) => {
       // LLM 루프에 중단 신호 전달
       stopRequested = true;
 
+      // Remove screenshot overlay when stopped
+      if (browserView) {
+        try {
+          await browserView.webContents.executeJavaScript(`
+            (function() {
+              const overlay = document.getElementById('ai-screenshot-overlay');
+              if (overlay) overlay.remove();
+            })();
+          `);
+        } catch (_) {}
+      }
+
       // 브라우저가 열려 있으면 즉시 닫아 리소스 해제 (try/catch 보호)
       if (browserController) {
         try {
@@ -225,6 +475,44 @@ ipcMain.handle('stop-task', async (event) => {
     console.error('[Electron] Error stopping task:', error);
     isTaskRunning = false;
     stopRequested = false;
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Quick Actions (navigate, screenshot, refresh)
+ipcMain.handle('quick-action', async (event, { action, data }) => {
+  console.log('[Electron] Quick action:', action);
+
+  try {
+    if (!browserView) {
+      return { success: false, error: 'BrowserView not initialized' };
+    }
+
+    switch (action) {
+      case 'navigate':
+        if (data && data.url) {
+          await browserView.webContents.loadURL(data.url);
+          return { success: true, message: `Navigated to ${data.url}` };
+        }
+        return { success: false, error: 'URL is required' };
+
+      case 'screenshot':
+        const image = await browserView.webContents.capturePage();
+        const dataURL = image.toDataURL();
+        if (mainWindow) {
+          mainWindow.webContents.send('agent-screenshot', { screenshot: dataURL });
+        }
+        return { success: true, message: 'Screenshot captured' };
+
+      case 'refresh':
+        browserView.webContents.reload();
+        return { success: true, message: 'Page refreshed' };
+
+      default:
+        return { success: false, error: 'Unknown action' };
+    }
+  } catch (error) {
+    console.error('[Electron] Quick action error:', error);
     return { success: false, error: error.message };
   }
 });

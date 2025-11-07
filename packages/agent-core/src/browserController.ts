@@ -3,6 +3,12 @@ import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 
+// Control mode for hybrid browser support
+enum ControlMode {
+  PLAYWRIGHT = 'playwright',    // AI task execution (existing logic)
+  BROWSERVIEW = 'browserview'    // User manual browsing (integrated view)
+}
+
 export class BrowserController extends EventEmitter {
   private browser: Browser | null = null;
   private page: Page | null = null;
@@ -11,6 +17,14 @@ export class BrowserController extends EventEmitter {
   private debugDir: string = './debug';
   private context: BrowserContext | null = null;
   private pageContentCache: { content: string; timestamp: number; url: string } | null = null;
+
+  // Multi-tab support
+  private tabs: Map<string, Page> = new Map();
+  private activeTabId: string = 'main';
+
+  // Hybrid mode support
+  private controlMode: ControlMode = ControlMode.PLAYWRIGHT;
+  private browserViewWebContents: any = null; // Electron webContents when in BrowserView mode
 
   // 타임아웃 상수 정의 (빠른 응답을 위해 단축)
   private readonly TIMEOUTS = {
@@ -149,6 +163,11 @@ export class BrowserController extends EventEmitter {
     });
 
     this.page = await context.newPage();
+
+    // Register main page as a tab
+    this.tabs.set('main', this.page);
+    this.activeTabId = 'main';
+
     this.emitLog('system', { message: 'Browser launched.' });
 
     // Take initial screenshot after launch
@@ -1659,6 +1678,10 @@ export class BrowserController extends EventEmitter {
         try { await this.context.storageState({ path: storageStatePath }); } catch (_) {}
       }
     } catch (_) {}
+
+    // Close all tabs
+    this.tabs.clear();
+
     if (this.browser) {
       await this.browser.close();
       this.browser = null;
@@ -1832,5 +1855,217 @@ export class BrowserController extends EventEmitter {
       // fs.writeFileSync(path.join(this.debugDir, `page-html-${Date.now()}.html`), html);
     }
     return null;
+  }
+
+  /**
+   * Multi-Tab Management Methods
+   */
+
+  /**
+   * Create a new tab and return its ID
+   */
+  async createNewTab(url?: string): Promise<string> {
+    if (!this.context) {
+      throw new Error('Browser context is not initialized. Call launch() first.');
+    }
+
+    const newPage = await this.context.newPage();
+    const tabId = `tab-${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
+    this.tabs.set(tabId, newPage);
+    this.emitLog('system', `[MultiTab] Created new tab: ${tabId}`);
+
+    if (url) {
+      await newPage.goto(url, {
+        waitUntil: 'domcontentloaded',
+        timeout: this.TIMEOUTS.NAVIGATION_DOMCONTENTLOADED
+      });
+      this.emitLog('system', `[MultiTab] Navigated tab ${tabId} to: ${url}`);
+    }
+
+    return tabId;
+  }
+
+  /**
+   * Switch to a specific tab by ID
+   */
+  async switchTab(tabId: string): Promise<boolean> {
+    const targetPage = this.tabs.get(tabId);
+
+    if (!targetPage) {
+      this.emitLog('error', `[MultiTab] Tab not found: ${tabId}`);
+      return false;
+    }
+
+    // Switch active tab
+    this.activeTabId = tabId;
+    this.page = targetPage;
+
+    // Bring tab to front
+    await targetPage.bringToFront();
+
+    this.emitLog('system', `[MultiTab] Switched to tab: ${tabId}`);
+    await this.streamScreenshot(`switched-to-${tabId}`);
+
+    return true;
+  }
+
+  /**
+   * Close a specific tab by ID
+   */
+  async closeTab(tabId: string): Promise<boolean> {
+    const targetPage = this.tabs.get(tabId);
+
+    if (!targetPage) {
+      this.emitLog('error', `[MultiTab] Tab not found: ${tabId}`);
+      return false;
+    }
+
+    // Don't allow closing the main tab if it's the only one
+    if (tabId === 'main' && this.tabs.size === 1) {
+      this.emitLog('error', `[MultiTab] Cannot close the main tab when it's the only tab`);
+      return false;
+    }
+
+    await targetPage.close();
+    this.tabs.delete(tabId);
+
+    this.emitLog('system', `[MultiTab] Closed tab: ${tabId}`);
+
+    // If we closed the active tab, switch to another one
+    if (this.activeTabId === tabId) {
+      const remainingTabs = Array.from(this.tabs.keys());
+      if (remainingTabs.length > 0) {
+        await this.switchTab(remainingTabs[0]);
+      } else {
+        this.page = null;
+        this.activeTabId = 'main';
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * List all open tabs
+   */
+  async listTabs(): Promise<Array<{ id: string; url: string; title: string; active: boolean }>> {
+    const tabList = [];
+
+    for (const [tabId, page] of this.tabs.entries()) {
+      try {
+        const url = page.url();
+        const title = await page.title();
+
+        tabList.push({
+          id: tabId,
+          url,
+          title,
+          active: tabId === this.activeTabId
+        });
+      } catch (error) {
+        // Tab might be closed or in invalid state
+        this.emitLog('warning', `[MultiTab] Could not get info for tab ${tabId}: ${(error as Error).message}`);
+      }
+    }
+
+    return tabList;
+  }
+
+  /**
+   * Get the currently active tab ID
+   */
+  getActiveTabId(): string {
+    return this.activeTabId;
+  }
+
+  /**
+   * Switch to tab by index (0-based)
+   */
+  async switchTabByIndex(index: number): Promise<boolean> {
+    const tabIds = Array.from(this.tabs.keys());
+
+    if (index < 0 || index >= tabIds.length) {
+      this.emitLog('error', `[MultiTab] Invalid tab index: ${index} (total tabs: ${tabIds.length})`);
+      return false;
+    }
+
+    return await this.switchTab(tabIds[index]);
+  }
+
+  /**
+   * Close all tabs except the main one
+   */
+  async closeAllTabsExceptMain(): Promise<void> {
+    const tabIds = Array.from(this.tabs.keys());
+
+    for (const tabId of tabIds) {
+      if (tabId !== 'main') {
+        await this.closeTab(tabId);
+      }
+    }
+
+    this.emitLog('system', `[MultiTab] Closed all tabs except main`);
+  }
+
+  /**
+   * Hybrid Mode: Attach BrowserView webContents (Electron)
+   * This allows BrowserController to read state from BrowserView
+   */
+  attachBrowserView(webContents: any): void {
+    this.browserViewWebContents = webContents;
+    this.controlMode = ControlMode.BROWSERVIEW;
+    this.emitLog('system', '[Hybrid] Attached to BrowserView mode');
+  }
+
+  /**
+   * Hybrid Mode: Detach BrowserView and switch back to Playwright mode
+   */
+  detachBrowserView(): void {
+    this.browserViewWebContents = null;
+    this.controlMode = ControlMode.PLAYWRIGHT;
+    this.emitLog('system', '[Hybrid] Switched to Playwright mode');
+  }
+
+  /**
+   * Get current control mode
+   */
+  getControlMode(): string {
+    return this.controlMode;
+  }
+
+  /**
+   * Get cookies from Playwright context (for syncing to BrowserView)
+   */
+  async getCookies(): Promise<any[]> {
+    if (!this.context) {
+      return [];
+    }
+
+    try {
+      const cookies = await this.context.cookies();
+      this.emitLog('system', `[Hybrid] Retrieved ${cookies.length} cookies from Playwright`);
+      return cookies;
+    } catch (error) {
+      this.emitLog('error', `[Hybrid] Failed to get cookies: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Set cookies to Playwright context (for syncing from BrowserView)
+   */
+  async setCookies(cookies: any[]): Promise<void> {
+    if (!this.context) {
+      this.emitLog('error', '[Hybrid] Cannot set cookies: context not initialized');
+      return;
+    }
+
+    try {
+      await this.context.addCookies(cookies);
+      this.emitLog('system', `[Hybrid] Set ${cookies.length} cookies to Playwright`);
+    } catch (error) {
+      this.emitLog('error', `[Hybrid] Failed to set cookies: ${(error as Error).message}`);
+    }
   }
 }

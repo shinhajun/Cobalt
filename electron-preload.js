@@ -8,6 +8,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 작업 중단
   stopTask: () => ipcRenderer.invoke('stop-task'),
 
+  // Quick actions (navigate, screenshot, refresh)
+  quickAction: (action, data) => ipcRenderer.invoke('quick-action', { action, data }),
+
   // 이벤트 리스너
   onAgentStarted: (callback) => {
     ipcRenderer.on('agent-started', (event, data) => callback(data));

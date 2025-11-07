@@ -92,6 +92,13 @@ The agent will:
 - `getPageContent` - Get page content
 - `pressKey` - Press keyboard key
 
+### Multi-Tab Actions
+- `createNewTab` - Open a new browser tab
+- `switchTab` - Switch to a specific tab by ID
+- `closeTab` - Close a specific tab
+- `listTabs` - List all open tabs with IDs and URLs
+- `getActiveTabId` - Get the currently active tab ID
+
 ### CAPTCHA/Challenge Tools
 - `solveCaptcha` - Auto-solve CAPTCHAs
 - `visionInteract` - Vision-guided interaction
@@ -193,6 +200,23 @@ Agent will:
 3. Use getCurrentDateTime for today
 4. Use calculateDateDiff for remaining days
 5. Format comprehensive report
+```
+
+### Multi-Tab Research
+```
+Task: "3개의 뉴스 사이트를 동시에 열어서 각 사이트의 헤드라인 뉴스를 수집하고,
+       모든 정보를 하나의 표로 정리해줘"
+
+Agent will:
+1. Create new tab for CNN, navigate to cnn.com
+2. Create new tab for BBC, navigate to bbc.com
+3. Create new tab for Reuters, navigate to reuters.com
+4. List all tabs to see their IDs
+5. Switch to first tab, extract headline, store in memory
+6. Switch to second tab, extract headline, store in memory
+7. Switch to third tab, extract headline, store in memory
+8. Use formatAsTable to combine all headlines
+9. Close extra tabs, return to main tab
 ```
 
 ## Model Selection

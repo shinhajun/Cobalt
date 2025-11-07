@@ -939,6 +939,13 @@ No explanation, only JSON.`;
         6.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"}
         7.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"}
 
+        Multi-Tab Actions:
+        8.  {"type": "BROWSER_ACTION", "command": "createNewTab", "url": "<OPTIONAL_URL>"} - Open a new browser tab
+        9.  {"type": "BROWSER_ACTION", "command": "switchTab", "tabId": "<TAB_ID>"} - Switch to a specific tab
+        10. {"type": "BROWSER_ACTION", "command": "closeTab", "tabId": "<TAB_ID>"} - Close a specific tab
+        11. {"type": "BROWSER_ACTION", "command": "listTabs"} - List all open tabs with their IDs and URLs
+        12. {"type": "BROWSER_ACTION", "command": "getActiveTabId"} - Get the currently active tab ID
+
         CAPTCHA/Challenge Tools:
         7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
         8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
@@ -1111,6 +1118,69 @@ No explanation, only JSON.`;
                    if(!pressSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: Selector or key missing for pressKey."; }
                 break;
+
+              // Multi-tab actions
+              case "createNewTab":
+                try {
+                  const newTabId = await browserController.createNewTab(action.url);
+                  actionObservation = `Created new tab: ${newTabId}`;
+                  if (action.url) {
+                    actionObservation += ` and navigated to ${action.url}`;
+                  }
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to create new tab: ${e.message}`;
+                }
+                break;
+
+              case "switchTab":
+                if (action.tabId) {
+                  const switchSuccess = await browserController.switchTab(action.tabId);
+                  if (switchSuccess) {
+                    const currentUrl = browserController.getCurrentUrl();
+                    actionObservation = `Switched to tab ${action.tabId}. Current URL: ${currentUrl}`;
+                  } else {
+                    actionError = true;
+                    actionObservation = `Failed to switch to tab ${action.tabId} (tab not found)`;
+                  }
+                } else { actionError = true; actionObservation = "Error: tabId missing for switchTab."; }
+                break;
+
+              case "closeTab":
+                if (action.tabId) {
+                  const closeSuccess = await browserController.closeTab(action.tabId);
+                  if (closeSuccess) {
+                    actionObservation = `Closed tab ${action.tabId}`;
+                  } else {
+                    actionError = true;
+                    actionObservation = `Failed to close tab ${action.tabId}`;
+                  }
+                } else { actionError = true; actionObservation = "Error: tabId missing for closeTab."; }
+                break;
+
+              case "listTabs":
+                try {
+                  const tabs = await browserController.listTabs();
+                  actionObservation = `Open tabs (${tabs.length}):\n`;
+                  for (const tab of tabs) {
+                    actionObservation += `  - ${tab.active ? '★' : ' '} ${tab.id}: ${tab.title} (${tab.url})\n`;
+                  }
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to list tabs: ${e.message}`;
+                }
+                break;
+
+              case "getActiveTabId":
+                try {
+                  const activeTabId = browserController.getActiveTabId();
+                  actionObservation = `Currently active tab: ${activeTabId}`;
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to get active tab ID: ${e.message}`;
+                }
+                break;
+
               default:
                 actionError = true;
                 actionObservation = `Error: Unknown browser command: ${action.command}`;
