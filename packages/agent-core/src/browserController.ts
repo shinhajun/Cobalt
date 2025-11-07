@@ -249,124 +249,7 @@ export class BrowserController extends EventEmitter {
   }
 
   // --- CAPTCHA detection helpers ---
-  async detectGoogleSorryCaptcha(options?: { includeImage?: boolean }): Promise<{ detected: boolean; imageBase64?: string; inputSelector?: string; submitSelectorCandidates?: string[] }> {
-    if (!this.page) return { detected: false };
-    try {
-      const url = this.page.url();
-      const includeImage = !!(options && options.includeImage);
-      let detected = /\/sorry\//.test(url);
-      if (!detected) {
-        // Check visible text hints
-        const hint = await this.page.evaluate(() => {
-          const text = document.body?.innerText || '';
-          return /unusual\s+traffic/i.test(text) || /비정상적인\s*트래픽/.test(text);
-        });
-        detected = !!hint;
-      }
-      if (!detected) return { detected: false };
-
-      let imageBase64: string | undefined;
-      if (includeImage) {
-        // 1) 시도: 폼 내 캡차 이미지 우선
-        const imgSelectors = [
-          'form[action*="sorry"] img',
-          'img[src*="captcha"]',
-          'img[alt*="captcha" i]',
-          'img[src*="sorry"]',
-          'img'
-        ];
-        for (const sel of imgSelectors) {
-          try {
-            const el = await this.page.$(sel);
-            if (el) {
-              const buf = await el.screenshot();
-              imageBase64 = Buffer.from(buf).toString('base64');
-              this.emitLog('system', { message: `Google Sorry captcha image captured via selector: ${sel}` });
-              break;
-            }
-          } catch (_) {}
-        }
-        // 2) 폼 자체 스크린샷으로 대체
-        if (!imageBase64) {
-          try {
-            const form = await this.page.$('form[action*="sorry"], form#captcha-form, form');
-            if (form) {
-              const buf = await form.screenshot();
-              imageBase64 = Buffer.from(buf).toString('base64');
-              this.emitLog('system', { message: 'Google Sorry captcha form captured as fallback.' });
-            }
-          } catch (_) {}
-        }
-        // 3) 최후 수단: 페이지 전체 스크린샷
-        if (!imageBase64) {
-          try {
-            const buf = await this.page.screenshot({ fullPage: true });
-            imageBase64 = Buffer.from(buf).toString('base64');
-            this.emitLog('system', { message: 'Full page captured as captcha fallback.' });
-          } catch (_) {}
-        }
-      }
-
-      // Input and submit candidates
-      const inputSelectorCandidates = [
-        'form[action*="sorry"] input[name="captcha"]',
-        'form[action*="sorry"] input#captcha',
-        'form[action*="sorry"] input[type="text"]',
-        'input[name="captcha"]',
-        'input#captcha',
-        'input[type="text"]',
-      ];
-      let inputSelector: string | undefined;
-      for (const sel of inputSelectorCandidates) {
-        const el = await this.page.$(sel);
-        if (el) { inputSelector = sel; break; }
-      }
-      const submitSelectorCandidates = [
-        'form[action*="sorry"] input[type="submit"]',
-        'form[action*="sorry"] button[type="submit"]',
-        'form[action*="sorry"] button:has-text("Submit")',
-        'form[action*="sorry"] button:has-text("확인")',
-        'form[action*="sorry"] button:has-text("Continue")',
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'button:has-text("Submit")',
-        'button:has-text("확인")',
-        'button:has-text("Continue")',
-        'input[name="submit"]',
-      ];
-
-      return { detected: true, imageBase64, inputSelector, submitSelectorCandidates };
-    } catch (e) {
-      return { detected: false };
-    }
-  }
-
-  async detectRecaptchaV2(): Promise<{ detected: boolean; siteKey?: string }> {
-    if (!this.page) return { detected: false };
-    try {
-      // Try div.g-recaptcha
-      const info = await this.page.evaluate(() => {
-        const recaptchaDiv = document.querySelector('div.g-recaptcha') as HTMLElement | null;
-        const siteKeyAttr = recaptchaDiv?.getAttribute('data-sitekey') || '';
-        // Try iframe fallback (k=sitekey in src)
-        const iframe = Array.from(document.querySelectorAll('iframe'))
-          .find((f: Element) => (f as HTMLIFrameElement).src.includes('google.com/recaptcha')) as HTMLIFrameElement | undefined;
-        const iframeSrc = iframe?.src || '';
-        return { siteKeyAttr, iframeSrc };
-      });
-      let siteKey = info.siteKeyAttr;
-      if (!siteKey && info.iframeSrc) {
-        const m = /[?&]k=([^&]+)/.exec(info.iframeSrc);
-        if (m) siteKey = decodeURIComponent(m[1]);
-      }
-      if (siteKey) {
-        return { detected: true, siteKey };
-      }
-      return { detected: false };
-    } catch (_) {
-      return { detected: false };
-    }
-  }
+  // Removed URL-based and special-case detectors; vision/DOM flows handle challenges now.
 
   async injectRecaptchaV2Token(token: string): Promise<boolean> {
     if (!this.page) return false;
@@ -448,17 +331,28 @@ export class BrowserController extends EventEmitter {
   }
 
   // --- reCAPTCHA (vision-based interaction) helpers ---
-  private getRecaptchaFrames() {
+  private async getRecaptchaFramesDOM(): Promise<{ anchorFrame: any, challengeFrame: any }> {
     if (!this.page) return { anchorFrame: null as any, challengeFrame: null as any };
     const frames = this.page.frames();
-    const anchorFrame = frames.find(f => /recaptcha/.test(f.url()) && /anchor/.test(f.url())) || null;
-    const challengeFrame = frames.find(f => /recaptcha/.test(f.url()) && /bframe/.test(f.url())) || null;
+    let anchorFrame: any = null;
+    let challengeFrame: any = null;
+    for (const f of frames) {
+      try {
+        const hasAnchor = await f.evaluate(() => !!document.querySelector('#recaptcha-anchor'));
+        if (hasAnchor) anchorFrame = anchorFrame || f;
+      } catch (_) {}
+      try {
+        const hasChallenge = await f.evaluate(() => !!(document.querySelector('#recaptcha-verify-button') || document.querySelector('.rc-imageselect-challenge')));
+        if (hasChallenge) challengeFrame = challengeFrame || f;
+      } catch (_) {}
+      if (anchorFrame && challengeFrame) break;
+    }
     return { anchorFrame, challengeFrame };
   }
 
   async clickRecaptchaAnchor(): Promise<boolean> {
     if (!this.page) return false;
-    const { anchorFrame } = this.getRecaptchaFrames();
+    const { anchorFrame } = await this.getRecaptchaFramesDOM();
     if (!anchorFrame) {
       this.emitLog('system', { message: 'reCAPTCHA anchor frame not found.' });
       return false;
@@ -482,7 +376,7 @@ export class BrowserController extends EventEmitter {
 
   async isRecaptchaSolved(): Promise<boolean> {
     if (!this.page) return false;
-    const { anchorFrame } = this.getRecaptchaFrames();
+    const { anchorFrame } = await this.getRecaptchaFramesDOM();
     if (!anchorFrame) return false;
     try {
       const solved = await anchorFrame.evaluate(() => {
@@ -501,12 +395,12 @@ export class BrowserController extends EventEmitter {
   async getRecaptchaChallenge(): Promise<{ instruction: string; gridImageBase64: string; gridSize?: number } | null> {
     if (!this.page) return null;
     try {
-      // Wait for challenge frame to appear briefly
-      let challengeFrame = this.getRecaptchaFrames().challengeFrame;
+      // Wait for challenge frame to appear briefly (DOM-based)
+      let challengeFrame = (await this.getRecaptchaFramesDOM()).challengeFrame;
       const start = Date.now();
       while (!challengeFrame && Date.now() - start < 8000) {
         await this.page.waitForTimeout(300);
-        challengeFrame = this.getRecaptchaFrames().challengeFrame;
+        challengeFrame = (await this.getRecaptchaFramesDOM()).challengeFrame;
       }
       if (!challengeFrame) return null;
 
@@ -529,15 +423,25 @@ export class BrowserController extends EventEmitter {
       // Also stream a full-page screenshot so Live View shows the challenge immediately
       await this.streamScreenshot('recaptcha-challenge-detected');
 
-      // Try to infer grid size (3x3 or 4x4) for better indexing guidance
+      // Try to infer grid size (3x3 or 4x4) using unique cell centers to avoid duplicate wrappers/overlays
       let gridSize: number | undefined = undefined;
       try {
-        const tileCount = await challengeFrame.evaluate(() => {
-          const nodes = document.querySelectorAll('.rc-image-tile-wrapper, .rc-imageselect-tile, table tr td div.rc-image-tile-wrapper');
-          return nodes ? nodes.length : 0;
-        });
-        if (typeof tileCount === 'number' && tileCount > 0) {
-          gridSize = tileCount >= 16 ? 4 : 3;
+        const tileHandles = await challengeFrame.$$('.rc-imageselect-table-33 td, .rc-imageselect-table-44 td, .rc-image-tile-wrapper, .rc-imageselect-tile');
+        const boxes = await Promise.all(tileHandles.map((h: any) => h.boundingBox()));
+        type Box = { x: number; y: number; width?: number; height?: number };
+        const byCenterKey = new Map<string, any>();
+        for (let i = 0; i < tileHandles.length; i++) {
+          const box = boxes[i] as Box | null;
+          if (!box) continue;
+          const cx = Math.round((box.x + (box.width || 0) / 2));
+          const cy = Math.round((box.y + (box.height || 0) / 2));
+          const key = `${cx}:${cy}`;
+          if (!byCenterKey.has(key)) byCenterKey.set(key, tileHandles[i]);
+        }
+        const uniqueCount = byCenterKey.size;
+        if (uniqueCount > 0) {
+          gridSize = uniqueCount >= 15 ? 4 : 3;
+          this.emitLog('system', { message: `reCAPTCHA grid unique tiles=${uniqueCount} => gridSize=${gridSize}` });
         }
       } catch (_) {}
 
@@ -550,7 +454,7 @@ export class BrowserController extends EventEmitter {
   // Capture lightweight signatures of current tiles to detect refresh/replacement
   async getRecaptchaTileSignatures(): Promise<string[] | null> {
     if (!this.page) return null;
-    const { challengeFrame } = this.getRecaptchaFrames();
+    const { challengeFrame } = await this.getRecaptchaFramesDOM();
     if (!challengeFrame) return null;
     try {
       const sigs = await challengeFrame.evaluate(() => {
@@ -595,7 +499,7 @@ export class BrowserController extends EventEmitter {
   // Wait until a minimum fraction of tiles report a loaded image (img naturalWidth>0 or background-image present)
   async waitForRecaptchaTilesLoaded(minLoadedFraction: number = 0.9, timeout: number = 4000): Promise<boolean> {
     if (!this.page) return false;
-    const { challengeFrame } = this.getRecaptchaFrames();
+    const { challengeFrame } = await this.getRecaptchaFramesDOM();
     if (!challengeFrame) return false;
     const start = Date.now();
     while (Date.now() - start < timeout) {
@@ -619,7 +523,7 @@ export class BrowserController extends EventEmitter {
 
   async selectRecaptchaTiles(indices: number[]): Promise<boolean> {
     if (!this.page) return false;
-    const { challengeFrame } = this.getRecaptchaFrames();
+    const { challengeFrame } = await this.getRecaptchaFramesDOM();
     if (!challengeFrame) return false;
     try {
       // Collect unique clickable tiles (avoid duplicates from multiple matching selectors)
@@ -688,7 +592,7 @@ export class BrowserController extends EventEmitter {
 
   async submitRecaptchaChallenge(): Promise<boolean> {
     if (!this.page) return false;
-    const { challengeFrame } = this.getRecaptchaFrames();
+    const { challengeFrame } = await this.getRecaptchaFramesDOM();
     if (!challengeFrame) return false;
     try {
       const btn = await challengeFrame.$('#recaptcha-verify-button');
@@ -709,8 +613,6 @@ export class BrowserController extends EventEmitter {
     if (!this.page) return false;
     // Try common submit/continue buttons on Google Sorry pages
     return await this.tryClickSelectors([
-      'form[action*="sorry"] button[type="submit"]',
-      'form[action*="sorry"] input[type="submit"]',
       'button:has-text("확인")',
       'button:has-text("계속")',
       'button:has-text("Continue")',
@@ -759,12 +661,7 @@ export class BrowserController extends EventEmitter {
       }).catch(() => 'Could not extract interactive elements');
 
       // Lightweight CAPTCHA status
-      let captchaStatus = 'google_sorry=false, recaptcha_v2=false';
-      try {
-        const sorry = await this.detectGoogleSorryCaptcha({ includeImage: false });
-        const rec = await this.detectRecaptchaV2();
-        captchaStatus = `google_sorry=${sorry.detected}, recaptcha_v2=${rec.detected}`;
-      } catch (_) {}
+      let captchaStatus = 'captcha_status=unknown (vision-driven)';
 
       const combined = `=== Visible Text (first 800 chars) ===\n${visibleText.substring(0, 800)}\n\n=== Interactive Elements (visible only) ===\n${inputInfo}\n\n=== Captcha Status ===\n${captchaStatus}`;
       this.emitLog('system', { message: 'Fetched page content (first 800 chars): ' + combined.substring(0, 800) });
@@ -850,9 +747,15 @@ export class BrowserController extends EventEmitter {
       // Take a screenshot and get it as buffer
       // For Google Sorry/CAPTCHA pages, use fullPage to capture the entire rendered page
       // For other pages, use viewport screenshot for better performance
-      const currentUrl = this.page.url();
-      const isGoogleSorry = currentUrl.includes('google.com') && currentUrl.includes('/sorry/');
-      const useFullPage = isCaptchaRelated || isGoogleSorry;
+      // Avoid URL-based detection; use action hint or text hints for full-page capture
+      let isTextCaptcha = false;
+      try {
+        isTextCaptcha = await this.page.evaluate(() => {
+          const t = document.body?.innerText || '';
+          return /unusual\s+traffic/i.test(t) || /비정상적인\s*트래픽/.test(t) || /captcha|reCAPTCHA/i.test(t);
+        });
+      } catch (_) {}
+      const useFullPage = isCaptchaRelated || isTextCaptcha;
 
       const screenshotBuffer = await this.page.screenshot({
         fullPage: useFullPage,
@@ -867,7 +770,7 @@ export class BrowserController extends EventEmitter {
       this.emit('screenshot', {
         image: base64Image,
         action: action,
-        url: currentUrl,
+        url: this.page.url(),
         timestamp: new Date().toISOString()
       });
 
@@ -875,6 +778,101 @@ export class BrowserController extends EventEmitter {
     } catch (error) {
       console.error(`[BrowserController] Failed to stream screenshot for action ${action}:`, error);
       this.emitLog('error', { message: `Failed to stream screenshot: ${(error as Error).message}` });
+    }
+  }
+
+  // --- Generic vision-interaction helpers ---
+  async getViewportSize(): Promise<{ width: number; height: number }> {
+    if (!this.page) return { width: 0, height: 0 };
+    const size = this.page.viewportSize();
+    return { width: size?.width || 0, height: size?.height || 0 };
+  }
+
+  async captureViewportScreenshotBase64(): Promise<{ imageBase64: string; width: number; height: number }> {
+    if (!this.page) return { imageBase64: '', width: 0, height: 0 };
+    const size = this.page.viewportSize();
+    // Use JPEG to reduce payload for vision models
+    const buf = await this.page.screenshot({ fullPage: false, type: 'jpeg', quality: 70 });
+    return { imageBase64: buf.toString('base64'), width: size?.width || 0, height: size?.height || 0 };
+  }
+
+  async clickViewport(x: number, y: number): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      await this.page.mouse.move(x, y);
+      await this.page.waitForTimeout(80);
+      await this.page.mouse.click(x, y, { delay: 50 });
+      await this.streamScreenshot('viewport-click');
+      await this.page.waitForTimeout(200);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async clickRectGrid(rect: { x: number; y: number; width: number; height: number }, gridSize: number, indices: number[]): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const rows = gridSize;
+      const cols = gridSize;
+      const cellW = rect.width / cols;
+      const cellH = rect.height / rows;
+      let clicked = 0;
+      for (const idx of indices) {
+        const r = Math.floor(idx / cols);
+        const c = idx % cols;
+        const cx = Math.round(rect.x + c * cellW + cellW / 2);
+        const cy = Math.round(rect.y + r * cellH + cellH / 2);
+        const ok = await this.clickViewport(cx, cy);
+        if (ok) clicked++;
+        await this.page!.waitForTimeout(200);
+      }
+      if (clicked > 0) await this.streamScreenshot('grid-tiles-clicked');
+      return clicked > 0;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async clickFirstVisibleContainingText(patterns: string[]): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const match = await this.page.evaluate((pats: string[]) => {
+        const toLower = (s: any) => (s || '').toString().toLowerCase();
+        const patterns = pats.map(toLower);
+        const isVisible = (el: Element) => {
+          const r = (el as HTMLElement).getBoundingClientRect();
+          const style = window.getComputedStyle(el as HTMLElement);
+          return r.width > 1 && r.height > 1 && style.visibility !== 'hidden' && style.display !== 'none';
+        };
+        const all = Array.from(document.querySelectorAll('*')) as HTMLElement[];
+        for (const el of all) {
+          try {
+            if (!isVisible(el)) continue;
+            const text = toLower(el.innerText || el.textContent || '');
+            if (!text) continue;
+            for (const pat of patterns) {
+              if (text.includes(pat)) {
+                const rect = el.getBoundingClientRect();
+                return { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) };
+              }
+            }
+          } catch (_e) {}
+        }
+        return null;
+      }, patterns);
+      if (match && typeof match.x === 'number' && typeof match.y === 'number') {
+        const { x, y } = match;
+        await this.page.mouse.move(x, y);
+        await this.page.waitForTimeout(80);
+        await this.page.mouse.click(x, y, { delay: 50 });
+        await this.streamScreenshot('text-click');
+        await this.page.waitForTimeout(200);
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 

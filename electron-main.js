@@ -99,6 +99,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
   // 비동기로 작업 실행 (Stop 버튼이 작동하도록)
   (async () => {
+    let prevEnv;
     try {
       // 이전 인스턴스 정리
       if (browserController) {
@@ -107,7 +108,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       // 환경 구성 병합: UI에서 온 설정값이 있으면 우선 적용 (프로세스 env override)
       // *** LLMService 생성 전에 환경변수를 먼저 설정해야 비전 모델이 올바르게 초기화됨 ***
-      let prevEnv = {
+      prevEnv = {
         CAPTCHA_VISION_MODEL: process.env.CAPTCHA_VISION_MODEL,
       };
       if (settings && settings.captchaVisionModel) {
@@ -167,6 +168,9 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
         });
       }
     } finally {
+      // Ensure flags reset even if errors occur
+      isTaskRunning = false;
+      stopRequested = false;
       // Restore previous env
       if (prevEnv) {
         if (prevEnv.CAPTCHA_VISION_MODEL !== undefined) process.env.CAPTCHA_VISION_MODEL = prevEnv.CAPTCHA_VISION_MODEL; else delete process.env.CAPTCHA_VISION_MODEL;
@@ -175,8 +179,6 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
         await browserController.close();
         browserController = null;
       }
-      isTaskRunning = false;
-      stopRequested = false;
     }
   })();
 

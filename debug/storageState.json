@@ -1,16 +1,6 @@
 {
   "cookies": [
     {
-      "name": "X-AB",
-      "value": "23186c2a0b094505bb5c2a7e574304fd",
-      "domain": "sc-static.net",
-      "path": "/scevent.min.js",
-      "expires": 1761092338.895449,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "_C_Auth",
       "value": "",
       "domain": "www.bing.com",
@@ -22,20 +12,20 @@
     },
     {
       "name": "_GRECAPTCHA",
-      "value": "09AG7bzvEy2ngPBfdLUmz79eVGvTU7Q1B_sJwmMigVBHZCnuTx68__jc5SOfb40s2gwMoL7EVTk1fnRLUjNaLlxuI",
+      "value": "09AG7bzvFzGRSmau8BDMvvzVZJAQreEBfTjzCo-1RjZN5sQYJfqZjQAPfzro9U_xv3h-Zp56GW3pHNTM3AddL6VgI",
       "domain": "www.google.com",
       "path": "/recaptcha",
-      "expires": 1776567797.286312,
+      "expires": 1776726859.063157,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "SNID",
-      "value": "ABablnf1qbntGwofnk8rr4wzmcNfwqxL9KIR96nYeOzD3DHLedOzyre_jxiAFYpHCwJOiCmBRwtOXp_YG8egMz0iSbP_sMO6FFo",
+      "value": "ABablncke-9Ycd-Ssv69VIJ9W6ufkM3vj6jWqBXyYfIJ-s3LYqThjCYPrK09AWcsC2UNzavriUFKOWrTBp8E0OpnQ341WMXA5jU",
       "domain": ".google.com",
       "path": "/verify",
-      "expires": 1776746474.872592,
+      "expires": 1776985669.666808,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
@@ -51,16 +41,6 @@
       "sameSite": "None"
     },
     {
-      "name": "AEC",
-      "value": "AaJma5s3cgTAxJW9t9sIi64dsul4sNObS503ZEoKMMhsOwtIsxgXMXaBBQ",
-      "domain": ".google.com",
-      "path": "/",
-      "expires": 1776487275.95504,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "Lax"
-    },
-    {
       "name": "NAC",
       "value": "0evnCohew5XVA",
       "domain": ".naver.com",
@@ -71,16 +51,6 @@
       "sameSite": "None"
     },
     {
-      "name": "NACT",
-      "value": "1",
-      "domain": ".naver.com",
-      "path": "/",
-      "expires": 1761021832.916291,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
       "name": "NNB",
       "value": "EI7WCOQJX32WQ",
       "domain": ".naver.com",
@@ -89,16 +59,6 @@
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
-    },
-    {
-      "name": "NM_srt_chzzk",
-      "value": "1",
-      "domain": "www.naver.com",
-      "path": "/",
-      "expires": 1761021833,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
     },
     {
       "name": "MUID",
@@ -395,7 +355,7 @@
       "value": "_0yNNYdwCWc",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776557353.557722,
+      "expires": 1776726913.356007,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -405,17 +365,7 @@
       "value": "CgJVUxIEGgAgaw%3D%3D",
       "domain": ".youtube.com",
       "path": "/",
-      "expires": 1776557353.557809,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "__Secure-ROLLOUT_TOKEN",
-      "value": "COidtqGko8P8_QEQmY70_f6zkAMY7sL8_f6zkAM%3D",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1776557038.058655,
+      "expires": 1776726913.356054,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -521,26 +471,6 @@
       "sameSite": "None"
     },
     {
-      "name": "_gid",
-      "value": "GA1.2.2128736150.1761005939",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1761096560,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "_ce.clock_data",
-      "value": "33%2C130.245.192.3%2C1%2Cf51bb482c660d0eeadd1f058058a2b35%2CChrome%2CUS",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1761092339,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Strict"
-    },
-    {
       "name": "_scid",
       "value": "YlYy7nTo3b739SjWcsD0DWtr_mCFSEp2",
       "domain": ".stonybrook.edu",
@@ -621,16 +551,6 @@
       "sameSite": "Lax"
     },
     {
-      "name": "panoramaId_expiry",
-      "value": "1761092339520",
-      "domain": ".stonybrook.edu",
-      "path": "/",
-      "expires": 1761092340,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
       "name": "UserMatchHistory",
       "value": "AQIOvWjO-oXSAAAAAZoEIiuuA-H15RS1I4aR9tDBldsyTtm6KdWgWCa00MsX5yC4oVgmOelo2udT5Q",
       "domain": ".linkedin.com",
@@ -666,16 +586,6 @@
       "domain": ".linkedin.com",
       "path": "/",
       "expires": 1792546151.744057,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "lidc",
-      "value": "\"b=OGST08:s=O:r=O:a=O:p=O:g=3325:u=1:x=1:i=1761005939:t=1761092339:v=2:sig=AQFJtlLN2H4qvJ7QZTuhsmX5IVIz5SQ7\"",
-      "domain": ".linkedin.com",
-      "path": "/",
-      "expires": 1761092339.517569,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -1131,31 +1041,11 @@
       "sameSite": "None"
     },
     {
-      "name": "done_redirects200",
-      "value": "1",
-      "domain": ".onaudience.com",
-      "path": "/",
-      "expires": 1761092351.809528,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "cookie",
       "value": "dfb221f4cad789cb",
       "domain": ".bidberry.net",
       "path": "/",
       "expires": 1792541951.937945,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "done_redirects280414",
-      "value": "1",
-      "domain": ".bidberry.net",
-      "path": "/",
-      "expires": 1761092351.884307,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -1326,16 +1216,6 @@
       "domain": ".sitescout.com",
       "path": "/",
       "expires": 1763597963.599508,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "KTPCACOOKIE",
-      "value": "YES",
-      "domain": ".pubmatic.com",
-      "path": "/",
-      "expires": 1761092363.611363,
       "httpOnly": false,
       "secure": true,
       "sameSite": "None"
@@ -1611,11 +1491,61 @@
       "sameSite": "None"
     },
     {
-      "name": "NID",
-      "value": "525=M9gZdTi4hl37V4Po5b_gv0i5yD_9CijkkRDW09NtXNvAFgAvKiNjbAqqgvgGWb0Ezc6XRzEuWABpvxT7rEWYe2BpZqU_NNo91axfcC0daCanbZDREyhApg58lBLebtKjuEHdHlwnim1qOY1L-4jmgzlrgR9Ft6rIIQEDg2Ok9gB9zKlooAwMNBg2mITZXCuYSIRBpQ3uqHG6IJZFKTCc0Sclb5cNikyU8QnSD9sOer4xjTobTo-ye30U537fjQTv3pbuSrgA0mQ",
+      "name": "AEC",
+      "value": "AaJma5uaKUq92OaBA2Bp0YFosojMBfX1DbyWaBLmRFiZthniB1iEVqqRCg",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1776746474.618375,
+      "expires": 1776487275.518574,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "GOOGLE_ABUSE_EXEMPTION",
+      "value": "ID=ddcf9cb05393c00f:TM=1761174849:C=R:IP=130.245.192.3-:S=pIp3lfhwuirmc8zOCQ0VPb4",
+      "domain": ".google.com",
+      "path": "/",
+      "expires": 1761185649.688788,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "NID",
+      "value": "525=RiQYXDYsLJSdxRjD1Ug49AwrFX7agMj4Q6t7HdEQp-52z1bkJP4LEUkMDZAnkv_sjrosDow0gZ3lji9CN05kRKiGrHbpDIuaBvdD6FO6SK6Jo8sFiYWCCJyAdwkl7zLkWyDSEPR_k3upJkH8LQQt7N_L_NGAi9uH9V2lDERjfJKkkTo-lGczPMdi9VODDlWDRU0pk5Jw1ze0cw3n1aY8WpIArgTM_YtCkIFVs1PyhIzu2k2JBqZBVJ41BjFQwtmojwVd-w97nTg",
+      "domain": ".google.com",
+      "path": "/",
+      "expires": 1776985669.688842,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "__Secure-ROLLOUT_TOKEN",
+      "value": "COidtqGko8P8_QEQmY70_f6zkAMYw7vp6Pe4kAM%3D",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1776726913.356087,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "cf_clearance",
+      "value": "QnaNUoQnbEvDB3RH7V61cAZF9UGi6BsYjbLhFu9Pzeo-1761174945-1.2.1.1-P.qJuph5g.UFt7DOtX5BvzqRnIMRcyXs7iulua6a3HZ1w1OnF8ks_XRU2tzQkk80rHvqGGvVEhs74aZXk5gjQ50FgtmwYy6okY.cMfj4oMmo_wcY.4v71XzbRvGKlae4Pbd9Rq6Z4yxu1RrMCS.7oUNdp4P8cAtREpl8q78zhtop_vwWZ0XUgvtz918plj718cxy8KjXPN5_AlDkC755Ce7KCkvxHukN9QbdDEeUUDk",
+      "domain": ".neal.fun",
+      "path": "/",
+      "expires": 1792710945.118607,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "cf_clearance",
+      "value": "MfE68ANv0.QtsUGhdzcQqKpuREDbVmP8FS7UtrlWsxs-1761175943-1.2.1.1-XRSGl.9iL1LjBA9UK9ElkmGnYAFuPdiwWf7MZ56c6sFdVH4VxTKvq5ZNHkQn6L2H_xRr.gnyr9qF3aovHL2SQR0qPMWHs8qezeWyq74oIpPxPRKZ_nqz6qxFI9ycL2kWYBIZwbd0l9r66HQWVCLiEOGsYZCRIe0OCsEAQIwGId49aG4Wt8_kQcecA0GFuP7wfQiCTAZYojJxeWaoTpef770h.jCWTOAFAAr4eSlopgM",
+      "domain": ".neal.fun",
+      "path": "/",
+      "expires": 1792711943.304481,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -1626,16 +1556,16 @@
       "origin": "https://www.google.com",
       "localStorage": [
         {
-          "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[[\"stony brook spring 2025 calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar spring 2026\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook winter break 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu academic calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 classes\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}]],\"1\":{\"ag\":{\"a\":{\"40009\":[\"최근 검색어와 관련이 있음\"]}},\"av\":\"-6453585955105366972\",\"q\":\"aaykATjeQPHaTtX2bYF0SrdDLkU\"}}"
+          "name": "sb_wiz.zpc.gws-wiz-serp.",
+          "value": "{\"0\":[],\"1\":{\"av\":\"7265019520140727419\",\"q\":\"V6eTl8zctobuivOivsUIiZ3U3M8\"}}"
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1761015790107"
+          "value": "1761174912667"
         },
         {
           "name": "rc::f",
-          "value": "0aAE_cEEwFentYG-EGMDctQEeXwl_wzF2ZrBlcwWbF_U8WFeo0y61Zjb26mWOixWxK8IDzQSY"
+          "value": "0aAN6Vh3u83uQzlyY45XJu2GmpU71CUMsT0bj_OOZB8KVZ_Mm9_vhZJx96bIcZYc5k2rMVZYY"
         },
         {
           "name": "sb_wiz.pq",
@@ -1647,11 +1577,11 @@
         },
         {
           "name": "sb_wiz.sr_di",
-          "value": "GJOvxfWQu7ed-QEY6dTp9JaFw4UrGJmM8NOP-4K-IxiOnrCxtvm4kYUBGJebmYzh_teXUg"
+          "value": "GJvzu9XL8py_sAEYo7_FrsbJzOVSGLjVqanV-cX5DBjy9v74jL3ijPQBGLr5zbHY0Luq3gE"
         },
         {
           "name": "_grecaptcha",
-          "value": "09AG7bzvGcTdh9gSu5UJgPPHJWebq16112I7nE1YJux26M7NgoF1HErAJeK2RuchuRK2NhH-ljxItv3Y4TRh1KuQ_J84nndQP8drAfl71kqXlwuFxb7Jog3SIfSgMpZYhx"
+          "value": "09AG7bzvHDeaIHsgkfdC7fivlYSHhRv0xFJZlkb3R07VHdFgvpOWiZU3wog97PjGno4gNjvYAr_L0Ra0x9g5To7OeGqKyoKcxrXgi69AUtF3JPPXnLqMMJi0hw4hQn0JGZ"
         },
         {
           "name": "sb_wiz.sc_pq",
@@ -1659,7 +1589,7 @@
         },
         {
           "name": "sb_wiz.qc",
-          "value": "44"
+          "value": "53"
         }
       ]
     },

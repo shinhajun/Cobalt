@@ -1,6 +1,6 @@
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { HumanMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController";
 // Vision-based captcha solving (no external captcha providers)
 import path from 'path';
@@ -103,6 +103,117 @@ export class LLMService {
     ] as any[];
   }
 
+  // Classify the current viewport: detect presence/type of challenge purely via vision
+  private async classifyChallengeViewport(browserController: BrowserController): Promise<{ kind: 'recaptcha_grid' | 'checkbox_recaptcha' | 'text_captcha' | 'gate' | 'none'; gridSize?: 3 | 4 | null }> {
+    if (!this.visionModel) return { kind: 'none' } as any;
+    try {
+      const { imageBase64, width, height } = await browserController.captureViewportScreenshotBase64();
+      if (!imageBase64) return { kind: 'none' } as any;
+      const prompt = `You will see a webpage screenshot (viewport ${width}x${height}). Determine if there is a bot-detection challenge present.\n` +
+        `Return ONLY JSON in the form {"kind":"recaptcha_grid|checkbox_recaptcha|text_captcha|gate|none","gridSize":3|4|null}.\n` +
+        `- recaptcha_grid: Google image grid challenge (3x3 or 4x4). Set gridSize accordingly.\n` +
+        `- checkbox_recaptcha: only the "I'm not a robot" checkbox is visible.\n` +
+        `- text_captcha: an image with distorted letters/numbers that must be typed.\n` +
+        `- gate: other generic bot or interstitial gate (e.g., continue/verify).\n` +
+        `- none: no challenge.\n` +
+        `No explanations. JSON only.`;
+      const messages: any[] = [
+        new HumanMessage({
+          content: this.buildVisionContentParts(prompt, imageBase64, 'image/jpeg') as any
+        } as any)
+      ];
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Vision classify timeout after 20s')), 20000));
+      const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch(() => null);
+      if (!res) return { kind: 'none' } as any;
+      let txt: string;
+      if (typeof res.content === 'string') txt = res.content; else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || JSON.stringify(x)))).join('\n'); else txt = JSON.stringify(res.content);
+      const cleaned = (txt || '').replace(/^```json\n?/, '').replace(/```$/, '').trim();
+      try {
+        const m = cleaned.match(/\{[\s\S]*\}/);
+        const obj = m ? JSON.parse(m[0]) : JSON.parse(cleaned);
+        const kind = obj.kind || 'none';
+        const gridSize = obj.gridSize ?? null;
+        return { kind, gridSize } as any;
+      } catch (_) {
+        return { kind: 'none' } as any;
+      }
+    } catch (_) {
+      return { kind: 'none' } as any;
+    }
+  }
+
+  // Generic vision-guided interaction on the current viewport
+  private async visionInteractViewport(browserController: BrowserController, instruction: string): Promise<{ success: boolean; report: string }> {
+    if (!this.visionModel) return { success: false, report: 'Vision model not initialized.' };
+    try {
+      const { imageBase64, width, height } = await browserController.captureViewportScreenshotBase64();
+      if (!imageBase64 || width === 0 || height === 0) {
+        return { success: false, report: 'Viewport screenshot unavailable.' };
+      }
+
+      const spec = `You will receive a screenshot (viewport ${width}x${height}).\n`+
+      `Return ONLY JSON in one of these forms:\n`+
+      `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"..."}\n`+
+      `or {"action":"grid_click","rect":{"x":<px>,"y":<px>,"width":<px>,"height":<px>}, "gridSize":3|4, "indexes":[...], "note":"..."}\n`+
+      `or {"action":"noop","note":"..."}.`;
+
+      const textPrompt = `Goal: ${instruction}\n${spec}`;
+      const messages: any[] = [
+        new HumanMessage({
+          content: this.buildVisionContentParts(textPrompt, imageBase64, 'image/jpeg') as any
+        } as any)
+      ];
+
+      this.emitLog('system', { message: 'Invoking vision model for generic viewport interaction...' });
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Vision interact timeout after 30s')), 30000));
+      const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch((e: any) => {
+        this.emitLog('error', { message: `Vision interaction error: ${e.message}` });
+        return null;
+      });
+      if (!res) return { success: false, report: 'No response from vision.' };
+
+      let txt: string;
+      if (typeof res.content === 'string') txt = res.content; else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || JSON.stringify(x)))).join('\n'); else txt = JSON.stringify(res.content);
+
+      let json: any = null;
+      try {
+        const raw = (txt || '').replace(/^```json\n?/, '').replace(/```$/, '').trim();
+        const m = raw.match(/\{[\s\S]*\}/);
+        json = m ? JSON.parse(m[0]) : JSON.parse(raw);
+      } catch (_) {}
+      if (!json || !json.action) return { success: false, report: 'No actionable JSON returned.' };
+
+      if (json.action === 'click_points' && Array.isArray(json.points)) {
+        let n = 0;
+        for (const p of json.points) {
+          if (typeof p?.x === 'number' && typeof p?.y === 'number') {
+            await browserController.clickViewport(Math.round(p.x), Math.round(p.y));
+            await new Promise(r => setTimeout(r, 200));
+            n++;
+          }
+        }
+        return { success: n > 0, report: `Clicked ${n} points.` };
+      }
+
+      if (json.action === 'grid_click' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4)) {
+        await browserController.clickRectGrid({
+          x: Math.max(0, Math.round(json.rect.x)),
+          y: Math.max(0, Math.round(json.rect.y)),
+          width: Math.max(10, Math.round(json.rect.width)),
+          height: Math.max(10, Math.round(json.rect.height)),
+        }, json.gridSize, json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n)));
+        return { success: true, report: `Grid click gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}` };
+      }
+
+      if (json.action === 'noop') {
+        return { success: true, report: json.note || 'Noop' };
+      }
+      return { success: false, report: 'Unsupported action from vision.' };
+    } catch (e: any) {
+      return { success: false, report: `Vision interaction failed: ${e.message}` };
+    }
+  }
+
   private emitLog(type: 'thought' | 'observation' | 'system' | 'error', data: any) {
     this.logCallback({ type, data });
   }
@@ -116,21 +227,11 @@ export class LLMService {
     try {
       this.emitLog('system', { message: `Calling vision model to extract CAPTCHA text. Image size: ${imageBase64.length} chars` });
       const instruction = `You are given an image of a text-based CAPTCHA. Read the characters exactly as shown and return only the characters to type. Do not add spaces or explanations. If unreadable, respond with the single word: UNREADABLE.`;
-      let messages: any;
-      if (this.isVisionGeminiProvider) {
-        // Gemini: avoid SystemMessage; send combined human content
-        messages = [
-          new HumanMessage({
-            content: this.buildVisionContentParts(instruction, imageBase64, 'image/png') as any
-          } as any)
-        ];
-      } else {
-        const content: any = this.buildVisionContentParts(instruction, imageBase64, 'image/png');
-        messages = [
-          { role: 'user', content },
-          { role: 'system', content: [{ type: 'text', text: 'You are an assistant that outputs strict JSON only.' }] }
-        ];
-      }
+      const messages: any = [
+        new HumanMessage({
+          content: this.buildVisionContentParts(instruction, imageBase64, 'image/png') as any
+        } as any)
+      ];
 
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) =>
@@ -202,25 +303,13 @@ Examples:
 No explanation, only JSON.`;
 
       // Build messages using LangChain message classes for maximum compatibility
-      let messages: any[];
-      if (this.isVisionGeminiProvider) {
-        // Gemini: combine system+human into a single human message
-        const combined = `${systemPrompt}\n\nInstruction: ${instruction}`;
-        messages = [
-          new HumanMessage({
-            // Grid is captured as JPEG in BrowserController
-            content: this.buildVisionContentParts(combined, gridImageBase64, 'image/jpeg') as any
-          } as any)
-        ];
-      } else {
-        messages = [
-          new SystemMessage(systemPrompt),
-          new HumanMessage({
-            // Grid is captured as JPEG in BrowserController
-            content: this.buildVisionContentParts(`Instruction: ${instruction}`, gridImageBase64, 'image/jpeg') as any
-          } as any)
-        ];
-      }
+      const combined = `${systemPrompt}\n\nInstruction: ${instruction}`;
+      const messages: any[] = [
+        new HumanMessage({
+          // Grid is captured as JPEG in BrowserController
+          content: this.buildVisionContentParts(combined, gridImageBase64, 'image/jpeg') as any
+        } as any)
+      ];
 
       this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
 
@@ -448,6 +537,7 @@ No explanation, only JSON.`;
         6.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} (e.g., Enter, Tab, ArrowDown)
         7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha", "captchaKind": "google_sorry|recaptcha_v2|hcaptcha"}
         8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>", "tilesVariable": "<VAR_NAME_FOR_TILES_BASE64>", "select": [0,3,4], "submit": true}
+        9.  {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
 
         Task Completion Actions:
         9.  {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
@@ -586,15 +676,14 @@ No explanation, only JSON.`;
           case "TOOL_ACTION":
             this.emitLog('system', { message: `Executing Tool Action: ${action.tool || '(no tool specified)'}` });
             if (action.tool === 'solveCaptcha') {
-              this.emitLog('system', { message: 'solveCaptcha tool invoked. Detecting captcha type...' });
-              // Decide captcha kind using current page (vision-based only)
-              const sorry = await browserController.detectGoogleSorryCaptcha({ includeImage: true });
-              const rec = await browserController.detectRecaptchaV2();
-              this.emitLog('system', { message: `Captcha detection: google_sorry=${sorry.detected}, recaptcha_v2=${rec.detected}` });
+              this.emitLog('system', { message: 'solveCaptcha tool invoked. Classifying challenge via vision...' });
+              // Vision-first classification (URL-independent)
+              const classified = await this.classifyChallengeViewport(browserController);
+              this.emitLog('system', { message: `Challenge classification: kind=${classified.kind}, gridSize=${classified.gridSize || 'n/a'}` });
 
               try {
                 // Priority: reCAPTCHA v2 (more common on Google Sorry pages)
-                if (rec.detected) {
+                if (classified.kind === 'checkbox_recaptcha' || classified.kind === 'recaptcha_grid') {
                   this.emitLog('system', { message: 'reCAPTCHA v2 detected. Attempting to click anchor checkbox...' });
                   const clicked = await browserController.clickRecaptchaAnchor();
                   if (clicked) {
@@ -615,6 +704,8 @@ No explanation, only JSON.`;
                       let attempts = 0;
                       let lastIndexes: number[] | null = null;
                       let prevSigs: string[] | null = await browserController.getRecaptchaTileSignatures();
+                      let progressiveNoMatchStreak = 0; // For 3x3 progressive: require consecutive no-match before submit
+                      let visionNullStreak = 0; // Count consecutive null results from vision
                       while (attempts < 8 && challenge && challenge.gridImageBase64) {
                         attempts++;
                         // Detect grid size each round to support 3x3 -> 4x4 transitions
@@ -623,7 +714,7 @@ No explanation, only JSON.`;
                         this.emitLog('system', { message: `reCAPTCHA round ${attempts}: gridSize=${currentGridSize} mode=${mode}` });
                         this.emitLog('system', { message: `Calling vision model to select tiles... (round ${attempts})` });
                         this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
-                        const indexes = await this.chooseRecaptchaTiles(
+                        let indexes = await this.chooseRecaptchaTiles(
                           challenge.instruction,
                           challenge.gridImageBase64,
                           (challenge as any).gridSize || 3
@@ -631,9 +722,12 @@ No explanation, only JSON.`;
                         this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
 
                         if (indexes === null) {
-                          actionError = true;
-                          actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
-                          break;
+                          visionNullStreak++;
+                          this.emitLog('system', { message: `Vision returned null indexes (streak=${visionNullStreak}). Treating as temporary no-match.` });
+                          // Treat as empty to trigger progressive stability check on 3x3
+                          indexes = [];
+                        } else {
+                          visionNullStreak = 0;
                         }
 
                         lastIndexes = indexes;
@@ -644,6 +738,7 @@ No explanation, only JSON.`;
                             // 3x3: 클릭 후 자동으로 새 이미지가 교체되므로 검증(확인)은 누르지 않는다. 새 타일 로딩을 기다렸다가 다음 라운드로.
                             const newSigs = await browserController.waitForRecaptchaTilesRefresh(prevSigs, 6000);
                             if (newSigs) prevSigs = newSigs;
+                            progressiveNoMatchStreak = 0; // reset streak since we just clicked some tiles
                             const next = await browserController.getRecaptchaChallenge();
                             if (!next || !next.gridImageBase64) break;
                             challenge = next;
@@ -654,11 +749,46 @@ No explanation, only JSON.`;
                           this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
                         }
 
-                        // 4x4: 항상 제출, 3x3: 더 이상 매칭이 없을 때만 제출
-                        if (mode === 'ALL_AT_ONCE' || indexes.length === 0) {
+                        // 제출 조건
+                        if (mode === 'ALL_AT_ONCE') {
+                          // 4x4: 한 번에 모두 클릭 후 바로 제출
                           await browserController.submitRecaptchaChallenge();
                           await browserController.streamScreenshot('recaptcha-submitted');
                           await browserController.waitForPageLoad(8000);
+                        } else {
+                          // 3x3: '없음'을 연속으로 확인해야 제출
+                          if (indexes.length === 0) {
+                            // 안정성 체크: 타일이 더 이상 갱신되지 않는지 짧게 확인
+                            try {
+                              await browserController.waitForRecaptchaTilesLoaded(0.95, 2000);
+                            } catch (_) {}
+                            const sigsA = await browserController.getRecaptchaTileSignatures();
+                            await new Promise(r => setTimeout(r, 700));
+                            const sigsB = await browserController.getRecaptchaTileSignatures();
+                            const stable = Array.isArray(sigsA) && Array.isArray(sigsB) && sigsA.length === sigsB.length && sigsA.every((s, i) => s === sigsB[i]);
+                            if (stable) {
+                              progressiveNoMatchStreak++;
+                              this.emitLog('system', { message: `3x3 no-match stable check passed. Streak=${progressiveNoMatchStreak}` });
+                            } else {
+                              progressiveNoMatchStreak = 0;
+                              this.emitLog('system', { message: '3x3 no-match not stable (tiles changed). Re-evaluating next round.' });
+                            }
+
+                            // If vision kept returning null multiple times, relax threshold to avoid infinite loop
+                            const threshold = visionNullStreak >= 2 ? 1 : 2;
+                            if (progressiveNoMatchStreak >= threshold) {
+                              await browserController.submitRecaptchaChallenge();
+                              await browserController.streamScreenshot('recaptcha-submitted');
+                              await browserController.waitForPageLoad(8000);
+                            } else {
+                              // 다시 한 번 분석 라운드 실행
+                              const next = await browserController.getRecaptchaChallenge();
+                              if (!next || !next.gridImageBase64) break;
+                              challenge = next;
+                              await new Promise(r => setTimeout(r, 300));
+                              continue;
+                            }
+                          }
                         }
 
                         // 다음 라운드 존재 여부 확인
@@ -684,28 +814,48 @@ No explanation, only JSON.`;
                       actionObservation = 'reCAPTCHA anchor clicked. Challenge may have auto-solved or is pending.';
                     }
                   } else {
-                    actionError = true;
-                    actionObservation = 'Failed to click reCAPTCHA anchor checkbox.';
+                    // Fallback: Not a real reCAPTCHA frame (e.g., custom checkbox like neal.fun). Use vision interact to click the visible checkbox/puzzle.
+                    this.emitLog('system', { message: 'reCAPTCHA anchor not found. Falling back to vision-driven interaction on viewport.' });
+                    const res = await this.visionInteractViewport(browserController, 'Click the visible checkbox that says "I\'m not a robot" (or similar) and solve any subsequent challenge to proceed. If an image grid appears, select tiles accordingly.');
+                    actionObservation = `Fallback visionInteract (no anchor): ${res.report}`;
+                    if (!res.success) actionError = true;
                   }
-                } else if (sorry.detected && sorry.imageBase64) {
-                  // Fallback: Google Sorry image text captcha
-                  this.emitLog('system', { message: 'Solving Google Sorry image captcha via vision model' });
-                  const text = await this.solveCaptchaImageToText(sorry.imageBase64);
+                } else if (classified.kind === 'text_captcha') {
+                  // Text-based captcha: crop not yet implemented; rely on viewport OCR first
+                  this.emitLog('system', { message: 'Text captcha detected. Attempting direct OCR on viewport image.' });
+                  const { imageBase64 } = await browserController.captureViewportScreenshotBase64();
+                  const text = await this.solveCaptchaImageToText(imageBase64);
                   if (!text) {
                     actionError = true;
                     actionObservation = 'Vision model failed to extract text from captcha image.';
                   } else {
-                    const typed = await browserController.typeCaptchaAndSubmit(sorry.inputSelector, text, sorry.submitSelectorCandidates || []);
+                    // Best-effort: try common input/submit without URL selectors
+                    const typed = await browserController.typeCaptchaAndSubmit(undefined as any, text, []);
                     actionObservation = typed ? `Captcha text "${text}" entered and submitted.` : 'Failed to enter/submit captcha text.';
                     if (!typed) actionError = true;
                   }
-                } else if (sorry.detected && !sorry.imageBase64) {
-                  actionError = true;
-                  actionObservation = 'Google Sorry captcha detected but image not captured.';
-                } else {
-                  actionError = true;
-                  actionObservation = 'No recognizable captcha detected for vision solving.';
-                }
+                } else if (classified.kind === 'gate') {
+                  // Generic gate: defer to generic vision interaction
+                  const res = await this.visionInteractViewport(browserController, 'Pass the gate or continue/verify to proceed.');
+                  actionObservation = `Gate handled via vision: ${res.report}`;
+                  if (!res.success) actionError = true;
+                  } else {
+                    // Unknown/none: try generic vision interaction; if no progress, try textual click heuristic
+                    const res = await this.visionInteractViewport(browserController, 'If a challenge is present, solve it to proceed. Click obvious buttons like I\'m not a robot / Verify / Continue.');
+                    actionObservation = `Generic vision attempt: ${res.report}`;
+                    if (!res.success) {
+                      try {
+                        const clicked = await browserController.clickFirstVisibleContainingText(['i\'m not a robot', 'i am not a robot', 'verify', 'continue', 'checkbox', 'reCAPTCHA']);
+                        if (clicked) {
+                          actionObservation += ' | Heuristic text click performed.';
+                        } else {
+                          actionError = true;
+                        }
+                      } catch (_) {
+                        actionError = true;
+                      }
+                    }
+                  }
               } catch (e: any) {
                 actionError = true;
                 actionObservation = `Error while solving captcha via vision: ${e.message}`;
@@ -769,6 +919,30 @@ No explanation, only JSON.`;
                 actionObservation += ` Could not fetch page content after recaptcha grid: ${e.message}`;
               }
 
+              observation = actionObservation;
+              if (actionError) this.emitLog('error', { message: observation });
+              break;
+            } else if (action.tool === 'visionInteract') {
+              // Generic vision-driven interaction for arbitrary bot challenges
+              try {
+                const goal = action.instruction || 'Solve the current challenge/gate to continue.';
+                const result = await this.visionInteractViewport(browserController, goal);
+                actionObservation = `VisionInteract: ${result.report}`;
+                if (!result.success) actionError = true;
+              } catch (e: any) {
+                actionError = true;
+                actionObservation = `Error during visionInteract: ${e.message}`;
+              }
+              // Post-state update
+              try {
+                await browserController.waitForPageLoad();
+                await browserController.streamScreenshot('post-vision-interact');
+                const currentPageContent = await browserController.getPageContent();
+                const currentUrl = browserController.getCurrentUrl();
+                actionObservation += ` Current URL: ${currentUrl}. Page content (first 500 chars): ${currentPageContent.substring(0, 500)}`;
+              } catch (e: any) {
+                actionObservation += ` Could not fetch page content after visionInteract: ${e.message}`;
+              }
               observation = actionObservation;
               if (actionError) this.emitLog('error', { message: observation });
               break;
