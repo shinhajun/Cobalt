@@ -1,16 +1,6 @@
 {
   "cookies": [
     {
-      "name": "COMPASS",
-      "value": "documents=CmIACWuJV9FgJbq0v6RJeylc-3ZRpimFzMYqHl7T1fAbBYgZ-oPBK6UeGJu4HiSL-bZlbxK4ufsFnDGSZ9YIWVITvLF341VCYU1yCUMnp0K_mwKFoEQ4-xz8e6V9-xKjibISoxC8hOvHBhqEAQAJa4lXy2IwceSD1c2aF0sLXvPC2MYGF0YdlnxlWytMCsk5kuDWZNdl3YJgsGJUZ2yOXBKfNFJw0qzjI-xgKI5u1gvCBoBYw2KsXrxQj7zk6DUQi57M_N3A-SdaENUVXoZ80G5LPA-W-6g1Qyyl3Cn4yL-pFVpCiZnA_AxbspJQb64Emg==",
-      "domain": ".docs.google.com",
-      "path": "/document/u/0/d/1kfGWZMEgcZZ9YM3VUuJ5oq6Qn0vxtk3n1n8Di4HhY9U",
-      "expires": 1761264188.878479,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "Conversion",
       "value": "EgwIABUAAAAAHQAAAAAYASDi6c-TnqPxvmdIAWpbQ2p3S0NBandwT2ZIQmhBeEVpd0FtMVN3RXRCTmFqNHRWVlc5VDUybnp2Wk9HbFp4OGpMUDR2R0hvYnJ4LTNWYkYwbGdVOHhzdm8wWDZ4b0NCaTRRQXZEX0J3RXDx5o_Ov7uQA5ABv6rMhqwVmAEA",
       "domain": "www.googleadservices.com",
@@ -1891,41 +1881,11 @@
       "sameSite": "None"
     },
     {
-      "name": "VISITOR_INFO1_LIVE",
-      "value": "6WyXSElKdk8",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1776814930.585737,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "VISITOR_PRIVACY_METADATA",
-      "value": "CgJVUxIEGgAgFA%3D%3D",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1776814930.58583,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "LOGIN_INFO",
       "value": "AFmmF2swRAIgXSEDrUEPlEn5bFpkKn8LN180SsxcX25FA7GUVUjZAAoCIGlNSDQOjaWGnIks_dd41aDMhxELToPSY39mM0ocS2Vh:QUQ3MjNmd210aEs5akhKcmp0QktsLWlwZUxNRC1BZVoyUGlxZURGcThFbTJzczBfa2I4VU1Ud0hWdUN3bE9BR3VoOUI4OGViVlROai1MWUpBXzZ2ZmJMUFBrYklybERKMGVxQjY5QWsxMFVVVmZWOTJWNG8yX3hxQ3plaGQ1MVBBeV80WmNGU1BLOVduNnNhWXN3d0pyd0VPOTVNcllLZ0t3",
       "domain": ".youtube.com",
       "path": "/",
       "expires": 1795819296.582311,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "__Secure-ROLLOUT_TOKEN",
-      "value": "CMv91oin_sTlvAEQz8belbK7kAMY-77klbK7kAM%3D",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1776811296.701255,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -1951,41 +1911,11 @@
       "sameSite": "None"
     },
     {
-      "name": "COMPASS",
-      "value": "appsfrontendserver=CgAQo_zqxwYagwEACWuJV2QfqkQ4uHTo29138kD1bMH5TYToFGZXwTq9GETZeihxMBa4cwc7SecHe8vTJ9MrVgAsO1enumw0fIeiv_aesiEhNVJ49wNl6a4yjpyVQdT4wjL99Z_i7p_hw0N1oLJ966J90Xl9TN3jJs9K6Kq10-WDT71q6LPebtJnumChZSABMAE",
-      "domain": "docs.google.com",
-      "path": "/",
-      "expires": 1762123539.454311,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "SRT30",
-      "value": "1761260614",
-      "domain": ".naver.com",
-      "path": "/",
-      "expires": 1761263950.233724,
-      "httpOnly": false,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
       "name": "isShownNewLnb",
       "value": "Y",
       "domain": "news.naver.com",
       "path": "/",
       "expires": 1795822148.913971,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "session_id",
-      "value": "b7b4c81a-2066-4a9f-bcb6-0ec93738b439",
-      "domain": ".ma.news.naver.com",
-      "path": "/",
-      "expires": 1761263950.954525,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -2006,16 +1936,6 @@
       "domain": ".youtube.com",
       "path": "/",
       "expires": -1,
-      "httpOnly": true,
-      "secure": true,
-      "sameSite": "None"
-    },
-    {
-      "name": "__Secure-3PSIDCC",
-      "value": "AKEyXzV1Z2FtM3PQfSrGOndcE6Pr8Xm_IAGdArqZZFmz4JrJ_WlU25oEmMPSUVJRlD1xo46E",
-      "domain": ".youtube.com",
-      "path": "/",
-      "expires": 1792798930.585895,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -2061,61 +1981,131 @@
       "sameSite": "Lax"
     },
     {
+      "name": "COMPASS",
+      "value": "appsfrontendserver=CgAQ35vrxwYagwEACWuJV2QfqkQ4uHTo29138kD1bMH5TYToFGZXwTq9GETZeihxMBa4cwc7SecHe8vTJ9MrVgAsO1enumw0fIeiv_aesiEhNVJ49wNl6a4yjpyVQdT4wjL99Z_i7p_hw0N1oLJ966J90Xl9TN3jJs9K6Kq10-WDT71q6LPebtJnumChZSABMAE",
+      "domain": "docs.google.com",
+      "path": "/",
+      "expires": 1762127567.948145,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "__Secure-3PSIDCC",
+      "value": "AKEyXzXwd7F9HC6U4QD8For8H-Y0jrYGA1LULtflPngNWIVvyKcT0h4OqSFncNT_9o0KZMYx",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1792799809.066891,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "_ga_WJ020WWLN5",
+      "value": "GS2.1.s1761263809$o1$g0$t1761263809$j60$l0$h0",
+      "domain": ".doodles.google",
+      "path": "/",
+      "expires": 1795823809.645902,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
+      "name": "_ga",
+      "value": "GA1.1.60949038.1761263810",
+      "domain": ".doodles.google",
+      "path": "/",
+      "expires": 1795823809.646267,
+      "httpOnly": false,
+      "secure": false,
+      "sameSite": "Lax"
+    },
+    {
       "name": "__Secure-1PSIDTS",
-      "value": "sidts-CjABmkD5S_XpIwt57iSxVAcRqLbqNb49bH4JMhi0nnZ-sbD4zRAbCSYct4pX9at1PmMQAA",
+      "value": "sidts-CjABmkD5S2GL1Aej0P_BcCJoIO4udM12246a9rFk5B3ZlxhDyQ-8HKEPXv0xeQaWvMwQAA",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792799203.255027,
+      "expires": 1792801037.592236,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-3PSIDTS",
-      "value": "sidts-CjABmkD5S_XpIwt57iSxVAcRqLbqNb49bH4JMhi0nnZ-sbD4zRAbCSYct4pX9at1PmMQAA",
+      "value": "sidts-CjABmkD5S2GL1Aej0P_BcCJoIO4udM12246a9rFk5B3ZlxhDyQ-8HKEPXv0xeQaWvMwQAA",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792799203.255221,
+      "expires": 1792801037.592317,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "__Secure-ROLLOUT_TOKEN",
+      "value": "CP2R-o_S9c_iMhDlzbz9wruQAxjlzbz9wruQAw%3D%3D",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1776815809.066719,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "VISITOR_INFO1_LIVE",
+      "value": "P2tgnW3Xn4M",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1776815809.066812,
+      "httpOnly": true,
+      "secure": true,
+      "sameSite": "None"
+    },
+    {
+      "name": "VISITOR_PRIVACY_METADATA",
+      "value": "CgJVUxIEGgAgIw%3D%3D",
+      "domain": ".youtube.com",
+      "path": "/",
+      "expires": 1776815809.06685,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
     },
     {
       "name": "DV",
-      "value": "s4sSNNH275tOwDAyItdn9wsJt303odnkTapnFuvyuQAAALC3phBCc5dZsEBFAPzAVRoSO47leVARAA",
+      "value": "s4sSNNH275su8ANXaUjsOJZXpmU5odnemkIIzV1mQQQAAAA",
       "domain": "www.google.com",
       "path": "/",
-      "expires": 1761263814,
+      "expires": 1761265825,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "SIDCC",
-      "value": "AKEyXzXHDd4_HQR4hwsaxmvX57XVIUPFw4REN1_-MWglJHhcn09QSp6RRv7iQmjTrt7A0_s-VaY",
+      "value": "AKEyXzVHPtsN9QO_aX24wof82SBIv4dGgT5E6B2LVb3TemSyBKTd9-AfmzUra3yGlDWAkH6pTZU",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792799217.82814,
+      "expires": 1792801242.334342,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-1PSIDCC",
-      "value": "AKEyXzXf9xjfU0e9F5emTNGx40-TaDp2n8b7HVc7z2rHd0QYpgDEST-mWImGqYMpw8jkb08EZA",
+      "value": "AKEyXzWpMuDaP_jmM4x8FziFHNBE7Szn4iuP7L5B4fN83F42ymoL0SHKFCZQozlMLL3p4C8EGw",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792799217.828191,
+      "expires": 1792801242.334391,
       "httpOnly": true,
       "secure": true,
       "sameSite": "Lax"
     },
     {
       "name": "__Secure-3PSIDCC",
-      "value": "AKEyXzUlevM5dYAE4S3IyPjJI1xtgD8ss7x1hegLoohoHjgCxnX_ywULW4zg4HlctLJ3cQFBdDE",
+      "value": "AKEyXzX_RVjZoPNi-7AZNtvADNvlGgu3R-0_rFp7Lyfb2XQgPp0b4bWU-rjClYBxQcWMiJpT2ko",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1792799217.828235,
+      "expires": 1792801242.33443,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -2123,15 +2113,28 @@
   ],
   "origins": [
     {
+      "origin": "https://docs.google.com",
+      "localStorage": [
+        {
+          "name": "docsOfflineIframeApi-n",
+          "value": "1"
+        },
+        {
+          "name": "docsOfflineIframeApi-v",
+          "value": "1"
+        },
+        {
+          "name": "docsOfflineIframeApi-f",
+          "value": "1"
+        }
+      ]
+    },
+    {
       "origin": "https://www.google.com",
       "localStorage": [
         {
           "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[],\"1\":{\"av\":\"-5501406395764057719\",\"q\":\"1qNNWkH54Fk0ObeSx7ar2SCaea0\"}}"
-        },
-        {
-          "name": "rc::f",
-          "value": "0aAN6Vh3vRt1ZryEk1BvxebzUo3s9jemASBWxG3neJ1Z3I72-5XHiDCRLBFBbriRZabplKofw"
+          "value": "{\"0\":[],\"1\":{\"av\":\"-8770893542946245831\",\"q\":\"_tWdmF_GSC8sVRcGi3SLgfUs1WM\"}}"
         },
         {
           "name": "sb_wiz.ueh",
@@ -2150,8 +2153,12 @@
           "value": "1761187382057"
         },
         {
+          "name": "rc::f",
+          "value": "0aAN6Vh3vRt1ZryEk1BvxebzUo3s9jemASBWxG3neJ1Z3I72-5XHiDCRLBFBbriRZabplKofw"
+        },
+        {
           "name": "sb_wiz.qc",
-          "value": "71"
+          "value": "73"
         }
       ]
     },
@@ -2165,23 +2172,6 @@
         {
           "name": "gfp_uuid_iv",
           "value": "8db08675-1048-40af-bcdf-8467ec336638"
-        }
-      ]
-    },
-    {
-      "origin": "https://docs.google.com",
-      "localStorage": [
-        {
-          "name": "docsOfflineIframeApi-v",
-          "value": "1"
-        },
-        {
-          "name": "docsOfflineIframeApi-n",
-          "value": "1"
-        },
-        {
-          "name": "docsOfflineIframeApi-f",
-          "value": "1"
         }
       ]
     },
@@ -2323,7 +2313,7 @@
       "localStorage": [
         {
           "name": "nextRotationAttemptTs",
-          "value": "1761263803104"
+          "value": "1761265715063"
         }
       ]
     }

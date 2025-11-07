@@ -176,17 +176,32 @@ async function runTask() {
     syncCookies: document.getElementById('syncCookies').checked
   };
 
-  // Send to main process
   const model = modelSelect.value;
+
   try {
-    const result = await electronAPI.runTask(task, model, settings);
-    if (!result.success) {
-      addErrorMessage('Failed to start task: ' + result.error);
+    // Step 1: Analyze if this is a simple question or a browser task
+    const analysisResult = await electronAPI.analyzeTask(task, model);
+
+    if (analysisResult.taskType === 'chat') {
+      // Simple question - just get AI response without browser automation
+      removeThinkingIndicator();
+      addAssistantMessage(analysisResult.response);
+
       isRunning = false;
       btnRun.style.display = 'flex';
       btnStop.style.display = 'none';
       taskInput.disabled = false;
-      removeThinkingIndicator();
+    } else {
+      // Browser task - run full automation
+      const result = await electronAPI.runTask(task, model, settings);
+      if (!result.success) {
+        addErrorMessage('Failed to start task: ' + result.error);
+        isRunning = false;
+        btnRun.style.display = 'flex';
+        btnStop.style.display = 'none';
+        taskInput.disabled = false;
+        removeThinkingIndicator();
+      }
     }
   } catch (error) {
     addErrorMessage('Error: ' + error.message);
@@ -241,9 +256,9 @@ function clearMessages() {
       <h2>Welcome to AI Browser Agent</h2>
       <p>I can help you automate web tasks, solve CAPTCHAs, extract data, and more!</p>
       <div class="welcome-examples">
-        <div class="example-item">💡 "구글에서 AI 뉴스 검색해줘"</div>
-        <div class="example-item">💡 "이 페이지에서 가격 정보 추출해줘"</div>
-        <div class="example-item">💡 "3개 사이트 열어서 헤드라인 비교해줘"</div>
+        <div class="example-item">💡 "Search AI news on Google"</div>
+        <div class="example-item">💡 "Extract pricing info on this page"</div>
+        <div class="example-item">💡 "Open 3 sites and compare headlines"</div>
       </div>
     </div>
   `;
@@ -354,7 +369,7 @@ function loadChatRooms() {
 function createDefaultChatRoom() {
   chatRooms = [{
     id: 0,
-    title: '채팅방 1',
+    title: 'Chat 1',
     messages: [],
     createdAt: Date.now()
   }];
@@ -374,7 +389,7 @@ function createNewChatRoom() {
   const roomId = nextChatRoomId++;
   const newRoom = {
     id: roomId,
-    title: `채팅방 ${roomId + 1}`,
+    title: `Chat ${roomId + 1}`,
     messages: [],
     createdAt: Date.now()
   };
@@ -387,11 +402,11 @@ function createNewChatRoom() {
 
 function deleteChatRoom(roomId) {
   if (chatRooms.length <= 1) {
-    alert('최소 1개의 채팅방이 필요합니다.');
+    alert('At least one chat room is required.');
     return;
   }
 
-  if (!confirm('이 채팅방을 삭제하시겠습니까?')) {
+  if (!confirm('Are you sure you want to delete this chat room?')) {
     return;
   }
 
@@ -554,7 +569,7 @@ function renameChatRoom(roomId) {
   const room = chatRooms.find(r => r.id === roomId);
   if (!room) return;
 
-  const newName = prompt('채팅방 이름 변경:', room.title);
+  const newName = prompt('Rename chat room:', room.title);
   if (newName && newName.trim()) {
     room.title = newName.trim();
     saveChatRooms();
@@ -573,7 +588,7 @@ function renderHistory() {
     historyList.innerHTML = `
       <div class="history-empty">
         <div class="history-empty-icon">📭</div>
-        <p>저장된 채팅방이 없습니다</p>
+        <p>No saved chat rooms</p>
       </div>
     `;
     return;
@@ -584,9 +599,9 @@ function renderHistory() {
   chatRooms.forEach(room => {
     const preview = room.messages.length > 0
       ? room.messages[0].text.substring(0, 50)
-      : '대화 내용이 없습니다';
+    : 'No conversation history';
 
-    const date = new Date(room.createdAt).toLocaleDateString('ko-KR');
+  const date = new Date(room.createdAt).toLocaleDateString('en-US');
 
     const item = document.createElement('div');
     item.className = 'history-item';
@@ -596,10 +611,10 @@ function renderHistory() {
         ${room.id === activeChatRoomId ? '<span style="color: #4285f4;">●</span>' : ''}
       </div>
       <div class="history-preview">${preview}</div>
-      <div class="history-date">${date} · ${room.messages.length}개 메시지</div>
+    <div class="history-date">${date} · ${room.messages.length} messages</div>
       <div class="history-actions">
-        <button class="btn-rename" data-room-id="${room.id}">이름변경</button>
-        <button class="btn-delete" data-room-id="${room.id}">삭제</button>
+      <button class="btn-rename" data-room-id="${room.id}">Rename</button>
+      <button class="btn-delete" data-room-id="${room.id}">Delete</button>
       </div>
     `;
 

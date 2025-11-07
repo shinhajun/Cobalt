@@ -1,19 +1,19 @@
 # AI Browser Agent - Integrated AI-Powered Browser
 
-> 🌐 **통합 AI 브라우저: 평소처럼 웹 서핑하다가 필요할 때 AI에게 작업 맡기기**
+> 🌐 **Integrated AI Browser: Browse as usual, delegate tasks to AI when needed**
 
-세계 최초 **하이브리드 AI 브라우저**! Electron 기반 데스크톱 앱으로, 왼쪽에서 평소처럼 웹 브라우징을 하면서 오른쪽 AI 어시스턴트에게 복잡한 작업을 맡길 수 있습니다. CAPTCHA 해결, Cloudflare 우회, 데이터 추출 등 모든 자동화 기능 내장.
+World’s first **Hybrid AI Browser**! An Electron-based desktop app that lets you browse on the left while delegating complex tasks to an AI assistant on the right. Built-in automation includes CAPTCHA solving, Cloudflare bypass, data extraction, and more.
 
 ---
 
 ## ✨ Key Features
 
-### 🌐 **하이브리드 브라우저 (NEW!)**
-- **통합 인터페이스**: 왼쪽 70% 브라우저 + 오른쪽 30% AI 채팅
-- **평상시**: 일반 크롬 브라우저처럼 사용 (구글 검색, 로그인, 쇼핑 등)
-- **AI 작업 시**: 백그라운드에서 Playwright 실행 → 완료 후 브라우저에 결과 표시
-- **양방향 동기화**: 브라우저의 로그인 상태를 AI가 활용 가능
-- **컨텍스트 인식**: "이 페이지에서 XX 해줘" 같은 자연스러운 명령
+### 🌐 **Hybrid Browser (NEW!)**
+- **Unified interface**: Left 70% browser + Right 30% AI chat
+- **Normal use**: Acts like Chrome (Google search, login, shopping, etc.)
+- **During AI tasks**: Runs Playwright in the background → syncs results to browser
+- **Bidirectional sync**: AI can use your logged-in browser state
+- **Context aware**: Understands commands like "Do X on this page"
 
 ### 🧠 **Intelligent Automation**
 - **ReAct Loop Architecture**: Plans and executes multi-step tasks autonomously (max 15 iterations)
@@ -138,30 +138,30 @@ npm start
 
 ### Basic Task
 ```
-구글에서 'AI news'를 검색하고 상위 3개 결과의 제목을 가져와줘
+Search Google for 'AI news' and return the top 3 result titles
 ```
 
 ### Memory + Calculation
 ```
-아마존에서 'laptop' 검색하고, 상위 5개 제품의 가격을
-메모리에 저장한 다음, 평균 가격을 계산해줘
+Search Amazon for 'laptop', store prices of top 5 products in memory,
+then calculate the average price
 ```
 
 ### Multi-Tab Research
 ```
-3개의 뉴스 사이트를 동시에 열어서 각 사이트의 헤드라인을 수집하고,
-모든 정보를 하나의 표로 정리해줘
+Open 3 news sites simultaneously, collect each site’s headline,
+and compile everything into a single table
 ```
 
 ### Data Extraction
 ```
-네이버 뉴스에서 'AI' 관련 기사 5개를 찾고,
-각 기사의 제목, 날짜, URL을 표 형식으로 정리해줘
+Find 5 'AI' related articles on Naver News and organize
+each article’s title, date, and URL into a table
 ```
 
 ### Form Automation
 ```
-이 페이지의 모든 입력 필드를 찾아서 자동으로 채워줘
+Find all input fields on this page and auto-fill them
 ```
 
 See [USAGE_EXAMPLES.md](USAGE_EXAMPLES.md) for comprehensive examples.

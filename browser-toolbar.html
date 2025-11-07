@@ -285,16 +285,16 @@
   <!-- Tab bar -->
   <div class="tab-bar" id="tabBar">
     <div class="tab active" data-tab-id="0" draggable="true">
-      <span class="tab-title" id="tab-title-0">새 탭</span>
+      <span class="tab-title" id="tab-title-0">New Tab</span>
       <span class="tab-close">×</span>
     </div>
     <button class="new-tab-btn" id="newTabBtn">+</button>
   </div>
 
   <div class="browser-toolbar" id="toolbar">
-    <button class="nav-button" id="backBtn" title="뒤로 가기">‹</button>
-    <button class="nav-button" id="forwardBtn" title="앞으로 가기">›</button>
-    <button class="nav-button" id="refreshBtn" title="새로고침">↻</button>
+    <button class="nav-button" id="backBtn" title="Back">‹</button>
+    <button class="nav-button" id="forwardBtn" title="Forward">›</button>
+    <button class="nav-button" id="refreshBtn" title="Reload">↻</button>
 
     <div class="url-container">
       <span class="url-icon"></span>
@@ -302,11 +302,11 @@
         type="text"
         class="url-input"
         id="urlInput"
-        placeholder="검색어를 입력하거나 URL을 입력하세요"
+        placeholder="Search or enter a URL"
       />
     </div>
 
-    <button class="chat-toggle-btn" id="chatToggleBtn" title="AI Chat 열기/닫기">💬</button>
+    <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle AI Chat">💬</button>
   </div>
 
   <!-- Chat UI iframe -->
@@ -327,7 +327,7 @@
 
     let chatVisible = true;
     let currentTabId = 0;
-    let tabs = [{ id: 0, title: '새 탭', url: 'https://www.google.com' }];
+    let tabs = [{ id: 0, title: 'New Tab', url: 'https://www.google.com' }];
     let nextTabId = 1;
 
     // Chat 토글
@@ -356,14 +356,14 @@
     // 탭 생성
     function createNewTab() {
       const tabId = nextTabId++;
-      tabs.push({ id: tabId, title: '새 탭', url: 'https://www.google.com' });
+      tabs.push({ id: tabId, title: 'New Tab', url: 'https://www.google.com' });
 
       const tabElement = document.createElement('div');
       tabElement.className = 'tab';
       tabElement.setAttribute('data-tab-id', tabId);
       tabElement.setAttribute('draggable', 'true');
       tabElement.innerHTML = `
-        <span class="tab-title" id="tab-title-${tabId}">새 탭</span>
+        <span class="tab-title" id="tab-title-${tabId}">New Tab</span>
         <span class="tab-close">×</span>
       `;
 
@@ -455,7 +455,7 @@
     // 탭 닫기
     function closeTab(tabId) {
       if (tabs.length === 1) {
-        alert('마지막 탭은 닫을 수 없습니다.');
+        alert('The last tab cannot be closed.');
         return;
       }
 
@@ -527,12 +527,12 @@
       const currentTab = tabs.find(t => t.id === currentTabId);
       if (currentTab) {
         currentTab.url = url;
-        currentTab.title = title || '새 탭';
+        currentTab.title = title || 'New Tab';
 
         // 탭 제목 업데이트
         const tabTitleElement = document.getElementById(`tab-title-${currentTabId}`);
         if (tabTitleElement) {
-          tabTitleElement.textContent = title || '새 탭';
+          tabTitleElement.textContent = title || 'New Tab';
         }
       }
 

@@ -149,6 +149,50 @@ app.on('window-all-closed', () => {
   }
 });
 
+// IPC: 작업 분석 (단순 질문 vs 브라우저 작업 판별)
+ipcMain.handle('analyze-task', async (event, { task, model }) => {
+  console.log('[Electron] Analyzing task type:', task);
+
+  try {
+    // LLM으로 작업 유형 분석
+    const tempLLM = new LLMService(model || 'gpt-5-mini');
+
+    const analysisPrompt = `You are a task classifier. Analyze if the user's request requires browser automation or is just a simple question/conversation.
+
+User request: "${task}"
+
+Classify as:
+- "chat": Simple question, general knowledge, calculation, explanation, or conversation that doesn't require web browsing
+- "browser": Requires web browsing, clicking buttons, filling forms, searching websites, extracting data from websites, etc.
+
+Respond in JSON format:
+{
+  "taskType": "chat" or "browser",
+  "reason": "brief explanation",
+  "response": "if taskType is chat, provide a helpful answer here. If browser, leave empty"
+}`;
+
+    const response = await tempLLM.chat([{ role: 'user', content: analysisPrompt }]);
+    console.log('[Electron] Task analysis response:', response);
+
+    // Parse JSON response
+    const jsonMatch = response.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const analysis = JSON.parse(jsonMatch[0]);
+      console.log('[Electron] Task classified as:', analysis.taskType);
+      return analysis;
+    } else {
+      // Fallback: treat as browser task if parsing fails
+      console.log('[Electron] Failed to parse analysis, defaulting to browser task');
+      return { taskType: 'browser', reason: 'Unable to classify' };
+    }
+  } catch (error) {
+    console.error('[Electron] Error analyzing task:', error);
+    // Fallback: treat as browser task on error
+    return { taskType: 'browser', reason: 'Analysis error' };
+  }
+});
+
 // IPC: 작업 실행
 ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
   console.log('[Electron] Task received:', taskPlan);
@@ -245,7 +289,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
                   // Add header
                   const header = document.createElement('div');
                   header.style.cssText = 'background: linear-gradient(135deg, #4361ee 0%, #3730a3 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
-                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI 작업 중...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">작업 진행 중</span></div>';
+                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI Working...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">In progress</span></div>';
                   overlay.appendChild(header);
 
                   // Add spinner animation
@@ -268,7 +312,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
                 // Update screenshot image
                 const container = document.getElementById('ai-screenshot-container');
                 if (container) {
-                  container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);" /></div>';
+                  container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.4);" /></div>';
                 }
               })();
             `).catch(() => {});
@@ -323,7 +367,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
                     const header = document.createElement('div');
                     header.style.cssText = 'background: linear-gradient(135deg, #4361ee 0%, #3730a3 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
-                    header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI 작업 중...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">작업 진행 중</span></div>';
+                    header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI Working...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">In progress</span></div>';
                     overlay.appendChild(header);
 
                     const style = document.createElement('style');

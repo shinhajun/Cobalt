@@ -12,15 +12,15 @@
     <div class="chat-tabs-header">
       <div class="tabs-container" id="chatTabsContainer">
         <div class="chat-tab active" data-room-id="0" draggable="true">
-          <span class="tab-title">채팅방 1</span>
+          <span class="tab-title">Chat 1</span>
           <span class="tab-close">×</span>
         </div>
       </div>
 
       <div class="header-actions">
-        <button class="header-btn" id="newChatBtn" title="새 채팅방">+</button>
-        <button class="header-btn" id="historyBtn" title="히스토리">📜</button>
-        <button class="header-btn" id="settingsIconBtn" title="설정">⚙️</button>
+        <button class="header-btn" id="newChatBtn" title="New Chat">+</button>
+        <button class="header-btn" id="historyBtn" title="History">📜</button>
+        <button class="header-btn" id="settingsIconBtn" title="Settings">⚙️</button>
       </div>
     </div>
 
@@ -30,10 +30,10 @@
         <div class="welcome-icon">👋</div>
         <h2>Welcome to AI Browser Agent</h2>
         <p>I can help you automate web tasks, solve CAPTCHAs, extract data, and more!</p>
-        <div class="welcome-examples">
-          <div class="example-item">💡 "구글에서 AI 뉴스 검색해줘"</div>
-          <div class="example-item">💡 "이 페이지에서 가격 정보 추출해줘"</div>
-          <div class="example-item">💡 "3개 사이트 열어서 헤드라인 비교해줘"</div>
+          <div class="welcome-examples">
+          <div class="example-item">💡 "Search AI news on Google"</div>
+          <div class="example-item">💡 "Extract pricing info on this page"</div>
+          <div class="example-item">💡 "Open 3 sites and compare headlines"</div>
         </div>
       </div>
     </div>
@@ -42,7 +42,7 @@
     <div class="input-area">
       <textarea
         id="taskInput"
-        placeholder="Ask AI to automate a task... (e.g., '구글에서 AI 검색해줘')"
+        placeholder="Ask AI to automate a task... (e.g., 'Search AI on Google')"
         rows="3"
       ></textarea>
       <div class="input-controls">
@@ -76,19 +76,19 @@
         <div class="setting-item">
           <label>
             <input type="checkbox" id="syncResultToBrowserView" checked />
-            작업 완료 후 결과를 브라우저에 표시
+            Show results in BrowserView after completion
           </label>
           <small style="color: #666; display: block; margin-top: 4px;">
-            AI 작업이 끝나면 브라우저가 결과 페이지로 이동합니다
+            The browser will navigate to the results page when the AI task finishes
           </small>
         </div>
         <div class="setting-item">
           <label>
             <input type="checkbox" id="syncCookies" checked />
-            로그인 상태 동기화 (쿠키 공유)
+            Sync login state (share cookies)
           </label>
           <small style="color: #666; display: block; margin-top: 4px;">
-            브라우저의 로그인 상태를 AI 작업에 전달합니다 (권장)
+            Pass the browser login state to AI tasks (recommended)
           </small>
         </div>
         <div class="setting-item">
@@ -116,7 +116,7 @@
   <div class="modal-overlay" id="historyModal" style="display: none;">
     <div class="modal-content">
       <div class="modal-header">
-        <h2>📜 채팅 히스토리</h2>
+        <h2>📜 Chat History</h2>
         <button class="modal-close" id="historyModalClose">×</button>
       </div>
       <div class="modal-body">

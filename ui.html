@@ -483,7 +483,7 @@
 
       // 보고서 제목
       const title = document.createElement('h2');
-      title.textContent = '📋 작업 완료 보고서';
+      title.textContent = '📋 Task Completion Report';
       title.style.cssText = `
         color: #2563eb;
         border-bottom: 3px solid #2563eb;
@@ -507,11 +507,11 @@
       screenshotArea.appendChild(reportContainer);
 
       // URL 바 업데이트
-      urlBar.textContent = '작업 완료 - 보고서';
+      urlBar.textContent = 'Task Completed - Report';
       urlBar.classList.add('show');
 
       // 로그에도 추가
-      addLog('보고서가 Live View에 표시되었습니다.');
+      addLog('Report displayed in Live View.');
     }
 
     // Run task
