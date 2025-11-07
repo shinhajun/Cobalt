@@ -1,0 +1,23 @@
+# Firebase service account key
+packages/server/config/ai-agent-cad35-firebase-adminsdk-fbsvc-e97b790820.json
+ai-agent/packages/server/config/*.json
+
+# Node.js
+node_modules/
+dist/
+npm-debug.log
+yarn-error.log
+.env
+*.env
+
+# TypeScript
+*.tsbuildinfo
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db 
