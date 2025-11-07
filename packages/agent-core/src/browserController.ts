@@ -521,9 +521,10 @@ export class BrowserController extends EventEmitter {
       if (!gridContainer) return { instruction, gridImageBase64: '' };
 
       // Ensure tiles are mostly loaded before capture to avoid blank/white tiles being analyzed
-      await this.waitForRecaptchaTilesLoaded(0.85, 4000).catch(() => {});
+      await this.waitForRecaptchaTilesLoaded(0.92, 6000).catch(() => {});
 
-      const buf = await gridContainer.screenshot();
+      // Use JPEG with moderate quality to reduce payload size for vision models
+      const buf = await gridContainer.screenshot({ type: 'jpeg', quality: 70 });
       const gridImageBase64 = Buffer.from(buf).toString('base64');
       // Also stream a full-page screenshot so Live View shows the challenge immediately
       await this.streamScreenshot('recaptcha-challenge-detected');
@@ -701,66 +702,6 @@ export class BrowserController extends EventEmitter {
       return false;
     } catch (_) {
       return false;
-    }
-  }
-
-  // Return ordered base64 screenshots of each reCAPTCHA tile (row-major), with inferred grid size
-  async getRecaptchaTilesBase64Ordered(): Promise<{ tiles: string[]; gridSize: number } | null> {
-    if (!this.page) return null;
-    const { challengeFrame } = this.getRecaptchaFrames();
-    if (!challengeFrame) return null;
-    try {
-      await this.waitForRecaptchaTilesLoaded(0.85, 4000).catch(() => {});
-      const tileHandles = await challengeFrame.$$('.rc-imageselect-table-33 td, .rc-imageselect-table-44 td, .rc-image-tile-wrapper, .rc-imageselect-tile');
-      if (!tileHandles || tileHandles.length === 0) return null;
-
-      const boxes = await Promise.all(tileHandles.map((h: any) => h.boundingBox()));
-      type Box = { x: number; y: number; width?: number; height?: number } | null;
-      const byCenterKey = new Map<string, any>();
-      for (let i = 0; i < tileHandles.length; i++) {
-        const box = boxes[i] as Box;
-        if (!box) continue;
-        const cx = Math.round((box.x + (box.width || 0) / 2));
-        const cy = Math.round((box.y + (box.height || 0) / 2));
-        const key = `${cx}:${cy}`;
-        if (!byCenterKey.has(key)) byCenterKey.set(key, tileHandles[i]);
-      }
-      const uniqueTiles: any[] = Array.from(byCenterKey.values());
-      const uniqueBoxes = await Promise.all(uniqueTiles.map((h: any) => h.boundingBox()));
-      const orderedPairs = uniqueTiles
-        .map((el: any, idx: number) => ({ el, box: uniqueBoxes[idx] as any }))
-        .filter((p) => !!p.box)
-        .sort((a, b) => {
-          const ay = Math.round((a.box!.y) / 10);
-          const by = Math.round((b.box!.y) / 10);
-          if (ay !== by) return ay - by;
-          return (a.box!.x) - (b.box!.x);
-        });
-      const ordered = orderedPairs.map(p => p.el);
-
-      const gridSize = ordered.length >= 16 ? 4 : 3;
-      const tiles: string[] = [];
-      for (const el of ordered) {
-        try {
-          const buf = await el.screenshot();
-          tiles.push(Buffer.from(buf).toString('base64'));
-        } catch (_) {
-          // Try inner image element
-          try {
-            const img = await el.$('img');
-            if (img) {
-              const buf = await img.screenshot();
-              tiles.push(Buffer.from(buf).toString('base64'));
-              continue;
-            }
-          } catch (_) {}
-          tiles.push('');
-        }
-      }
-
-      return { tiles, gridSize };
-    } catch (_) {
-      return null;
     }
   }
 

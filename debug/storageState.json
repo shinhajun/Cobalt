@@ -22,10 +22,10 @@
     },
     {
       "name": "_GRECAPTCHA",
-      "value": "09AG7bzvEs9hz-ujuhui732lUPvUKOavQTPqicxRcpVrK1dqR-TachxU54T7XoZSdwbk5U9jvT9rudJeEvPLJWodg",
+      "value": "09AG7bzvEy2ngPBfdLUmz79eVGvTU7Q1B_sJwmMigVBHZCnuTx68__jc5SOfb40s2gwMoL7EVTk1fnRLUjNaLlxuI",
       "domain": "www.google.com",
       "path": "/recaptcha",
-      "expires": 1776564176.013067,
+      "expires": 1776567797.286312,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -376,16 +376,6 @@
       "domain": ".naver.com",
       "path": "/",
       "expires": -1,
-      "httpOnly": false,
-      "secure": false,
-      "sameSite": "Lax"
-    },
-    {
-      "name": "GOOGLE_ABUSE_EXEMPTION",
-      "value": "ID=cf42fb670a65b036:TM=1761004956:C=R:IP=130.245.192.3-:S=WuiZIpqiuYL-y7wl-nMo2p8",
-      "domain": ".google.com",
-      "path": "/",
-      "expires": 1761015756.26877,
       "httpOnly": false,
       "secure": false,
       "sameSite": "Lax"
@@ -1622,10 +1612,10 @@
     },
     {
       "name": "NID",
-      "value": "525=GNLwyRNTjNJpYDynLKiWOSP3-soGCC2e0az6xiRLzs8e-jUsCN03cxTJzd2lxITW23LzxfFbTwk9louiNxsQOB0K4akNuAOPcJafL5mIU4BHVVOqVV8bC2zHXQo-crWFxMgyVFsSTixJYA0u2pPub_7Um5gui-MYnZLBaIlrDz6yYU4KKsVmUu82TiX8AepuQE-am39XxV0YvlDjKIl2NsW-Vgr5jG5H8xcZ7u1rPKiaE_IiNmVmq0NPRs6aNU2xNMbxGH1Qz_g",
+      "value": "525=M9gZdTi4hl37V4Po5b_gv0i5yD_9CijkkRDW09NtXNvAFgAvKiNjbAqqgvgGWb0Ezc6XRzEuWABpvxT7rEWYe2BpZqU_NNo91axfcC0daCanbZDREyhApg58lBLebtKjuEHdHlwnim1qOY1L-4jmgzlrgR9Ft6rIIQEDg2Ok9gB9zKlooAwMNBg2mITZXCuYSIRBpQ3uqHG6IJZFKTCc0Sclb5cNikyU8QnSD9sOer4xjTobTo-ye30U537fjQTv3pbuSrgA0mQ",
       "domain": ".google.com",
       "path": "/",
-      "expires": 1776746474.748965,
+      "expires": 1776746474.618375,
       "httpOnly": true,
       "secure": true,
       "sameSite": "None"
@@ -1637,15 +1627,15 @@
       "localStorage": [
         {
           "name": "sb_wiz.zpc.gws-wiz.",
-          "value": "{\"0\":[[\"stony brook spring 2025 calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar spring 2026\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook winter break 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu academic calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 classes\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}]],\"1\":{\"ag\":{\"a\":{\"40009\":[\"최근 검색어와 관련이 있음\"]}},\"av\":\"-5871423537472056971\",\"q\":\"0EHy8sKo5Nb_tQt5b34_pLyoDso\"}}"
+          "value": "{\"0\":[[\"stony brook spring 2025 calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar spring 2026\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook winter break 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"stony brook academic calendar fall 2025\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 courses\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu academic calendar\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}],[\"sbu fall 2025 classes\",0,[512,308,468,357,439,650,362,394],{\"zl\":40009}]],\"1\":{\"ag\":{\"a\":{\"40009\":[\"최근 검색어와 관련이 있음\"]}},\"av\":\"-6453585955105366972\",\"q\":\"aaykATjeQPHaTtX2bYF0SrdDLkU\"}}"
         },
         {
           "name": "sb_wiz.pq_tm_hp",
-          "value": "1761012169122"
+          "value": "1761015790107"
         },
         {
           "name": "rc::f",
-          "value": "0aAE_cEEwWYBxFBAcVuoBnlQKNkEUzyI7ASEcI8UMeMKLnzsDOH2jJzKOPnRxze25Imtm3zck"
+          "value": "0aAE_cEEwFentYG-EGMDctQEeXwl_wzF2ZrBlcwWbF_U8WFeo0y61Zjb26mWOixWxK8IDzQSY"
         },
         {
           "name": "sb_wiz.pq",
@@ -1669,7 +1659,7 @@
         },
         {
           "name": "sb_wiz.qc",
-          "value": "35"
+          "value": "44"
         }
       ]
     },

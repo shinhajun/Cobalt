@@ -7,13 +7,23 @@ const envPath = path.resolve(__dirname, '.env');
 console.log('[Electron] Loading .env from:', envPath);
 dotenv.config({ path: envPath });
 
-// API 키 확인
-if (!process.env.OPENAI_API_KEY) {
-  console.error('[Electron] ERROR: OPENAI_API_KEY not found in .env file!');
-  console.error('[Electron] Please create .env file at:', envPath);
-  console.error('[Electron] With content: OPENAI_API_KEY=your-key-here');
+// API 키 확인 (OpenAI 또는 Google 중 하나만 있어도 시작 가능)
+const hasOpenAI = !!process.env.OPENAI_API_KEY;
+const hasGoogle = !!process.env.GOOGLE_API_KEY;
+if (!hasOpenAI && !hasGoogle) {
+  console.error('[Electron] ERROR: No API key found! Set OPENAI_API_KEY or GOOGLE_API_KEY in .env');
+  console.error('[Electron] .env path:', envPath);
 } else {
-  console.log('[Electron] OPENAI_API_KEY loaded:', process.env.OPENAI_API_KEY.substring(0, 20) + '...');
+  if (hasOpenAI) {
+    console.log('[Electron] OPENAI_API_KEY loaded:', process.env.OPENAI_API_KEY.substring(0, 20) + '...');
+  } else {
+    console.log('[Electron] OPENAI_API_KEY not set (OK if using Gemini)');
+  }
+  if (hasGoogle) {
+    console.log('[Electron] GOOGLE_API_KEY loaded:', process.env.GOOGLE_API_KEY.substring(0, 20) + '...');
+  } else {
+    console.log('[Electron] GOOGLE_API_KEY not set (OK if using OpenAI)');
+  }
 }
 
 const { BrowserController } = require('./packages/agent-core/dist/browserController');
@@ -95,6 +105,16 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
         await browserController.close();
       }
 
+      // 환경 구성 병합: UI에서 온 설정값이 있으면 우선 적용 (프로세스 env override)
+      // *** LLMService 생성 전에 환경변수를 먼저 설정해야 비전 모델이 올바르게 초기화됨 ***
+      let prevEnv = {
+        CAPTCHA_VISION_MODEL: process.env.CAPTCHA_VISION_MODEL,
+      };
+      if (settings && settings.captchaVisionModel) {
+        process.env.CAPTCHA_VISION_MODEL = settings.captchaVisionModel;
+        console.log('[Electron] Setting CAPTCHA_VISION_MODEL to:', settings.captchaVisionModel);
+      }
+
       // 새 인스턴스 생성
       browserController = new BrowserController(true);
       llmService = new LLMService(model || 'gpt-5-mini');
@@ -117,14 +137,6 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
 
       if (mainWindow) {
         mainWindow.webContents.send('agent-started', { task: taskPlan });
-      }
-
-      // 환경 구성 병합: UI에서 온 설정값이 있으면 우선 적용 (프로세스 env override)
-      const prevEnv = {
-        CAPTCHA_VISION_MODEL: process.env.CAPTCHA_VISION_MODEL,
-      };
-      if (settings && settings.captchaVisionModel) {
-        process.env.CAPTCHA_VISION_MODEL = settings.captchaVisionModel;
       }
 
       // AI 작업 실행
@@ -156,7 +168,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
       }
     } finally {
       // Restore previous env
-      if (typeof prevEnv !== 'undefined') {
+      if (prevEnv) {
         if (prevEnv.CAPTCHA_VISION_MODEL !== undefined) process.env.CAPTCHA_VISION_MODEL = prevEnv.CAPTCHA_VISION_MODEL; else delete process.env.CAPTCHA_VISION_MODEL;
       }
       if (browserController) {
