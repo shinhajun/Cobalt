@@ -332,6 +332,152 @@ export class AgentTools {
   }
 
   /**
+   * Extract table data from HTML
+   * Note: This is a placeholder - actual implementation requires browser context
+   */
+  async extractTable(selector: string, context?: any): Promise<ToolResult> {
+    try {
+      // This will be called from BrowserController with page context
+      return {
+        success: true,
+        result: {
+          note: 'extractTable should be called via browser action',
+          selector
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        result: null,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Extract list data
+   */
+  async extractList(selector: string, context?: any): Promise<ToolResult> {
+    try {
+      return {
+        success: true,
+        result: {
+          note: 'extractList should be called via browser action',
+          selector
+        }
+      };
+    } catch (error) {
+      return {
+        success: false,
+        result: null,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Save data to file
+   */
+  async saveToFile(data: any, filename: string): Promise<ToolResult> {
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const outputDir = path.join(process.cwd(), 'output');
+
+      // Ensure output directory exists
+      if (!fs.existsSync(outputDir)) {
+        fs.mkdirSync(outputDir, { recursive: true });
+      }
+
+      const filePath = path.join(outputDir, filename);
+      const content = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+
+      fs.writeFileSync(filePath, content, 'utf8');
+
+      return {
+        success: true,
+        result: `File saved to: ${filePath}`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        result: null,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Parse structured data based on schema
+   */
+  async parseStructuredData(text: string, schema: any): Promise<ToolResult> {
+    try {
+      // Simple schema-based extraction
+      const result: any = {};
+
+      for (const [key, pattern] of Object.entries(schema)) {
+        if (typeof pattern === 'string') {
+          const regex = new RegExp(pattern);
+          const match = text.match(regex);
+          result[key] = match ? match[1] || match[0] : null;
+        }
+      }
+
+      return {
+        success: true,
+        result
+      };
+    } catch (error) {
+      return {
+        success: false,
+        result: null,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
+   * Convert CSV to JSON
+   */
+  async csvToJson(csvText: string): Promise<ToolResult> {
+    try {
+      const lines = csvText.trim().split('\n');
+      if (lines.length === 0) {
+        return {
+          success: false,
+          result: null,
+          error: 'Empty CSV'
+        };
+      }
+
+      const headers = lines[0].split(',').map(h => h.trim());
+      const data = [];
+
+      for (let i = 1; i < lines.length; i++) {
+        const values = lines[i].split(',').map(v => v.trim());
+        const row: any = {};
+
+        headers.forEach((header, index) => {
+          row[header] = values[index] || '';
+        });
+
+        data.push(row);
+      }
+
+      return {
+        success: true,
+        result: data
+      };
+    } catch (error) {
+      return {
+        success: false,
+        result: null,
+        error: (error as Error).message
+      };
+    }
+  }
+
+  /**
    * Clear all stored data
    */
   async clearAll(): Promise<ToolResult> {

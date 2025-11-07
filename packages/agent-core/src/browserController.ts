@@ -1240,31 +1240,322 @@ export class BrowserController extends EventEmitter {
     }
   }
 
-  async clickRectGrid(rect: { x: number; y: number; width: number; height: number }, gridSize: number, indices: number[]): Promise<boolean> {
+  /**
+   * Click grid tiles using DOM element selection (preferred method)
+   * Searches for actual grid DOM elements and clicks them directly
+   */
+  async clickGridByElements(rect: { x: number; y: number; width: number; height: number }, gridSize: number, indices: number[]): Promise<boolean> {
     if (!this.page) return false;
     try {
+      this.emitLog('system', `[ClickGridByElements] Searching for ${gridSize}x${gridSize} grid tiles in DOM...`);
+
+      // Discover what selectors are available
+      const availableSelectors = await this.page.evaluate(() => {
+        const testSelectors = [
+          '.captcha-box-grid > div',
+          '.captcha-box-grid div',
+          '.captcha-box div',
+          '[class*="captcha"] div',
+          '[class*="grid"] > div',
+          '[class*="grid"] div',
+          '.grid-tile', '.tile', '.square', '.cell',
+          'img[src*="captcha"]', 'canvas',
+          'div[onclick]', 'div[style*="cursor"]'
+        ];
+
+        const results: { selector: string; count: number }[] = [];
+        for (const sel of testSelectors) {
+          try {
+            const elements = document.querySelectorAll(sel);
+            if (elements.length > 0) {
+              results.push({ selector: sel, count: elements.length });
+            }
+          } catch (_) {}
+        }
+        return results;
+      });
+
+      this.emitLog('system', `[ClickGridByElements] Available selectors: ${JSON.stringify(availableSelectors)}`);
+
+      const selectors = [
+        '.captcha-box-grid > div > div',  // neal.fun: nested divs
+        '.captcha-box-grid > div',
+        '.captcha-box-grid-tile',
+        '.captcha-tile',
+        '[class*="captcha-box-grid"] > div > div',
+        '[class*="captcha-box-grid"] > div',
+        '[class*="grid"] > div > div',
+        '[class*="grid"] > div',
+        '.grid-tile', '.tile', '.square', '.cell',
+        '[class*="tile"]',
+        'img[src*="captcha"]', 'canvas', 'div[onclick]'
+      ];
+
+      let clicked = 0;
+      const expectedTiles = gridSize * gridSize;
+
+      for (const selector of selectors) {
+        try {
+          const tiles = await this.page.$$(selector);
+          if (tiles.length !== expectedTiles) continue;
+
+          // Found matching grid!
+          this.emitLog('system', `[ClickGridByElements] ✓ Found ${tiles.length} tiles using selector: ${selector}`);
+
+          // Click the specified indices directly
+          for (const idx of indices) {
+            if (idx < 0 || idx >= tiles.length) continue;
+
+            const tile = tiles[idx];
+            this.emitLog('system', `[ClickGridByElements] Clicking tile ${idx} (DOM element)`);
+
+            try {
+              await tile.click({ delay: 50 });
+              clicked++;
+              await this.page.waitForTimeout(200);
+            } catch (clickErr: any) {
+              this.emitLog('error', `[ClickGridByElements] Failed to click tile ${idx}: ${clickErr.message}`);
+            }
+          }
+
+          if (clicked > 0) {
+            this.emitLog('system', `[ClickGridByElements] ✓ Successfully clicked ${clicked}/${indices.length} tiles via DOM elements`);
+            await this.streamScreenshot('grid-tiles-clicked-elements');
+            if (this.debugMode) await this.takeDebugScreenshot('after-grid-tiles-clicked-elements');
+          }
+
+          return clicked > 0;
+        } catch (_) {
+          continue;  // Try next selector
+        }
+      }
+
+      this.emitLog('error', `[ClickGridByElements] ✗ No matching grid found with ${expectedTiles} tiles`);
+      return false;
+    } catch (e: any) {
+      this.emitLog('error', `[ClickGridByElements] Error: ${e.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Click grid tiles using coordinate calculation (fallback method)
+   * Divides the grid rect into cells and clicks calculated coordinates
+   */
+  async clickGridByCoordinates(rect: { x: number; y: number; width: number; height: number }, gridSize: number, indices: number[]): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      this.emitLog('system', `[ClickGridByCoordinates] Using rect-based calculation for ${gridSize}x${gridSize} grid`);
+      this.emitLog('system', `[ClickGridByCoordinates] Grid rect: x=${rect.x}, y=${rect.y}, w=${rect.width}, h=${rect.height}`);
+
       const rows = gridSize;
       const cols = gridSize;
       const cellW = rect.width / cols;
       const cellH = rect.height / rows;
+
       let clicked = 0;
+
       for (const idx of indices) {
         const r = Math.floor(idx / cols);
         const c = idx % cols;
         const cx = Math.round(rect.x + c * cellW + cellW / 2);
         const cy = Math.round(rect.y + r * cellH + cellH / 2);
+
+        this.emitLog('system', `[ClickGridByCoordinates] Clicking tile ${idx} (row=${r}, col=${c}) at (${cx}, ${cy})`);
+
         const ok = await this.clickViewport(cx, cy);
         if (ok) clicked++;
-        await this.page!.waitForTimeout(200);
+        await this.page.waitForTimeout(200);
       }
+
+      this.emitLog('system', `[ClickGridByCoordinates] ✓ Successfully clicked ${clicked}/${indices.length} tiles via coordinates`);
+
       if (clicked > 0) {
-        await this.streamScreenshot('grid-tiles-clicked');
-        if (this.debugMode) await this.takeDebugScreenshot('after-grid-tiles-clicked');
+        await this.streamScreenshot('grid-tiles-clicked-coordinates');
+        if (this.debugMode) await this.takeDebugScreenshot('after-grid-tiles-clicked-coordinates');
       }
+
       return clicked > 0;
+    } catch (e: any) {
+      this.emitLog('error', `[ClickGridByCoordinates] Error: ${e.message}`);
+      return false;
+    }
+  }
+
+  /**
+   * @deprecated Use clickGridByElements or clickGridByCoordinates instead
+   * Old method kept for compatibility
+   */
+  async clickRectGrid(rect: { x: number; y: number; width: number; height: number }, gridSize: number, indices: number[]): Promise<boolean> {
+    // Try elements first, fall back to coordinates
+    const success = await this.clickGridByElements(rect, gridSize, indices);
+    if (success) return true;
+    return await this.clickGridByCoordinates(rect, gridSize, indices);
+  }
+
+  /**
+   * Handle dynamic grid challenge (reCAPTCHA-style)
+   * Click tiles one by one, wait for new images, continue until no more matches
+   * Uses vision model to identify which tiles contain the target object after each click
+   */
+  async clickGridDynamic(
+    rect: { x: number; y: number; width: number; height: number },
+    gridSize: number,
+    initialIndexes: number[],
+    _instruction: string,
+    clickMethod: 'elements' | 'coordinates',
+    maxIterations: number = 20
+  ): Promise<{ success: boolean; clickCount: number }> {
+    if (!this.page) return { success: false, clickCount: 0 };
+
+    this.emitLog('system', `[DynamicGrid] Starting dynamic grid challenge: ${gridSize}x${gridSize}, method=${clickMethod}`);
+    this.emitLog('system', `[DynamicGrid] Initial tiles to click: ${JSON.stringify(initialIndexes)}`);
+
+    let totalClicked = 0;
+    let iteration = 0;
+    let currentIndexes = [...initialIndexes];
+
+    try {
+      while (iteration < maxIterations && currentIndexes.length > 0) {
+        iteration++;
+        this.emitLog('system', `[DynamicGrid] Iteration ${iteration}: clicking ${currentIndexes.length} tiles`);
+
+        // Click all current tiles
+        for (const idx of currentIndexes) {
+          let success = false;
+
+          if (clickMethod === 'elements') {
+            success = await this.clickGridByElements(rect, gridSize, [idx]);
+          } else {
+            success = await this.clickGridByCoordinates(rect, gridSize, [idx]);
+          }
+
+          if (success) {
+            totalClicked++;
+            // Wait for new image to load
+            await this.page.waitForTimeout(800);
+          }
+        }
+
+        this.emitLog('system', `[DynamicGrid] Iteration ${iteration} complete. Total clicked: ${totalClicked}`);
+
+        // Take screenshot and check if there are more tiles to click
+        await this.streamScreenshot(`dynamic-grid-iteration-${iteration}`);
+
+        // Small delay before checking again
+        await this.page.waitForTimeout(500);
+
+        // Note: Vision loop for dynamic grids is handled by LLMService
+        // The agent will call visionInteract again if needed
+        // This method handles one round of clicking, then returns control to agent
+        this.emitLog('system', `[DynamicGrid] Round complete. Agent will re-evaluate if more tiles remain.`);
+        break;
+      }
+
+      this.emitLog('system', `[DynamicGrid] Completed. Total iterations: ${iteration}, total tiles clicked: ${totalClicked}`);
+      return { success: totalClicked > 0, clickCount: totalClicked };
+
+    } catch (e: any) {
+      this.emitLog('error', `[DynamicGrid] Error: ${e.message}`);
+      return { success: false, clickCount: totalClicked };
+    }
+  }
+
+  /**
+   * Handle static grid challenge (neal.fun-style)
+   * Select all matching tiles at once, then the agent will click verify
+   */
+  async clickGridStatic(
+    rect: { x: number; y: number; width: number; height: number },
+    gridSize: number,
+    indexes: number[],
+    clickMethod: 'elements' | 'coordinates'
+  ): Promise<boolean> {
+    this.emitLog('system', `[StaticGrid] Clicking all ${indexes.length} tiles at once (method=${clickMethod})`);
+
+    if (clickMethod === 'elements') {
+      return await this.clickGridByElements(rect, gridSize, indexes);
+    } else {
+      return await this.clickGridByCoordinates(rect, gridSize, indexes);
+    }
+  }
+
+  /**
+   * Check if captcha failed (shows error or wrong selection)
+   * Returns true if failure detected
+   */
+  async isCaptchaFailed(): Promise<boolean> {
+    if (!this.page) return false;
+    try {
+      const text = await this.page.evaluate(() => document.body?.innerText || '');
+      // Look for common failure indicators
+      const failurePatterns = /incorrect|wrong|try again|failed|error|다시|틀렸|오류/i;
+      return failurePatterns.test(text);
     } catch (_) {
       return false;
     }
+  }
+
+  /**
+   * Retry action with automatic failure detection and reset
+   */
+  async retryWithReset<T>(
+    action: () => Promise<T>,
+    maxRetries: number = 3,
+    actionName: string = 'action'
+  ): Promise<T> {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        this.emitLog('system', `[Retry] Attempt ${attempt}/${maxRetries} for ${actionName}`);
+
+        const result = await action();
+
+        // Check if failed
+        await this.page?.waitForTimeout(1000);
+        const failed = await this.isCaptchaFailed();
+
+        if (!failed) {
+          this.emitLog('system', `[Retry] ✓ Success on attempt ${attempt}`);
+          return result;
+        }
+
+        this.emitLog('system', `[Retry] ✗ Failed on attempt ${attempt}, trying reset...`);
+
+        // Try to reset
+        const resetSuccess = await this.clickResetButton();
+        if (resetSuccess) {
+          await this.page?.waitForTimeout(1500);
+        }
+
+        if (attempt === maxRetries) {
+          this.emitLog('error', `[Retry] ✗ Failed after ${maxRetries} attempts`);
+          return result;
+        }
+      } catch (error) {
+        this.emitLog('error', `[Retry] Error on attempt ${attempt}: ${(error as Error).message}`);
+        if (attempt === maxRetries) {
+          throw error;
+        }
+      }
+    }
+
+    throw new Error(`Failed after ${maxRetries} retries`);
+  }
+
+  /**
+   * Click Reset button if visible
+   */
+  async clickResetButton(): Promise<boolean> {
+    this.emitLog('system', '[Reset] Looking for Reset button...');
+    const resetClicked = await this.clickFirstVisibleContainingText(['reset', '재설정', '다시']);
+    if (resetClicked) {
+      this.emitLog('system', '[Reset] ✓ Reset button clicked');
+      await this.page?.waitForTimeout(1000);
+      await this.streamScreenshot('after-reset');
+      return true;
+    }
+    this.emitLog('system', '[Reset] ✗ No Reset button found');
+    return false;
   }
 
   async clickFirstVisibleContainingText(patterns: string[]): Promise<boolean> {
@@ -1375,6 +1666,151 @@ export class BrowserController extends EventEmitter {
       this.context = null;
       this.emitLog('system', { message: 'Browser closed.'});
       console.log('[BrowserController] Browser closed.');
+    }
+  }
+
+  /**
+   * Fill form with data
+   */
+  async fillForm(formData: Record<string, string>): Promise<boolean> {
+    if (!this.page) return false;
+
+    try {
+      for (const [selector, value] of Object.entries(formData)) {
+        try {
+          const element = await this.page.$(selector);
+          if (element) {
+            await element.fill(value);
+            this.emitLog('system', `[FillForm] Filled ${selector} with value`);
+            await this.page.waitForTimeout(100);
+          }
+        } catch (err) {
+          this.emitLog('error', `[FillForm] Failed to fill ${selector}: ${(err as Error).message}`);
+        }
+      }
+
+      return true;
+    } catch (error) {
+      this.emitLog('error', `[FillForm] Error: ${(error as Error).message}`);
+      return false;
+    }
+  }
+
+  /**
+   * Detect form fields on page
+   */
+  async detectFormFields(): Promise<Array<{selector: string; type: string; name: string; label: string}>> {
+    if (!this.page) return [];
+
+    try {
+      const fields = await this.page.$$eval('input, textarea, select', (elements: Element[]) => {
+        return elements.map(el => {
+          const input = el as HTMLInputElement;
+          const label = document.querySelector(`label[for="${input.id}"]`);
+
+          return {
+            selector: input.id ? `#${input.id}` : `[name="${input.name}"]`,
+            type: input.type || input.tagName.toLowerCase(),
+            name: input.name || input.id || '',
+            label: label?.textContent?.trim() || input.placeholder || ''
+          };
+        }).filter(f => f.selector);
+      });
+
+      this.emitLog('system', `[DetectForm] Found ${fields.length} form fields`);
+      return fields;
+    } catch (error) {
+      this.emitLog('error', `[DetectForm] Error: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract table data from page
+   */
+  async extractTableData(selector: string): Promise<any[][]> {
+    if (!this.page) throw new Error('Page not initialized');
+
+    try {
+      const data = await this.page.$$eval(selector, (tables: Element[]) => {
+        const results: any[][] = [];
+
+        tables.forEach(table => {
+          const rows = Array.from(table.querySelectorAll('tr'));
+          rows.forEach(row => {
+            const cells = Array.from(row.querySelectorAll('td, th'));
+            const rowData = cells.map(cell => (cell as HTMLElement).innerText?.trim() || '');
+            if (rowData.length > 0) {
+              results.push(rowData);
+            }
+          });
+        });
+
+        return results;
+      });
+
+      this.emitLog('system', `[ExtractTable] Extracted ${data.length} rows from ${selector}`);
+      return data;
+    } catch (error) {
+      this.emitLog('error', `[ExtractTable] Error: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract list data from page
+   */
+  async extractListData(selector: string): Promise<string[]> {
+    if (!this.page) throw new Error('Page not initialized');
+
+    try {
+      const data = await this.page.$$eval(selector, (lists: Element[]) => {
+        const results: string[] = [];
+
+        lists.forEach(list => {
+          const items = Array.from(list.querySelectorAll('li'));
+          items.forEach(item => {
+            const text = (item as HTMLElement).innerText?.trim();
+            if (text) results.push(text);
+          });
+        });
+
+        return results;
+      });
+
+      this.emitLog('system', `[ExtractList] Extracted ${data.length} items from ${selector}`);
+      return data;
+    } catch (error) {
+      this.emitLog('error', `[ExtractList] Error: ${(error as Error).message}`);
+      return [];
+    }
+  }
+
+  /**
+   * Extract structured data based on selectors
+   */
+  async extractStructuredData(schema: Record<string, string>): Promise<Record<string, string>> {
+    if (!this.page) throw new Error('Page not initialized');
+
+    try {
+      const result: Record<string, string> = {};
+
+      for (const [key, selector] of Object.entries(schema)) {
+        try {
+          const value = await this.page.$eval(selector, (el: Element) =>
+            (el as HTMLElement).innerText?.trim() || ''
+          );
+          result[key] = value;
+        } catch {
+          result[key] = '';
+        }
+      }
+
+      this.emitLog('system', `[ExtractStructured] Extracted ${Object.keys(result).length} fields`);
+      return result;
+    } catch (error) {
+      this.emitLog('error', `[ExtractStructured] Error: ${(error as Error).message}`);
+      return {};
     }
   }
 

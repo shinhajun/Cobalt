@@ -5,8 +5,25 @@ import { BrowserController } from "./browserController";
 import { AgentTools } from "./agentTools";
 // Vision-based captcha solving (no external captcha providers)
 import path from 'path';
+import crypto from 'crypto';
 
 export type AgentLogCallback = (log: { type: 'thought' | 'observation' | 'system' | 'error', data: any }) => void;
+
+// Shared action history entry
+export interface ActionHistoryEntry {
+  timestamp: number;
+  actor: 'main_llm' | 'vision_model' | 'tool' | 'browser';
+  action: string;
+  details: any;
+  result?: any;
+  success?: boolean;
+}
+
+// Vision model cache entry
+interface VisionCacheEntry {
+  result: any;
+  expires: number;
+}
 
 export class LLMService {
   private model: any;
@@ -14,6 +31,13 @@ export class LLMService {
   private visionModel: any | null = null;
   private isVisionGeminiProvider: boolean = false;
   private tools: AgentTools;
+
+  // Shared context: all actions from both LLM and Vision model
+  private actionHistory: ActionHistoryEntry[] = [];
+
+  // Vision model response cache (key: hash of domain+type+instruction, value: cached result)
+  private visionCache = new Map<string, VisionCacheEntry>();
+  private readonly VISION_CACHE_TTL = 30 * 60 * 1000; // 30 minutes
 
   // Vision 모델 타임아웃 상수 통일
   private readonly VISION_TIMEOUTS = {
@@ -28,6 +52,7 @@ export class LLMService {
     MAX_ITERATIONS: 15,
     PROMPT_LOG_LENGTH: 50, // 로그에 표시할 프롬프트 길이
     RESPONSE_LOG_LENGTH: 300,
+    MAX_HISTORY_ENTRIES: 20, // 히스토리에 보관할 최대 액션 수
   };
 
   constructor(modelName: string = "gpt-5-mini", logCallback?: AgentLogCallback) {
@@ -107,6 +132,80 @@ export class LLMService {
     }
   }
 
+  // Add action to shared history
+  private addToHistory(entry: ActionHistoryEntry) {
+    this.actionHistory.push(entry);
+    // Keep only recent entries
+    if (this.actionHistory.length > this.LLM_CONFIG.MAX_HISTORY_ENTRIES) {
+      this.actionHistory = this.actionHistory.slice(-this.LLM_CONFIG.MAX_HISTORY_ENTRIES);
+    }
+  }
+
+  // Create cache key for vision model responses
+  private createVisionCacheKey(url: string, challengeType: string, instruction: string): string {
+    const domain = new URL(url).hostname;
+    const hash = crypto.createHash('md5').update(instruction).digest('hex').substring(0, 8);
+    return `${domain}_${challengeType}_${hash}`;
+  }
+
+  // Get cached vision response if available and not expired
+  private getCachedVisionResponse(key: string): any | null {
+    const cached = this.visionCache.get(key);
+    if (!cached) return null;
+
+    if (Date.now() > cached.expires) {
+      // Cache expired
+      this.visionCache.delete(key);
+      return null;
+    }
+
+    this.emitLog('system', { message: `[VisionCache] Hit for key: ${key}` });
+    return cached.result;
+  }
+
+  // Cache vision response
+  private cacheVisionResponse(key: string, result: any) {
+    this.visionCache.set(key, {
+      result,
+      expires: Date.now() + this.VISION_CACHE_TTL
+    });
+    this.emitLog('system', { message: `[VisionCache] Cached response for key: ${key}` });
+
+    // Clean up expired entries periodically
+    if (this.visionCache.size > 100) {
+      const now = Date.now();
+      for (const [k, v] of this.visionCache.entries()) {
+        if (now > v.expires) {
+          this.visionCache.delete(k);
+        }
+      }
+    }
+  }
+
+  // Format history for prompts
+  private formatHistoryForPrompt(): string {
+    if (this.actionHistory.length === 0) {
+      return 'No previous actions yet.';
+    }
+
+    const formatted = this.actionHistory.map((entry, idx) => {
+      const timeAgo = Date.now() - entry.timestamp;
+      const seconds = Math.floor(timeAgo / 1000);
+      const statusIcon = entry.success === true ? '✓' : entry.success === false ? '✗' : '•';
+
+      let detail = '';
+      if (typeof entry.details === 'string') {
+        detail = entry.details;
+      } else if (entry.details) {
+        detail = JSON.stringify(entry.details).substring(0, 100);
+      }
+
+      return `${idx + 1}. [${seconds}s ago] ${statusIcon} ${entry.actor}: ${entry.action} ${detail}`;
+    }).join('\n');
+
+    return `Recent Actions:\n${formatted}`;
+  }
+
   private buildVisionContentParts(textPrompt: string, imageBase64: string, mime: 'image/png' | 'image/jpeg' = 'image/png'): any[] {
     // Provider-aware content parts for multimodal messages
     if (this.isVisionGeminiProvider) {
@@ -165,7 +264,11 @@ export class LLMService {
 
   // Generic vision-guided interaction on the current viewport
   private async visionInteractViewport(browserController: BrowserController, instruction: string): Promise<{ success: boolean; report: string }> {
-    if (!this.visionModel) return { success: false, report: 'Vision model not initialized.' };
+    this.emitLog('system', { message: `[VisionInteract] Starting with instruction: "${instruction}"` });
+    if (!this.visionModel) {
+      this.emitLog('error', { message: '[VisionInteract] Vision model not initialized!' });
+      return { success: false, report: 'Vision model not initialized.' };
+    }
     try {
       // If Cloudflare shows "verification success ... waiting", use common method
       try {
@@ -178,42 +281,115 @@ export class LLMService {
         }
       } catch (_) {}
 
-      // Pre-heuristics: try obvious checkbox/gate clicks before invoking the vision model
+      // Pre-heuristics: try obvious checkbox clicks, but skip verify/continue if instruction mentions selecting squares/tiles
+      this.emitLog('system', { message: '[VisionInteract] Trying heuristics first...' });
+      const isGridChallenge = /select.*square|select.*tile|click.*square|click.*tile|top.?right|top.?left|bottom.?right|bottom.?left|stop sign|traffic light|bicycle|crosswalk|bus|car|storefront|grid|captcha/i.test(instruction);
+
       try {
-        const checkboxClicked = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
-        if (checkboxClicked) {
-          await browserController.streamScreenshot('pre-vision-checkbox-heuristic');
-          await new Promise(r => setTimeout(r, 400));
-          return { success: true, report: 'Heuristic checkbox-left-of-text click.' };
-        }
-        const textClicked = await browserController.clickFirstVisibleContainingText(['verify', 'continue', '확인', '계속']);
-        if (textClicked) {
-          await browserController.streamScreenshot('pre-vision-text-heuristic');
-          await new Promise(r => setTimeout(r, 400));
-          return { success: true, report: 'Heuristic text click (verify/continue) performed.' };
+        // Only try checkbox click if not a grid challenge
+        if (!isGridChallenge) {
+          const checkboxClicked = await browserController.clickCheckboxLeftOfText(["i'm not a robot", 'i am not a robot', '로봇이 아닙니다', 'reCAPTCHA']);
+          if (checkboxClicked) {
+            await browserController.streamScreenshot('pre-vision-checkbox-heuristic');
+            await new Promise(r => setTimeout(r, 400));
+            this.emitLog('system', { message: '[VisionInteract] Heuristic checkbox click succeeded' });
+            return { success: true, report: 'Heuristic checkbox-left-of-text click.' };
+          }
+          // Only try verify/continue click if not a grid challenge
+          const textClicked = await browserController.clickFirstVisibleContainingText(['verify', 'continue', '확인', '계속']);
+          if (textClicked) {
+            await browserController.streamScreenshot('pre-vision-text-heuristic');
+            await new Promise(r => setTimeout(r, 400));
+            this.emitLog('system', { message: '[VisionInteract] Heuristic text click (verify/continue) succeeded' });
+            return { success: true, report: 'Heuristic text click (verify/continue) performed.' };
+          }
+        } else {
+          this.emitLog('system', { message: '[VisionInteract] Grid challenge detected, skipping heuristics to use vision model' });
         }
       } catch (_) {}
 
+      this.emitLog('system', { message: '[VisionInteract] Heuristics failed, capturing screenshot for vision model...' });
       const { imageBase64, width, height } = await browserController.captureViewportScreenshotBase64();
       if (!imageBase64 || width === 0 || height === 0) {
+        this.emitLog('error', { message: '[VisionInteract] Failed to capture screenshot' });
         return { success: false, report: 'Viewport screenshot unavailable.' };
       }
+      this.emitLog('system', { message: `[VisionInteract] Screenshot captured: ${width}x${height}, base64 length: ${imageBase64.length}` });
+
+      // Include action history for context
+      const historyContext = this.formatHistoryForPrompt();
 
       const spec = `You will receive a screenshot (viewport ${width}x${height}).\n`+
-      `Analyze the image and determine what needs to be clicked.\n`+
+      `Analyze the image and determine what needs to be clicked to complete the task.\n`+
+      `\n`+
+      `CONTEXT - What has been tried before:\n`+
+      `${historyContext}\n`+
+      `\n`+
+      `Use this context to avoid repeating failed actions and make better decisions.\n`+
+      `If previous attempts failed, try a different approach or look for Reset/Retry buttons.\n`+
+      `\n`+
+      `You can return MULTIPLE sequential actions or a SINGLE action.\n`+
       `Return ONLY JSON in one of these forms:\n`+
-      `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"what you clicked"}\n`+
-      `or {"action":"grid_click","rect":{"x":<px>,"y":<px>,"width":<px>,"height":<px>}, "gridSize":3|4|5, "indexes":[...], "note":"..."}\n`+
-      `or {"action":"noop","note":"reason why no action needed"}.\n`+
+      `\n`+
+      `SINGLE ACTION:\n`+
+      `{"action":"click_points","points":[{"x":<px>,"y":<px>}, ...], "note":"..."}\n`+
+      `{"action":"grid_click_elements","rect":{...}, "gridSize":3|4|5, "gridType":"static"|"dynamic", "indexes":[...], "note":"..."}\n`+
+      `{"action":"grid_click_coords","rect":{...}, "gridSize":3|4|5, "gridType":"static"|"dynamic", "indexes":[...], "note":"..."}\n`+
+      `{"action":"noop","note":"reason why no action needed"}\n`+
+      `\n`+
+      `MULTIPLE ACTIONS (for complex tasks like "select grid tiles then click verify"):\n`+
+      `{"action":"sequence","steps":[...actions...], "note":"overall plan"}\n`+
+      `Example: {"action":"sequence","steps":[{"action":"grid_click_coords","rect":{...},"gridSize":4,"gridType":"static","indexes":[2,3,6,7]},{"action":"click_points","points":[{"x":1142,"y":660}]}],"note":"Select stop signs then click Verify"}\n`+
+      `\n`+
+      `Use "sequence" when you need to:\n`+
+      `- Select grid tiles AND then click a Verify/Submit button\n`+
+      `- Click multiple different elements in order\n`+
+      `- Perform any multi-step interaction\n`+
 
-      `IMPORTANT for image grids (like "Select all squares with Stop Sign"):\n`+
-      `- Identify the grid of images/squares on the page\n`+
-      `- Measure the exact position and size of the entire grid area\n`+
-      `- Count how many rows and columns (3x3, 4x4, or 5x5)\n`+
-      `- Identify which squares contain the requested object (e.g., stop signs, traffic lights)\n`+
-      `- Return indexes in 0-based row-major order (left-to-right, top-to-bottom)\n`+
-      `- Example for 3x3: top-left=0, top-middle=1, top-right=2, middle-left=3, etc.\n`+
-      `- Be very careful to identify ALL matching squares\n`+
+      `CRITICAL INSTRUCTIONS for image grids (like "Select all squares with Stop Sign"):\n`+
+      `\n`+
+      `STEP 1: COUNT THE GRID SIZE ACCURATELY\n`+
+      `- Look at the grid lines/borders that divide the image into squares\n`+
+      `- Count HORIZONTAL lines: If you see 3 horizontal dividing lines (creating 4 horizontal sections), it's 4 rows\n`+
+      `- Count VERTICAL lines: If you see 3 vertical dividing lines (creating 4 vertical sections), it's 4 columns\n`+
+      `- 3 dividing lines = 4 tiles, 2 dividing lines = 3 tiles, 4 dividing lines = 5 tiles\n`+
+      `- COMMON ERROR: Counting tiles as 3x3 when it's actually 4x4. Look at the LINES, not just the squares!\n`+
+      `- If you count 4 rows and 4 columns, that means 16 total tiles (4x4), NOT 9 tiles (3x3)\n`+
+      `- Verify: 3x3=9 tiles, 4x4=16 tiles, 5x5=25 tiles\n`+
+      `\n`+
+      `STEP 2: MEASURE THE GRID RECTANGLE\n`+
+      `- Identify the exact pixel coordinates of the entire grid area (x, y, width, height)\n`+
+      `- The rect should encompass ALL grid tiles from top-left to bottom-right corner\n`+
+      `\n`+
+      `STEP 3: DETECT GRID TYPE\n`+
+      `- "static": Select all matching tiles at once, then click verify (images don't change when clicked)\n`+
+      `- "dynamic": Click tiles one by one, new images appear after each click (typically reCAPTCHA)\n`+
+      `- Look for hints: "Select all" = static, "Click verify once there are none left" = dynamic\n`+
+      `\n`+
+      `STEP 4: IDENTIFY MATCHING TILES\n`+
+      `- Stop Sign: Red octagonal (8-sided) sign with white text "STOP" - very distinctive shape\n`+
+      `  * IMPORTANT: Only select tiles where the stop sign is CLEARLY and PROMINENTLY visible\n`+
+      `  * If stop sign pole extends into tile but the actual sign is NOT in that tile, DO NOT select it\n`+
+      `  * Only count tiles that contain the actual red octagonal sign, not just the pole/post\n`+
+      `- Traffic Light: Vertical lights (red, yellow, green) in a box\n`+
+      `- Bicycle: Two-wheeled vehicle with handlebars\n`+
+      `- Crosswalk: White striped pedestrian crossing on road\n`+
+      `- Bus: Large public transport vehicle\n`+
+      `- Car/Vehicle: Automobiles on road\n`+
+      `- Be EXTREMELY STRICT: Only select tiles where the PRIMARY OBJECT is clearly visible\n`+
+      `- Do NOT select tiles that only show edges, poles, or minor parts of the object\n`+
+      `- When in doubt, DO NOT select the tile\n`+
+      `\n`+
+      `STEP 5: RETURN CORRECT INDEXES\n`+
+      `- Use 0-based row-major order (left-to-right, top-to-bottom)\n`+
+      `- 3x3 grid (9 tiles): [0,1,2] [3,4,5] [6,7,8]\n`+
+      `- 4x4 grid (16 tiles): [0,1,2,3] [4,5,6,7] [8,9,10,11] [12,13,14,15]\n`+
+      `- Example: If Stop Sign appears in top-right 4 tiles of a 4x4 grid, indexes are [2,3,6,7]\n`+
+      `- DOUBLE-CHECK: Count your indexes - if gridSize=4 and you have 4 matching tiles in top-right, they should be 2,3,6,7 (NOT 4,5)\n`+
+      `\n`+
+      `STEP 6: CHOOSE CLICKING METHOD\n`+
+      `- Use "grid_click_elements" if tiles have visible borders/buttons (DOM elements)\n`+
+      `- Use "grid_click_coords" if grid appears as one image divided into sections\n`+
 
       `IMPORTANT for checkboxes:\n`+
       `- Look for a small square box (usually 15-30px) next to "I'm not a robot" text\n`+
@@ -225,32 +401,130 @@ export class LLMService {
       `Be extremely precise with coordinates and grid measurements.`;
 
       const textPrompt = `Goal: ${instruction}\n${spec}`;
-      const messages: any[] = [
-        new HumanMessage({
-          content: this.buildVisionContentParts(textPrompt, imageBase64, 'image/jpeg') as any
-        } as any)
-      ];
 
-      this.emitLog('system', { message: 'Invoking vision model for generic viewport interaction...' });
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Vision interact timeout after ${this.VISION_TIMEOUTS.INTERACT}ms`)), this.VISION_TIMEOUTS.INTERACT));
-      const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch((e: any) => {
-        this.emitLog('error', { message: `Vision interaction error: ${e.message}` });
-        return null;
-      });
-      if (!res) return { success: false, report: 'No response from vision.' };
-
-      let txt: string;
-      if (typeof res.content === 'string') txt = res.content; else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || JSON.stringify(x)))).join('\n'); else txt = JSON.stringify(res.content);
+      // Check cache before calling vision model
+      const currentUrl = browserController.getCurrentUrl();
+      const cacheKey = this.createVisionCacheKey(currentUrl, 'interact', instruction);
+      const cached = this.getCachedVisionResponse(cacheKey);
 
       let json: any = null;
-      try {
-        const raw = (txt || '').replace(/^```json\n?/, '').replace(/```$/, '').trim();
-        const m = raw.match(/\{[\s\S]*\}/);
-        json = m ? JSON.parse(m[0]) : JSON.parse(raw);
-      } catch (_) {}
-      if (!json || !json.action) return { success: false, report: 'No actionable JSON returned.' };
 
+      if (cached) {
+        // Use cached response
+        json = cached;
+        this.emitLog('system', { message: `[VisionCache] Using cached response for ${cacheKey}` });
+      } else {
+        // Call vision model
+        const messages: any[] = [
+          new HumanMessage({
+            content: this.buildVisionContentParts(textPrompt, imageBase64, 'image/jpeg') as any
+          } as any)
+        ];
+
+        this.emitLog('system', { message: 'Invoking vision model for generic viewport interaction...' });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error(`Vision interact timeout after ${this.VISION_TIMEOUTS.INTERACT}ms`)), this.VISION_TIMEOUTS.INTERACT));
+        const res: any = await Promise.race([(this.visionModel as any).invoke(messages), timeoutPromise]).catch((e: any) => {
+          this.emitLog('error', { message: `Vision interaction error: ${e.message}` });
+          return null;
+        });
+        if (!res) return { success: false, report: 'No response from vision.' };
+
+        let txt: string;
+        if (typeof res.content === 'string') txt = res.content; else if (Array.isArray(res.content)) txt = res.content.map((x: any) => (typeof x === 'string' ? x : (x.text || JSON.stringify(x)))).join('\n'); else txt = JSON.stringify(res.content);
+
+        // Log the vision model's raw response for debugging
+        this.emitLog('system', { message: `Vision model response (first 300 chars): ${txt.substring(0, 300)}` });
+
+        try {
+          const raw = (txt || '').replace(/^```json\n?/, '').replace(/```$/, '').trim();
+          const m = raw.match(/\{[\s\S]*\}/);
+          json = m ? JSON.parse(m[0]) : JSON.parse(raw);
+
+          // Cache the parsed JSON response
+          if (json && json.action) {
+            this.cacheVisionResponse(cacheKey, json);
+          }
+        } catch (parseError: any) {
+          this.emitLog('error', { message: `Failed to parse vision response as JSON: ${parseError.message}. Raw text: ${txt.substring(0, 200)}` });
+          return { success: false, report: 'Failed to parse vision response as JSON.' };
+        }
+      }
+
+      if (!json || !json.action) {
+        this.emitLog('error', { message: `Vision response missing 'action' field. JSON: ${JSON.stringify(json).substring(0, 200)}` });
+        return { success: false, report: 'No actionable JSON returned.' };
+      }
+
+      // Handle sequence action (multiple steps)
+      if (json.action === 'sequence' && Array.isArray(json.steps)) {
+        this.emitLog('system', { message: `Vision returned sequence with ${json.steps.length} steps. Note: ${json.note || 'N/A'}` });
+
+        // Record sequence start
+        this.addToHistory({
+          timestamp: Date.now(),
+          actor: 'vision_model',
+          action: 'sequence_start',
+          details: { steps: json.steps.length, note: json.note },
+        });
+
+        for (let i = 0; i < json.steps.length; i++) {
+          const step = json.steps[i];
+          this.emitLog('system', { message: `[Sequence] Executing step ${i+1}/${json.steps.length}: ${step.action}` });
+
+          // Recursively handle each step by processing it as a single action
+          const stepResult = await this.executeVisionAction(browserController, step, instruction);
+
+          if (!stepResult.success) {
+            this.emitLog('error', { message: `[Sequence] Step ${i+1} failed: ${stepResult.report}` });
+            this.addToHistory({
+              timestamp: Date.now(),
+              actor: 'vision_model',
+              action: 'sequence_failed',
+              details: { step: i+1, reason: stepResult.report },
+              success: false,
+            });
+            return { success: false, report: `Sequence failed at step ${i+1}: ${stepResult.report}` };
+          }
+
+          // Wait between steps
+          await new Promise(r => setTimeout(r, 300));
+        }
+
+        this.addToHistory({
+          timestamp: Date.now(),
+          actor: 'vision_model',
+          action: 'sequence_completed',
+          details: { steps: json.steps.length, note: json.note },
+          success: true,
+        });
+
+        return { success: true, report: `Completed ${json.steps.length} step sequence. Note: ${json.note || 'N/A'}` };
+      }
+
+      // Execute single action
+      const result = await this.executeVisionAction(browserController, json, instruction);
+
+      // Record the action
+      this.addToHistory({
+        timestamp: Date.now(),
+        actor: 'vision_model',
+        action: json.action,
+        details: json,
+        result: result.report,
+        success: result.success,
+      });
+
+      return result;
+    } catch (e: any) {
+      return { success: false, report: `Vision interaction failed: ${e.message}` };
+    }
+  }
+
+  // Helper method to execute a single vision action
+  private async executeVisionAction(browserController: BrowserController, json: any, instruction: string): Promise<{ success: boolean; report: string }> {
+    try {
       if (json.action === 'click_points' && Array.isArray(json.points)) {
+        this.emitLog('system', { message: `Vision identified ${json.points.length} click points: ${JSON.stringify(json.points)}. Note: ${json.note || 'N/A'}` });
         let n = 0;
         for (const p of json.points) {
           if (typeof p?.x === 'number' && typeof p?.y === 'number') {
@@ -260,10 +534,66 @@ export class LLMService {
             n++;
           }
         }
-        return { success: n > 0, report: `Clicked ${n} points.` };
+        return { success: n > 0, report: `Clicked ${n} points. Note: ${json.note || 'N/A'}` };
       }
 
+      // Handle grid_click_elements action (AI chooses element-based clicking)
+      if (json.action === 'grid_click_elements' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4 || json.gridSize === 5)) {
+        const gridType = json.gridType || 'static'; // Default to static for backward compatibility
+        this.emitLog('system', { message: `Vision chose ELEMENT-based grid click: type=${gridType}, size=${json.gridSize}, rect=(${json.rect.x},${json.rect.y},${json.rect.width}x${json.rect.height}), indexes=${JSON.stringify(json.indexes)}` });
+
+        const rect = {
+          x: Math.max(0, Math.round(json.rect.x)),
+          y: Math.max(0, Math.round(json.rect.y)),
+          width: Math.max(10, Math.round(json.rect.width)),
+          height: Math.max(10, Math.round(json.rect.height)),
+        };
+        const indexes = json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n));
+
+        let success = false;
+        if (gridType === 'dynamic') {
+          const result = await browserController.clickGridDynamic(rect, json.gridSize, indexes, instruction, 'elements');
+          success = result.success;
+          this.emitLog('system', { message: `[DynamicGrid] Clicked ${result.clickCount} tiles total` });
+        } else {
+          success = await browserController.clickGridStatic(rect, json.gridSize, indexes, 'elements');
+        }
+
+        await browserController.streamScreenshot('post-vision-grid-click-elements');
+        await new Promise(r => setTimeout(r, 500));
+        return { success, report: `Grid click (elements, ${gridType}) gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}. Note: ${json.note || 'N/A'}` };
+      }
+
+      // Handle grid_click_coords action (AI chooses coordinate-based clicking)
+      if (json.action === 'grid_click_coords' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4 || json.gridSize === 5)) {
+        const gridType = json.gridType || 'static'; // Default to static for backward compatibility
+        this.emitLog('system', { message: `Vision chose COORDINATE-based grid click: type=${gridType}, size=${json.gridSize}, rect=(${json.rect.x},${json.rect.y},${json.rect.width}x${json.rect.height}), indexes=${JSON.stringify(json.indexes)}` });
+
+        const rect = {
+          x: Math.max(0, Math.round(json.rect.x)),
+          y: Math.max(0, Math.round(json.rect.y)),
+          width: Math.max(10, Math.round(json.rect.width)),
+          height: Math.max(10, Math.round(json.rect.height)),
+        };
+        const indexes = json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n));
+
+        let success = false;
+        if (gridType === 'dynamic') {
+          const result = await browserController.clickGridDynamic(rect, json.gridSize, indexes, instruction, 'coordinates');
+          success = result.success;
+          this.emitLog('system', { message: `[DynamicGrid] Clicked ${result.clickCount} tiles total` });
+        } else {
+          success = await browserController.clickGridStatic(rect, json.gridSize, indexes, 'coordinates');
+        }
+
+        await browserController.streamScreenshot('post-vision-grid-click-coords');
+        await new Promise(r => setTimeout(r, 500));
+        return { success, report: `Grid click (coords, ${gridType}) gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}. Note: ${json.note || 'N/A'}` };
+      }
+
+      // Legacy support for old grid_click action (falls back to auto-detect method)
       if (json.action === 'grid_click' && json.rect && Array.isArray(json.indexes) && (json.gridSize === 3 || json.gridSize === 4 || json.gridSize === 5)) {
+        this.emitLog('system', { message: `Vision identified grid (legacy): size=${json.gridSize}, rect=(${json.rect.x},${json.rect.y},${json.rect.width}x${json.rect.height}), indexes=${JSON.stringify(json.indexes)}` });
         await browserController.clickRectGrid({
           x: Math.max(0, Math.round(json.rect.x)),
           y: Math.max(0, Math.round(json.rect.y)),
@@ -271,7 +601,6 @@ export class LLMService {
           height: Math.max(10, Math.round(json.rect.height)),
         }, json.gridSize, json.indexes.map((n: any) => Number(n)).filter((n: number) => Number.isInteger(n)));
         await browserController.streamScreenshot('post-vision-grid-click');
-        // Wait a bit after clicking grid tiles
         await new Promise(r => setTimeout(r, 500));
         return { success: true, report: `Grid click gridSize=${json.gridSize} indexes=${JSON.stringify(json.indexes)}. Note: ${json.note || 'N/A'}` };
       }
