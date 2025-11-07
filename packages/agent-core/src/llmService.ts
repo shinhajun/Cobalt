@@ -1,4 +1,5 @@
 import { ChatOpenAI } from "@langchain/openai";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController";
 // Vision-based captcha solving (no external captcha providers)
 import path from 'path';
@@ -143,20 +144,18 @@ Examples:
 
 No explanation, only JSON.`;
 
-      // Try both old and new image payload shapes for best compatibility
-      const content: any[] = [
-        { type: 'text', text: systemPrompt },
-        { type: 'text', text: `Instruction: ${instruction}` },
-        { type: 'image_url', image_url: `data:image/png;base64,${gridImageBase64}` },
-        { type: 'image_url', image_url: { url: `data:image/png;base64,${gridImageBase64}` } }
+      // Build messages using LangChain message classes for maximum compatibility
+      const messages = [
+        new SystemMessage(systemPrompt),
+        new HumanMessage({
+          content: [
+            { type: 'text', text: `Instruction: ${instruction}` },
+            { type: 'image_url', image_url: { url: `data:image/png;base64,${gridImageBase64}` } }
+          ] as any
+        } as any)
       ];
 
       this.emitLog('system', { message: 'Invoking vision model for tile selection...' });
-
-      // Wrap as a user message for maximum compatibility
-      const messages: any = [
-        { role: 'user', content }
-      ];
 
       // Add timeout to prevent hanging
       const timeoutPromise = new Promise((_, reject) =>
@@ -208,8 +207,12 @@ No explanation, only JSON.`;
           if (typeof x === 'string') return x;
           if (x.text) return x.text;
           if (x.type === 'text' && x.text) return x.text;
+          if (x.type === 'output_text' && x.text) return x.text; // responses api compat
           return JSON.stringify(x);
         }).join('\n');
+      } else if (res.content && res.content.text) {
+        // Some adapters return { content: { text: '...' } }
+        txt = res.content.text;
       } else {
         this.emitLog('system', { message: 'Content is neither string nor array, stringifying' });
         txt = JSON.stringify(res.content);
@@ -230,9 +233,19 @@ No explanation, only JSON.`;
         parsed = JSON.parse(cleaned);
         this.emitLog('system', { message: `JSON parsing successful: ${JSON.stringify(parsed)}` });
       } catch (parseErr: any) {
+        // Try a loose regex fallback to salvage indexes
+        const match = cleaned.match(/\"indexes\"\s*:\s*\[(.*?)\]/s);
+        if (match) {
+          const nums = match[1]
+            .split(/\s*,\s*/)
+            .map((n) => parseInt(n, 10))
+            .filter((n) => Number.isInteger(n));
+          this.emitLog('error', { message: `JSON parse failed but salvaged indexes via regex: [${nums.join(', ')}]` });
+          return nums;
+        }
         this.emitLog('error', { message: `JSON parse error: ${parseErr.message}` });
         this.emitLog('error', { message: `Failed to parse: "${cleaned}"` });
-        return null;
+        return [];
       }
 
       const indexes: number[] = Array.isArray(parsed.indexes) ? parsed.indexes.filter((n: any) => Number.isInteger(n)) : [];

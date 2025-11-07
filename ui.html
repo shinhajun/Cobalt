@@ -171,6 +171,7 @@
       display: flex;
       flex-direction: column;
       background-color: #000;
+      min-width: 0; /* prevent horizontal overflow from long children */
     }
 
     .live-header {
@@ -207,6 +208,7 @@
       overflow: auto;
       background-color: #000;
       min-height: 0;
+      min-width: 0; /* allow child to shrink and center properly */
       cursor: zoom-in;
       display: flex;
       align-items: center;
@@ -219,10 +221,13 @@
     }
 
     .screenshot-img {
-      width: 100%;
-      height: 100%;
+      max-width: 100%;
+      max-height: 100%;
+      width: auto;
+      height: auto;
       object-fit: contain;
       object-position: center;
+      display: block;
       image-rendering: auto;
       transition: transform 0.3s ease;
     }
@@ -254,6 +259,11 @@
       font-size: 0.85rem;
       color: #4caf50;
       display: none;
+      max-width: 100%;
+      overflow: hidden;            /* avoid expanding layout horizontally */
+      white-space: normal;         /* allow wrapping */
+      word-break: break-all;       /* break long URLs */
+      overflow-wrap: anywhere;     /* robust wrapping for long tokens */
     }
 
     .url-bar.show {
@@ -550,6 +560,9 @@
         screenshotArea.classList.remove('zoomed');
         zoomLevel = 1;
         screenshotArea.style.cursor = 'zoom-in';
+        // Reset scroll position to avoid right-shifted image when previous zoom/scroll remained
+        screenshotArea.scrollLeft = 0;
+        screenshotArea.scrollTop = 0;
         if (img) {
           img.src = `data:image/png;base64,${data.image}`;
           img.style.display = 'block';
@@ -558,6 +571,7 @@
         }
 
         if (data.url) {
+          // Wrap long URLs without causing horizontal scroll
           urlBar.textContent = data.url;
           urlBar.classList.add('show');
         }

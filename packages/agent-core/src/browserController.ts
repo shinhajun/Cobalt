@@ -472,6 +472,8 @@ export class BrowserController extends EventEmitter {
       }
       await box.click({ delay: 50 });
       await this.page.waitForTimeout(800);
+      // Stream an immediate screenshot so Live View reflects the click
+      await this.streamScreenshot('recaptcha-anchor-click');
       return true;
     } catch (_) {
       return false;
@@ -520,6 +522,8 @@ export class BrowserController extends EventEmitter {
 
       const buf = await gridContainer.screenshot();
       const gridImageBase64 = Buffer.from(buf).toString('base64');
+      // Also stream a full-page screenshot so Live View shows the challenge immediately
+      await this.streamScreenshot('recaptcha-challenge-detected');
 
       // Try to infer grid size (3x3 or 4x4) for better indexing guidance
       let gridSize: number | undefined = undefined;
@@ -553,7 +557,13 @@ export class BrowserController extends EventEmitter {
           await el.click({ delay: 50 });
           await this.page!.waitForTimeout(250);
           clicked++;
+          // Stream after each tile click for more frequent Live View updates
+          await this.streamScreenshot('recaptcha-tile-click');
         } catch (_) {}
+      }
+      // One more screenshot after finishing all clicks in this round
+      if (clicked > 0) {
+        await this.streamScreenshot('recaptcha-tiles-clicked');
       }
       return clicked > 0;
     } catch (_) {
@@ -570,6 +580,8 @@ export class BrowserController extends EventEmitter {
       if (btn) {
         await btn.click({ delay: 50 });
         await this.page.waitForTimeout(800);
+        // Stream verify click immediately
+        await this.streamScreenshot('recaptcha-verify-click');
         return true;
       }
       return false;
@@ -721,16 +733,20 @@ export class BrowserController extends EventEmitter {
       } catch (_) {}
 
       // Take a screenshot and get it as buffer
-      // For Live View, always use viewport screenshot (not fullPage) for better performance
+      // For Google Sorry/CAPTCHA pages, use fullPage to capture the entire rendered page
+      // For other pages, use viewport screenshot for better performance
+      const currentUrl = this.page.url();
+      const isGoogleSorry = currentUrl.includes('google.com') && currentUrl.includes('/sorry/');
+      const useFullPage = isCaptchaRelated || isGoogleSorry;
+
       const screenshotBuffer = await this.page.screenshot({
-        fullPage: false,
+        fullPage: useFullPage,
         omitBackground: false,
         type: 'png'
       });
 
       // Convert buffer to base64 for sending over WebSocket
       const base64Image = screenshotBuffer.toString('base64');
-      const currentUrl = this.page.url();
 
       // Emit an event with the screenshot data and action info
       this.emit('screenshot', {
