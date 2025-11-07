@@ -26,11 +26,11 @@ body {
 /* Chat Tabs Header */
 .chat-tabs-header {
   display: flex;
-  background: linear-gradient(135deg, #5f6fd8 0%, #4285f4 100%);
-  padding: 8px 12px;
-  gap: 8px;
+  background: #fff;
+  border-bottom: 1px solid #e8eaed;
+  padding: 6px 10px;
+  gap: 6px;
   align-items: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .tabs-container {
@@ -57,30 +57,31 @@ body {
 }
 
 .chat-tab {
-  background: rgba(255, 255, 255, 0.2);
-  padding: 8px 12px;
-  border-radius: 8px 8px 0 0;
+  background: transparent;
+  padding: 4px 12px;
+  border-bottom: 2px solid transparent;
   cursor: grab;
   white-space: nowrap;
   display: flex;
   align-items: center;
   gap: 6px;
-  color: rgba(255, 255, 255, 0.9);
-  font-size: 0.9rem;
+  color: #5f6368;
+  font-size: 0.85rem;
   transition: all 0.15s ease;
   user-select: none;
-  min-width: 120px;
-  max-width: 200px;
+  min-width: 100px;
+  max-width: 180px;
 }
 
 .chat-tab:hover {
-  background: rgba(255, 255, 255, 0.3);
+  color: #202124;
+  border-bottom-color: #dadce0;
 }
 
 .chat-tab.active {
-  background: #fff;
   color: #4285f4;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  border-bottom-color: #4285f4;
+  font-weight: 500;
 }
 
 .chat-tab.dragging {
@@ -100,25 +101,29 @@ body {
 }
 
 .tab-close {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
-  opacity: 0.7;
+  font-size: 14px;
+  opacity: 0;
   transition: all 0.15s ease;
   flex-shrink: 0;
 }
 
+.chat-tab:hover .tab-close {
+  opacity: 0.6;
+}
+
 .tab-close:hover {
-  opacity: 1;
-  background: rgba(0, 0, 0, 0.1);
+  opacity: 1 !important;
+  background: rgba(95, 99, 104, 0.1);
 }
 
 .chat-tab.active .tab-close:hover {
-  background: rgba(66, 133, 244, 0.1);
+  background: rgba(66, 133, 244, 0.15);
 }
 
 .header-actions {
@@ -129,35 +134,35 @@ body {
 }
 
 .header-btn {
-  background: rgba(255, 255, 255, 0.2);
+  background: transparent;
   border: none;
   border-radius: 50%;
-  width: 32px;
-  height: 32px;
-  font-size: 16px;
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
   cursor: pointer;
   transition: all 0.15s ease;
-  color: #fff;
+  color: #5f6368;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .header-btn:hover {
-  background: rgba(255, 255, 255, 0.3);
-  transform: scale(1.1);
+  background: #f1f3f4;
+  color: #202124;
 }
 
 .header-btn:active {
-  transform: scale(0.95);
+  background: #e8eaed;
 }
 
 #settingsIconBtn:hover {
-  transform: rotate(90deg) scale(1.1);
+  transform: rotate(90deg);
 }
 
 #settingsIconBtn:active {
-  transform: rotate(90deg) scale(0.95);
+  transform: rotate(90deg);
 }
 
 /* Messages Container - Enlarged */
@@ -251,12 +256,14 @@ body {
 
 /* Message Bubbles */
 .message {
-  margin-bottom: 16px;
-  padding: 12px 16px;
-  border-radius: 12px;
-  max-width: 85%;
+  margin-bottom: 12px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  max-width: 80%;
   word-wrap: break-word;
-  animation: slideIn 0.3s ease-out;
+  animation: slideIn 0.2s ease-out;
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 @keyframes slideIn {
@@ -271,40 +278,36 @@ body {
 }
 
 .message.user {
-  background: linear-gradient(135deg, #5f6fd8 0%, #4285f4 100%);
+  background: #4285f4;
   color: #fff;
   margin-left: auto;
   border-bottom-right-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.1);
 }
 
 .message.assistant {
-  background: #fff;
+  background: #f1f3f4;
   color: #202124;
   margin-right: auto;
   border-bottom-left-radius: 4px;
-  border: 1px solid #e8eaed;
-  border-left: 3px solid #4285f4;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.05);
 }
 
 .message.system {
-  background: #e8f0fe;
-  color: #1967d2;
-  margin: 0 auto;
+  background: transparent;
+  color: #5f6368;
+  margin: 8px auto;
   text-align: center;
-  font-size: 0.85rem;
-  max-width: 70%;
-  border-radius: 20px;
-  border: 1px solid #d2e3fc;
+  font-size: 0.8rem;
+  max-width: 90%;
+  padding: 6px 12px;
+  border-radius: 12px;
 }
 
 .message.error {
   background: #fce8e6;
   color: #c5221f;
   margin-right: auto;
-  border: 1px solid #f6aea9;
-  border-left: 3px solid #ea4335;
+  border-bottom-left-radius: 4px;
+  border-left: 2px solid #ea4335;
 }
 
 /* Input Area with Compact Model Selector */

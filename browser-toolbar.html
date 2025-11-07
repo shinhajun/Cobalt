@@ -18,11 +18,11 @@
 
     .browser-toolbar {
       position: fixed;
-      top: 36px; /* Tab bar 바로 아래, padding 제거 */
+      top: 32px; /* Tab bar 바로 아래 */
       left: 0;
       width: 75%; /* 왼쪽 75% - BrowserView 영역 */
-      height: 40px; /* 높이 줄임 */
-      background: #f1f3f4;
+      height: 40px;
+      background: #fff;
       border-bottom: 1px solid #dadce0;
       display: flex;
       align-items: center;
@@ -42,7 +42,8 @@
       align-items: center;
       justify-content: center;
       color: #5f6368;
-      font-size: 18px;
+      font-size: 24px;
+      font-weight: 300;
       transition: background 0.15s, transform 0.1s;
     }
 
@@ -88,8 +89,36 @@
 
     .url-icon {
       margin-right: 8px;
-      color: #5f6368;
-      font-size: 16px;
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+    }
+
+    .url-icon::before {
+      content: '';
+      position: absolute;
+      width: 10px;
+      height: 12px;
+      border: 2px solid #5f6368;
+      border-radius: 3px;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .url-icon::after {
+      content: '';
+      position: absolute;
+      width: 6px;
+      height: 4px;
+      background: #5f6368;
+      border-radius: 1px 1px 0 0;
+      top: 20%;
+      left: 50%;
+      transform: translateX(-50%);
     }
 
     .chat-toggle-btn {
@@ -143,18 +172,18 @@
     /* Tab bar */
     .tab-bar {
       position: fixed;
-      top: 0; /* 맨 위 */
+      top: 0;
       left: 0;
       width: 75%;
-      height: 36px;
-      background: #dee1e6;
+      height: 32px;
+      background: #f1f3f4;
       display: flex;
       align-items: center;
       gap: 2px;
       padding: 0 4px;
       overflow-x: auto;
       overflow-y: hidden;
-      z-index: 10001; /* toolbar보다 위 */
+      z-index: 10001;
       transition: width 0.15s ease-out;
     }
 
@@ -167,26 +196,31 @@
       align-items: center;
       gap: 8px;
       padding: 6px 12px;
-      background: #9aa0a6;
+      background: #dadce0;
       border-radius: 8px 8px 0 0;
       cursor: grab;
       min-width: 150px;
       max-width: 200px;
       font-size: 13px;
-      color: #fff;
+      color: #5f6368;
       user-select: none;
       transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
       position: relative;
+      border: 1px solid #dadce0;
+      border-bottom: none;
     }
 
     .tab:hover {
-      background: #80868b;
+      background: #e8eaed;
     }
 
     .tab.active {
-      background: #f1f3f4;
+      background: #fff;
       color: #202124;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      border: 1px solid #dadce0;
+      border-bottom: 1px solid #fff;
+      position: relative;
+      z-index: 1;
     }
 
     .tab.dragging {
@@ -258,12 +292,12 @@
   </div>
 
   <div class="browser-toolbar" id="toolbar">
-    <button class="nav-button" id="backBtn" title="뒤로 가기">◀</button>
-    <button class="nav-button" id="forwardBtn" title="앞으로 가기">▶</button>
+    <button class="nav-button" id="backBtn" title="뒤로 가기">‹</button>
+    <button class="nav-button" id="forwardBtn" title="앞으로 가기">›</button>
     <button class="nav-button" id="refreshBtn" title="새로고침">↻</button>
 
     <div class="url-container">
-      <span class="url-icon">🔒</span>
+      <span class="url-icon"></span>
       <input
         type="text"
         class="url-input"

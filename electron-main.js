@@ -117,9 +117,9 @@ function updateBrowserViewBounds() {
   const { width, height } = mainWindow.getContentBounds();
   const chatPanelWidth = chatVisible ? Math.floor(width * 0.25) : 0; // 25% for chat when visible
   const browserWidth = width - chatPanelWidth; // 75% or 100% for browser
-  const toolbarHeight = 40; // Toolbar height (reduced)
-  const tabBarHeight = 36; // Tab bar height
-  const topOffset = toolbarHeight + tabBarHeight; // Total offset
+  const toolbarHeight = 40; // Toolbar height
+  const tabBarHeight = 32; // Tab bar height (reduced)
+  const topOffset = toolbarHeight + tabBarHeight; // Total offset (72px)
 
   // BrowserView는 왼쪽에 배치 (toolbar + tab bar 아래)
   browserView.setBounds({
@@ -253,17 +253,22 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
                   style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
                   document.head.appendChild(style);
 
-                  // Add image container
+                  // Add image container with animated gradient
                   const imgContainer = document.createElement('div');
-                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; background: #1a1a1a;';
+                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: linear-gradient(45deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%); background-size: 400% 400%; animation: gradientFlow 15s ease infinite;';
                   imgContainer.id = 'ai-screenshot-container';
                   overlay.appendChild(imgContainer);
+
+                  // Add gradient animation
+                  const gradientStyle = document.createElement('style');
+                  gradientStyle.textContent = '@keyframes gradientFlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }';
+                  document.head.appendChild(gradientStyle);
                 }
 
                 // Update screenshot image
                 const container = document.getElementById('ai-screenshot-container');
                 if (container) {
-                  container.innerHTML = '<img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />';
+                  container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);" /></div>';
                 }
               })();
             `).catch(() => {});
@@ -326,14 +331,18 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings }) => {
                     document.head.appendChild(style);
 
                     const imgContainer = document.createElement('div');
-                    imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: auto; background: #1a1a1a;';
+                    imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: linear-gradient(45deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%); background-size: 400% 400%; animation: gradientFlow 15s ease infinite;';
                     imgContainer.id = 'ai-screenshot-container';
                     overlay.appendChild(imgContainer);
+
+                    const gradientStyle = document.createElement('style');
+                    gradientStyle.textContent = '@keyframes gradientFlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }';
+                    document.head.appendChild(gradientStyle);
                   }
 
                   const container = document.getElementById('ai-screenshot-container');
                   if (container) {
-                    container.innerHTML = '<img src="data:image/png;base64,${screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />';
+                    container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="data:image/png;base64,${screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);" /></div>';
                   }
                 })();
               `).catch(() => {});
