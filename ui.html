@@ -203,35 +203,30 @@
 
     .screenshot-area {
       flex: 1;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      overflow: hidden;
-    }
-
-    /* Stable wrapper to ensure perfect centering regardless of image aspect/size */
-    .screenshot-frame {
       position: relative;
-      width: 100%;
-      height: 100%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      overflow: hidden;
+      background-color: #000;
+      min-height: 0; /* Important for flex children */
     }
 
     .screenshot-img {
-      display: block;            /* remove inline whitespace/align issues */
-      margin: auto;              /* hard center fallback */
-      max-width: 100%;
-      max-height: 100%;
-      width: auto;
-      height: auto;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      width: 100%;
+      height: 100%;
       object-fit: contain;
-      object-position: center;   /* ensure content is centered inside the box */
+      object-position: center center;
       image-rendering: auto;
     }
 
     .placeholder {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
       text-align: center;
       color: #555;
     }
@@ -361,12 +356,10 @@
       </div>
 
       <div class="screenshot-area" id="screenshotArea">
-        <div class="screenshot-frame">
-          <img id="liveImage" class="screenshot-img" alt="Screenshot" style="display:none;" />
-          <div id="placeholder" class="placeholder">
-            <h3>📸</h3>
-            <p>Run a task to see the live browser view</p>
-          </div>
+        <img id="liveImage" class="screenshot-img" alt="Screenshot" style="display:none;" />
+        <div id="placeholder" class="placeholder">
+          <h3>📸</h3>
+          <p>Run a task to see the live browser view</p>
         </div>
       </div>
 
@@ -515,13 +508,42 @@
       });
 
       // Screenshot update
+      let lastImageToken = 0;
       window.electronAPI.onAgentScreenshot((data) => {
         const img = document.getElementById('liveImage');
         const placeholder = document.getElementById('placeholder');
-        if (img) {
-          img.src = `data:image/png;base64,${data.image}`;
+        if (!img || !data || !data.image) return;
+
+        const token = ++lastImageToken; // drop stale frames arriving out of order
+
+        const applyVisible = () => {
+          if (token !== lastImageToken) return; // a newer frame already arrived
           img.style.display = 'block';
           if (placeholder) placeholder.style.display = 'none';
+          // Force a reflow/repaint to avoid the black/offset rendering issue on some Electron builds
+          requestAnimationFrame(() => {
+            img.style.willChange = 'transform';
+            img.style.transform = 'translateZ(0)';
+            void img.offsetWidth; // trigger reflow
+            img.style.transform = '';
+            img.style.willChange = '';
+          });
+        };
+
+        const src = `data:image/png;base64,${data.image}`;
+        try {
+          img.src = src;
+          if (typeof img.decode === 'function') {
+            img.decode().then(applyVisible).catch(() => {
+              img.onload = applyVisible;
+            });
+          } else {
+            img.onload = applyVisible;
+          }
+        } catch (_) {
+          // Fallback: still try to show the image
+          img.onload = applyVisible;
+          img.src = src;
         }
 
         if (data.url) {

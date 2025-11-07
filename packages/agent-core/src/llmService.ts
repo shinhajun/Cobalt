@@ -458,7 +458,7 @@ No explanation, only JSON.`;
                     await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for challenge or auto-pass
 
                     // Check if challenge appeared
-                    const challenge = await browserController.getRecaptchaChallenge();
+                    let challenge = await browserController.getRecaptchaChallenge();
                     if (challenge && challenge.gridImageBase64) {
                       this.emitLog('system', { message: `reCAPTCHA challenge appeared: ${challenge.instruction}` });
                       // Wait extra time for iframe challenge to fully render before screenshot
@@ -466,39 +466,55 @@ No explanation, only JSON.`;
                       await browserController.streamScreenshot('recaptcha-challenge');
                       await browserController.takeDebugScreenshot('recaptcha-challenge');
 
-                      this.emitLog('system', { message: 'Calling vision model to select tiles...' });
-                      this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
-                      const indexes = await this.chooseRecaptchaTiles(
-                        challenge.instruction,
-                        challenge.gridImageBase64,
-                        (challenge as any).gridSize || 3
-                      );
-                      this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
+                      // Multiple rounds handling
+                      let attempts = 0;
+                      let lastIndexes: number[] | null = null;
+                      while (attempts < 5 && challenge && challenge.gridImageBase64) {
+                        attempts++;
+                        this.emitLog('system', { message: `Calling vision model to select tiles... (round ${attempts})` });
+                        this.emitLog('system', { message: `Grid image size: ${challenge.gridImageBase64.length} chars` });
+                        const indexes = await this.chooseRecaptchaTiles(
+                          challenge.instruction,
+                          challenge.gridImageBase64,
+                          (challenge as any).gridSize || 3
+                        );
+                        this.emitLog('system', { message: `Vision model returned indexes: ${JSON.stringify(indexes)}` });
 
-                      if (indexes !== null) {
+                        if (indexes === null) {
+                          actionError = true;
+                          actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
+                          break;
+                        }
+
+                        lastIndexes = indexes;
                         if (indexes.length > 0) {
                           this.emitLog('system', { message: `Clicking tiles: [${indexes.join(', ')}]` });
                           await browserController.selectRecaptchaTiles(indexes);
                         } else {
                           this.emitLog('system', { message: 'Vision model returned empty array (skip/no matching tiles).' });
                         }
-                        // Submit challenge; if grid wasn't shown (auto-solve), this no-ops
+
                         await browserController.submitRecaptchaChallenge();
-                        // If anchor shows solved state, try to submit/continue sorry page
-                        try {
-                          const solved = await browserController.isRecaptchaSolved();
-                          if (solved) {
-                            await browserController.submitSorryPageIfPresent();
-                          }
-                        } catch (_) {}
                         await browserController.streamScreenshot('recaptcha-submitted');
-                        actionObservation = indexes.length > 0
-                          ? `reCAPTCHA v2 solved by clicking tiles: [${indexes.join(', ')}]`
-                          : `reCAPTCHA v2 submitted with skip (no matching tiles).`;
-                      } else {
-                        actionError = true;
-                        actionObservation = 'Vision model failed to select reCAPTCHA tiles.';
+                        await browserController.waitForPageLoad(8000);
+
+                        const next = await browserController.getRecaptchaChallenge();
+                        if (!next || !next.gridImageBase64) break;
+                        this.emitLog('system', { message: 'Another reCAPTCHA round detected; continuing...' });
+                        challenge = next;
+                        await new Promise(r => setTimeout(r, 800));
                       }
+
+                      // Finalize sorry page if checkbox solved
+                      try {
+                        const solved = await browserController.isRecaptchaSolved();
+                        if (solved) await browserController.submitSorryPageIfPresent();
+                      } catch (_) {}
+
+                      const used = lastIndexes || [];
+                      actionObservation = used.length > 0
+                        ? `reCAPTCHA v2 handled. Last clicked tiles: [${used.join(', ')}]`
+                        : `reCAPTCHA v2 submitted without tile clicks.`;
                     } else {
                       this.emitLog('system', { message: `Challenge check: gridImage=${challenge?.gridImageBase64?.length || 0} chars, instruction="${challenge?.instruction || 'none'}"` });
                       actionObservation = 'reCAPTCHA anchor clicked. Challenge may have auto-solved or is pending.';
