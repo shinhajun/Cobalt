@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain, protocol } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -9,19 +9,6 @@ dotenv.config({ path: envPath });
 // Note: .env is only used as fallback. Primary API keys come from Settings tab (localStorage)
 console.log('[Electron] API keys will be loaded from Settings tab (preferred) or .env (fallback)');
 
-// Register custom protocol for cobalt:// URLs BEFORE app is ready
-protocol.registerSchemesAsPrivileged([
-  {
-    scheme: 'cobalt',
-    privileges: {
-      standard: true,
-      secure: true,
-      supportFetchAPI: true,
-      corsEnabled: true
-    }
-  }
-]);
-
 // Use new browser-use style services
 const { NewBrowserController } = require('./packages/agent-core/dist/newBrowserController');
 const { NewLLMService } = require('./packages/agent-core/dist/newLLMService');
@@ -30,6 +17,7 @@ let mainWindow;
 let browserView = null; // Current active BrowserView
 let browserViews = new Map(); // Map of tabId -> BrowserView
 let currentTabId = 0;
+let aiWorkingTabId = null; // AI가 작업 중인 탭 ID (탭 격리용)
 let browserController = null;
 let llmService = null;
 let isTaskRunning = false;
@@ -1000,6 +988,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
   isTaskRunning = true;
   stopRequested = false;
+  aiWorkingTabId = currentTabId; // 현재 탭을 AI 작업 탭으로 설정
+  console.log('[Electron] AI task started on tab:', aiWorkingTabId);
 
   // 비동기로 작업 실행 (Stop 버튼이 작동하도록)
   (async () => {
@@ -1177,14 +1167,28 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
       // === AUTO SCREENSHOT STREAMING: 1초마다 자동 스크린샷 캡처 ===
       screenshotInterval = setInterval(async () => {
-        if (browserController && !stopRequested) {
+        if (browserController && !stopRequested && aiWorkingTabId !== null) {
           try {
             const screenshotBuffer = await browserController.captureScreenshot();
-            if (screenshotBuffer && browserView) {
+            if (screenshotBuffer) {
               const screenshotBase64 = screenshotBuffer.toString('base64');
+              const screenshotDataURL = `data:image/png;base64,${screenshotBase64}`;
+              const currentUrl = browserController.getCurrentUrl();
 
-              // Stream to BrowserView
-              browserView.webContents.executeJavaScript(`
+              // Send screenshot to Chat UI (mainWindow) with tabId
+              if (mainWindow) {
+                mainWindow.webContents.send('agent-screenshot', {
+                  screenshot: screenshotDataURL,
+                  timestamp: Date.now(),
+                  url: currentUrl,
+                  tabId: aiWorkingTabId  // AI 작업 중인 탭 ID 포함
+                });
+              }
+
+              // Only inject overlay if AI working tab is currently active
+              const aiTabView = browserViews.get(aiWorkingTabId);
+              if (aiTabView && currentTabId === aiWorkingTabId) {
+                aiTabView.webContents.executeJavaScript(`
                 (function() {
                   let overlay = document.getElementById('ai-screenshot-overlay');
                   if (!overlay) {
@@ -1220,7 +1224,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
                   const container = document.getElementById('ai-screenshot-container');
                   if (container) {
-                    const screenshotData = 'data:image/png;base64,${screenshotBase64}';
+                    const screenshotData = '${screenshotDataURL}';
                     container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
                       '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
                         '<div style="display: flex; gap: 8px;">' +
@@ -1236,7 +1240,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                     '</div>';
                   }
                 })();
-              `).catch(() => {});
+                `).catch(() => {});
+              }
             }
           } catch (error) {
             // Ignore screenshot errors
@@ -1325,6 +1330,10 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
         console.log('[Hybrid] Auto-screenshot streaming stopped');
       }
 
+      // Clear AI working tab
+      console.log('[Electron] AI task ended, releasing tab:', aiWorkingTabId);
+      aiWorkingTabId = null;
+
       // Remove overlay BEFORE navigating to preserve it on current page
       if (browserView) {
         try {
@@ -1410,6 +1419,10 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
         clearInterval(screenshotInterval);
         screenshotInterval = null;
       }
+
+      // Clear AI working tab on error
+      console.log('[Electron] AI task error, releasing tab:', aiWorkingTabId);
+      aiWorkingTabId = null;
 
       if (browserView) {
         try {
@@ -1621,6 +1634,10 @@ ipcMain.handle('stop-task', async (event) => {
         screenshotInterval = null;
       }
 
+      // Clear AI working tab on stop
+      console.log('[Electron] AI task stopped, releasing tab:', aiWorkingTabId);
+      aiWorkingTabId = null;
+
       if (browserView) {
         try {
           await browserView.webContents.executeJavaScript(`
@@ -1659,6 +1676,43 @@ ipcMain.handle('stop-task', async (event) => {
     console.error('[Electron] Error stopping task:', error);
     isTaskRunning = false;
     stopRequested = false;
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Switch to specific tab
+ipcMain.handle('switch-to-tab', async (event, tabId) => {
+  console.log('[Electron] Switch to tab requested:', tabId);
+
+  try {
+    if (!browserViews.has(tabId)) {
+      console.error('[Electron] Tab not found:', tabId);
+      return { success: false, error: 'Tab not found' };
+    }
+
+    // Hide current view
+    if (browserView) {
+      mainWindow.removeBrowserView(browserView);
+    }
+
+    // Show target view
+    browserView = browserViews.get(tabId);
+    currentTabId = tabId;
+    mainWindow.addBrowserView(browserView);
+    updateBrowserViewBounds();
+
+    // Send URL update to toolbar
+    const url = browserView.webContents.getURL();
+    const title = browserView.webContents.getTitle();
+    mainWindow.webContents.send('url-changed', url, title);
+
+    // Notify toolbar to update tab UI
+    mainWindow.webContents.send('tab-switched', { tabId });
+
+    console.log('[Electron] Successfully switched to tab:', tabId);
+    return { success: true };
+  } catch (error) {
+    console.error('[Electron] Failed to switch tab:', error);
     return { success: false, error: error.message };
   }
 });

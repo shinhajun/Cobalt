@@ -11,6 +11,9 @@ window.electronAPI = {
   // 작업 중단
   stopTask: () => ipcRenderer.invoke('stop-task'),
 
+  // 탭 전환
+  switchToTab: (tabId) => ipcRenderer.invoke('switch-to-tab', tabId),
+
   // API 키 업데이트
   updateApiKeys: (keys) => ipcRenderer.invoke('update-api-keys', keys),
 

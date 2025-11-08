@@ -360,21 +360,9 @@ export class BrowserController {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
-      try {
-        await this.typeByBackendNodeId(element.backendNodeId, text, clear);
-      } catch (focusError: any) {
-        // Fallback: If CDP focus fails (like Google Sheets), try direct keyboard typing
-        if (focusError.message.includes('not focusable') || focusError.message.includes('DOM.focus')) {
-          console.log('[BrowserController] CDP focus failed, using direct keyboard typing fallback');
-
-          // Just type directly without focusing (element might already be focused)
-          for (const char of text) {
-            await this.page.keyboard.type(char, { delay: 1 });
-          }
-        } else {
-          throw focusError;
-        }
-      }
+      // typeByBackendNodeId now handles all focus failures internally with 3-tier fallback
+      // It will NOT throw on focus failures, only on critical errors
+      await this.typeByBackendNodeId(element.backendNodeId, text, clear);
 
       // Wait briefly for input to register (browser-use: 50ms)
       await this.page.waitForTimeout(50);
@@ -646,9 +634,53 @@ export class BrowserController {
     try {
       const { object } = await cdp.send('DOM.resolveNode', { backendNodeId });
 
-      // Focus the element first
-      await cdp.send('DOM.focus', { objectId: object.objectId });
-      await this.page.waitForTimeout(100); // Wait longer for focus and autocomplete
+      // === browser-use style 3-tier focus strategy ===
+      // Strategy 1: Try CDP DOM.focus with backendNodeId (not objectId!)
+      let focusSucceeded = false;
+      try {
+        await cdp.send('DOM.focus', { backendNodeId }); // Use backendNodeId like browser-use
+        focusSucceeded = true;
+        console.log('[BrowserController] CDP DOM.focus succeeded');
+        await this.page.waitForTimeout(100);
+      } catch (focusError: any) {
+        console.log('[BrowserController] CDP DOM.focus failed:', focusError.message);
+
+        // Strategy 2: Try clicking the element using coordinates
+        try {
+          const boxModel = await cdp.send('DOM.getBoxModel', { backendNodeId });
+          if (boxModel && boxModel.model) {
+            const quad = boxModel.model.content;
+            // Calculate center point from quad coordinates
+            const centerX = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
+            const centerY = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
+
+            console.log(`[BrowserController] Trying click fallback at (${centerX}, ${centerY})`);
+
+            // Dispatch mouse click events
+            await cdp.send('Input.dispatchMouseEvent', {
+              type: 'mousePressed',
+              x: centerX,
+              y: centerY,
+              button: 'left',
+              clickCount: 1,
+            });
+            await cdp.send('Input.dispatchMouseEvent', {
+              type: 'mouseReleased',
+              x: centerX,
+              y: centerY,
+              button: 'left',
+              clickCount: 1,
+            });
+            await this.page.waitForTimeout(50);
+            focusSucceeded = true;
+            console.log('[BrowserController] Click fallback succeeded');
+          }
+        } catch (clickError: any) {
+          console.log('[BrowserController] Click fallback also failed:', clickError.message);
+          // Strategy 3: Continue anyway - element might already be focused (common in Google Sheets)
+          console.log('[BrowserController] Continuing with typing anyway (element might already be focused)');
+        }
+      }
 
       // Clear if needed - browser-use style with JavaScript
       if (clearFirst) {

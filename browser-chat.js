@@ -146,6 +146,9 @@ function init() {
           btnStop.style.display = 'none';
           taskInput.disabled = false;
 
+          // Remove screenshot display
+          removeScreenshotDisplay();
+
           if (event.data.data.success) {
             addAssistantMessage('✅ Task completed!\n\n' + event.data.data.report);
           } else {
@@ -156,8 +159,11 @@ function init() {
           break;
 
         case 'agent-screenshot':
-          // Screenshot events are handled by BrowserView now
-          // We can optionally show a notification
+          // Display screenshot in chat UI with tabId
+          if (event.data.data && event.data.data.screenshot) {
+            const tabId = event.data.data.tabId; // AI 작업 중인 탭 ID
+            updateScreenshotDisplay(event.data.data.screenshot, tabId);
+          }
           break;
       }
     }
@@ -826,6 +832,97 @@ function addErrorMessage(text, save = true) {
 
   if (save) {
     saveCurrentRoomMessages();
+  }
+}
+
+// Screenshot display management - inline chat message style
+let lastScreenshotMessageDiv = null;
+let lastScreenshotTabId = null;
+
+function updateScreenshotDisplay(screenshotDataURL, tabId) {
+  // Get active chat room
+  const activeRoom = chatRooms.find(r => r.id === activeChatRoomId);
+  if (!activeRoom) return;
+
+  // Store tabId for click handler
+  lastScreenshotTabId = tabId;
+
+  // Create or update screenshot message in chat
+  if (!lastScreenshotMessageDiv || !messagesContainer.contains(lastScreenshotMessageDiv)) {
+    // Create new screenshot message
+    lastScreenshotMessageDiv = document.createElement('div');
+    lastScreenshotMessageDiv.className = 'message screenshot';
+    lastScreenshotMessageDiv.style.cssText = `
+      padding: 12px;
+      margin-bottom: 12px;
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+      border-left: 4px solid #667eea;
+      border-radius: 8px;
+      max-width: 100%;
+      cursor: pointer;
+      transition: background 0.2s;
+    `;
+
+    // Click handler: Switch to AI working tab
+    lastScreenshotMessageDiv.addEventListener('click', () => {
+      if (lastScreenshotTabId !== undefined && lastScreenshotTabId !== null) {
+        console.log('[Chat] Switching to AI tab:', lastScreenshotTabId);
+        if (electronAPI && electronAPI.switchToTab) {
+          electronAPI.switchToTab(lastScreenshotTabId).then(result => {
+            if (result.success) {
+              console.log('[Chat] Successfully switched to tab:', lastScreenshotTabId);
+            } else {
+              console.error('[Chat] Failed to switch tab:', result.error);
+            }
+          });
+        }
+      }
+    });
+
+    // Hover effects
+    lastScreenshotMessageDiv.addEventListener('mouseenter', () => {
+      lastScreenshotMessageDiv.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)';
+    });
+    lastScreenshotMessageDiv.addEventListener('mouseleave', () => {
+      lastScreenshotMessageDiv.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)';
+    });
+
+    lastScreenshotMessageDiv.innerHTML = `
+      <div style="color: #667eea; font-weight: 600; font-size: 12px; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+        <span>🤖</span>
+        <span>AI Browser View</span>
+        <span class="screenshot-status" style="color: #999; font-weight: 400; font-size: 11px; margin-left: auto;">
+          실시간 업데이트 중... ${tabId !== undefined && tabId !== null ? `(탭 ${tabId})` : ''}
+        </span>
+      </div>
+      <div style="border-radius: 6px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); position: relative;">
+        <img src="" style="width: 100%; display: block;" />
+        <div style="position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.7); color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; pointer-events: none;">
+          클릭하여 탭으로 이동 →
+        </div>
+      </div>
+    `;
+
+    messagesContainer.appendChild(lastScreenshotMessageDiv);
+    scrollToBottom();
+  }
+
+  // Update image
+  const img = lastScreenshotMessageDiv.querySelector('img');
+  if (img) {
+    img.src = screenshotDataURL;
+  }
+}
+
+function removeScreenshotDisplay() {
+  if (lastScreenshotMessageDiv && messagesContainer.contains(lastScreenshotMessageDiv)) {
+    // Mark as completed instead of removing
+    const statusSpan = lastScreenshotMessageDiv.querySelector('.screenshot-status');
+    if (statusSpan) {
+      statusSpan.textContent = '✓ 완료';
+      statusSpan.style.color = '#28ca42';
+    }
+    lastScreenshotMessageDiv = null;
   }
 }
 
