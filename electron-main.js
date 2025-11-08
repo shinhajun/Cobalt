@@ -1330,12 +1330,15 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
         console.log('[Hybrid] Auto-screenshot streaming stopped');
       }
 
+      // Store tab ID before clearing (FIX: overlay cleanup bug)
+      const completedTabId = aiWorkingTabId;
+
       // Clear AI working tab
-      console.log('[Electron] AI task ended, releasing tab:', aiWorkingTabId);
+      console.log('[Electron] AI task ended, releasing tab:', completedTabId);
       aiWorkingTabId = null;
 
-      // Remove overlay from AI working tab
-      const completedTabView = browserViews.get(aiWorkingTabId);
+      // Remove overlay from AI working tab (using stored ID)
+      const completedTabView = browserViews.get(completedTabId);
       if (completedTabView && completedTabView.webContents && !completedTabView.webContents.isDestroyed()) {
         try {
           await completedTabView.webContents.executeJavaScript(`
@@ -1492,37 +1495,9 @@ ipcMain.handle('update-api-keys', async (_event, { openai, google, claude }) => 
   }
 });
 
-// IPC: Translate text to English (from BrowserView)
-ipcMain.on('translate-text-request', async (_event, text) => {
-  console.log('[Electron] Translate text requested:', text.substring(0, 50) + '...');
-
-  try {
-    if (!llmService) {
-      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
-    }
-
-    mainWindow.webContents.send('translate-text', { text });
-  } catch (error) {
-    console.error('[Electron] Translation request failed:', error);
-  }
-});
-
-// IPC: AI edit text (from BrowserView)
-ipcMain.on('ai-edit-text-request', async (_event, text) => {
-  console.log('[Electron] AI edit text requested:', text.substring(0, 50) + '...');
-
-  try {
-    if (!llmService) {
-      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
-    }
-
-    mainWindow.webContents.send('ai-edit-text', { text });
-  } catch (error) {
-    console.error('[Electron] AI edit request failed:', error);
-  }
-});
+// Note: Legacy 'translate-text-request' and 'ai-edit-text-request' removed
+// These were unused - actual translation/editing uses 'browserview-translate-request'
+// and 'browserview-edit-request' handled below
 
 // IPC: Execute search from home page
 ipcMain.on('execute-home-search', async (_event, query) => {

@@ -18,24 +18,10 @@ window.electronAPI = {
   updateApiKeys: (keys) => ipcRenderer.invoke('update-api-keys', keys),
 
   // Quick actions (navigate, screenshot, refresh)
-  quickAction: (action, data) => ipcRenderer.invoke('quick-action', { action, data }),
+  quickAction: (action, data) => ipcRenderer.invoke('quick-action', { action, data })
 
-  // 이벤트 리스너
-  onAgentStarted: (callback) => {
-    ipcRenderer.on('agent-started', (event, data) => callback(data));
-  },
-
-  onAgentStopped: (callback) => {
-    ipcRenderer.on('agent-stopped', (event, data) => callback(data));
-  },
-
-  onAgentScreenshot: (callback) => {
-    ipcRenderer.on('agent-screenshot', (event, data) => callback(data));
-  },
-
-  onAgentLog: (callback) => {
-    ipcRenderer.on('agent-log', (event, data) => callback(data));
-  }
+  // Note: onAgent* event listeners removed - now using postMessage pattern
+  // via browser-toolbar.html → browser-chat-ui.html iframe communication
 };
 
 console.log('[Preload] Electron API exposed to window.electronAPI');

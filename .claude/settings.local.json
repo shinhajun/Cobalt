@@ -14,7 +14,10 @@
       "Bash(timeout:*)",
       "Bash(rm:*)",
       "Bash(tree:*)",
-      "Bash(node test-integration.js:*)"
+      "Bash(node test-integration.js:*)",
+      "Bash(npm uninstall:*)",
+      "Bash(grep:*)",
+      "Bash(awk:*)"
     ],
     "deny": [],
     "ask": []

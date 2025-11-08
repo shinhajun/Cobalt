@@ -21,6 +21,8 @@ import {
 import { BrowserProfile } from './browser/BrowserProfile.js';
 import { BaseWatchdog, createDefaultWatchdogs, destroyWatchdogs } from './watchdogs/index.js';
 import { BrowserError, ElementNotFoundError } from './errors/index.js';
+import { BrowserSession } from './browser/BrowserSession.js';
+import { Element } from './actor/Element.js';
 
 export interface BrowserStateSummary {
   url: string;
@@ -63,6 +65,9 @@ export class BrowserController {
   private cachedDOMState: SerializedDOMState | null = null;
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL = 500; // ms
+
+  // BrowserSession for CDP session management (browser-use style)
+  private browserSession: BrowserSession | null = null;
 
   constructor(debugMode: boolean = false, profile?: BrowserProfile) {
     this.debugMode = debugMode;
@@ -158,6 +163,10 @@ export class BrowserController {
     this.page = await context.newPage();
     this.domService = new DomService(this.page);
 
+    // Initialize BrowserSession for CDP session management
+    this.browserSession = new BrowserSession(context, this.page);
+    console.log('[BrowserController] BrowserSession initialized');
+
     // Initialize watchdogs
     try {
       this.watchdogs = await createDefaultWatchdogs(this.eventBus, this);
@@ -177,7 +186,18 @@ export class BrowserController {
   }
 
   async close(): Promise<void> {
-    // Destroy watchdogs first
+    // Destroy BrowserSession first
+    if (this.browserSession) {
+      try {
+        await this.browserSession.destroy();
+        console.log('[BrowserController] BrowserSession destroyed');
+      } catch (error: any) {
+        console.error('[BrowserController] Failed to destroy BrowserSession:', error.message);
+      }
+      this.browserSession = null;
+    }
+
+    // Destroy watchdogs
     if (this.watchdogs.length > 0) {
       try {
         await destroyWatchdogs(this.watchdogs);
@@ -344,22 +364,29 @@ export class BrowserController {
   // ==================== Actions ====================
 
   /**
-   * Click element by index
+   * Click element by index (browser-use style with Element class)
    */
   async clickElement(index: number): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService) {
+      if (!this.page || !this.domService || !this.browserSession) {
         throw new Error('Browser not launched');
       }
 
       const state = await this.getBrowserState(false, true);
-      const element = state.selectorMap[index];
+      const elementData = state.selectorMap[index];
 
-      if (!element || !element.backendNodeId) {
+      if (!elementData || !elementData.backendNodeId) {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
-      await this.clickByBackendNodeId(element.backendNodeId);
+      // Use browser-use style Element class with advanced click
+      const element = new Element(
+        this.browserSession,
+        elementData.backendNodeId,
+        this.browserSession.agentFocus.sessionId
+      );
+
+      await element.click();
 
       // Wait briefly for click to register (browser-use: 50-80ms)
       await this.page.waitForTimeout(80);
@@ -369,29 +396,35 @@ export class BrowserController {
 
       return { success: true };
     } catch (error: any) {
+      console.error('[BrowserController] Click error:', error);
       return { success: false, error: error.message };
     }
   }
 
   /**
-   * Type text into element by index
+   * Type text into element by index (browser-use style with Element class)
    */
   async inputText(index: number, text: string, clear: boolean = true): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService) {
+      if (!this.page || !this.domService || !this.browserSession) {
         throw new Error('Browser not launched');
       }
 
       const state = await this.getBrowserState(false, true);
-      const element = state.selectorMap[index];
+      const elementData = state.selectorMap[index];
 
-      if (!element || !element.backendNodeId) {
+      if (!elementData || !elementData.backendNodeId) {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
-      // typeByBackendNodeId now handles all focus failures internally with 3-tier fallback
-      // It will NOT throw on focus failures, only on critical errors
-      await this.typeByBackendNodeId(element.backendNodeId, text, clear);
+      // Use browser-use style Element class with advanced fill
+      const element = new Element(
+        this.browserSession,
+        elementData.backendNodeId,
+        this.browserSession.agentFocus.sessionId
+      );
+
+      await element.fill(text, clear);
 
       // Wait briefly for input to register (browser-use: 50ms)
       await this.page.waitForTimeout(50);
@@ -401,6 +434,7 @@ export class BrowserController {
 
       return { success: true };
     } catch (error: any) {
+      console.error('[BrowserController] Input text error:', error);
       return { success: false, error: error.message };
     }
   }

@@ -1,6 +1,6 @@
 /**
  * CrashWatchdog - Detect and recover from browser/page crashes
- * Based on browser-use's CrashWatchdog
+ * Enhanced with network timeout monitoring and health checks (browser-use style)
  */
 
 import { BaseWatchdog } from './BaseWatchdog.js';
@@ -10,28 +10,66 @@ import {
   BrowserCrashEvent,
   BrowserCrashRecoveredEvent,
   BrowserEventTypes,
+  BrowserConnectedEvent,
+  BrowserStoppedEvent,
 } from '../events/browserEvents.js';
 import { PageCrashError } from '../errors/BrowserError.js';
 
-export class CrashWatchdog extends BaseWatchdog {
-  static readonly LISTENS_TO = ['navigation_complete', 'navigation_started'];
-  static readonly EMITS = ['browser_crash', 'browser_crash_recovered'];
+/**
+ * Network request tracker
+ */
+interface NetworkRequestTracker {
+  requestId: string;
+  startTime: number;
+  url: string;
+  method: string;
+  resourceType?: string;
+}
 
+/**
+ * Browser error event data
+ */
+interface BrowserErrorEvent {
+  type: 'browser_error';
+  errorType: 'NetworkTimeout' | 'TargetCrash' | 'BrowserProcessCrashed' | 'HealthCheckFailed';
+  message: string;
+  details: Record<string, any>;
+  timestamp: number;
+}
+
+export class CrashWatchdog extends BaseWatchdog {
+  static readonly LISTENS_TO = [
+    'navigation_complete',
+    'navigation_started',
+    'browser_launch',
+    'browser_stopped',
+  ];
+  static readonly EMITS = ['browser_crash', 'browser_crash_recovered', 'browser_error'];
+
+  // Configuration
   private maxRecoveryAttempts = 3;
+  private networkTimeoutSeconds = 10.0;
+  private checkIntervalSeconds = 5.0;
+
+  // State
   private recoveryAttempts: Map<string, number> = new Map();
   private crashMonitoringActive = false;
+  private activeRequests: Map<string, NetworkRequestTracker> = new Map();
+  private monitoringTask: NodeJS.Timeout | null = null;
+  private cdpSession: any = null;
 
   async onInitialize(): Promise<void> {
-    this.info('Crash watchdog initialized');
+    this.info('Crash watchdog initialized with network monitoring and health checks');
     await this.startCrashMonitoring();
   }
 
   async onDestroy(): Promise<void> {
     this.crashMonitoringActive = false;
+    await this.stopMonitoring();
   }
 
   /**
-   * Start monitoring for page crashes
+   * Start monitoring for page crashes and network issues
    */
   private async startCrashMonitoring(): Promise<void> {
     if (this.crashMonitoringActive) {
@@ -39,13 +77,42 @@ export class CrashWatchdog extends BaseWatchdog {
     }
 
     this.crashMonitoringActive = true;
-    this.debug('Started crash monitoring');
+    this.debug('Started crash monitoring with network timeout detection');
 
     try {
       const page = (this.browserController as any).page;
       if (!page) {
         this.warn('No page available for crash monitoring');
         return;
+      }
+
+      // Get CDP session for network monitoring
+      try {
+        this.cdpSession = await page.context().newCDPSession(page);
+
+        // Enable network tracking
+        await this.cdpSession.send('Network.enable');
+
+        // Set up network event listeners
+        this.cdpSession.on('Network.requestWillBeSent', (event: any) => {
+          this.onRequestWillBeSent(event);
+        });
+
+        this.cdpSession.on('Network.responseReceived', (event: any) => {
+          this.onResponseReceived(event);
+        });
+
+        this.cdpSession.on('Network.loadingFailed', (event: any) => {
+          this.onLoadingFailed(event);
+        });
+
+        this.cdpSession.on('Network.loadingFinished', (event: any) => {
+          this.onLoadingFinished(event);
+        });
+
+        this.debug('Network monitoring enabled');
+      } catch (error: any) {
+        this.warn('Failed to enable network monitoring:', error.message);
       }
 
       // Listen for page crash events
@@ -57,14 +124,191 @@ export class CrashWatchdog extends BaseWatchdog {
       // Listen for page errors
       page.on('pageerror', (error: Error) => {
         this.debug('Page error detected:', error.message);
-        // Don't treat all page errors as crashes, only fatal ones
         if (this.isFatalError(error)) {
           this.handlePageCrash('main');
         }
       });
 
+      // Start health check monitoring loop
+      this.startMonitoringLoop();
     } catch (error: any) {
       this.error('Failed to start crash monitoring:', error.message);
+    }
+  }
+
+  /**
+   * Track new network request
+   */
+  private onRequestWillBeSent(event: any): void {
+    const requestId = event.requestId;
+    const request = event.request;
+
+    this.activeRequests.set(requestId, {
+      requestId,
+      startTime: Date.now(),
+      url: request.url,
+      method: request.method,
+      resourceType: event.type,
+    });
+
+    this.debug(`Tracking network request: ${request.method} ${request.url.substring(0, 50)}...`);
+  }
+
+  /**
+   * Remove request from tracking on response
+   */
+  private onResponseReceived(event: any): void {
+    const requestId = event.requestId;
+    if (this.activeRequests.has(requestId)) {
+      const tracker = this.activeRequests.get(requestId)!;
+      const elapsed = Date.now() - tracker.startTime;
+      this.debug(`Request completed in ${elapsed}ms: ${tracker.url.substring(0, 50)}...`);
+      // Don't remove yet - wait for loadingFinished
+    }
+  }
+
+  /**
+   * Remove request from tracking on failure
+   */
+  private onLoadingFailed(event: any): void {
+    const requestId = event.requestId;
+    if (this.activeRequests.has(requestId)) {
+      const tracker = this.activeRequests.get(requestId)!;
+      const elapsed = Date.now() - tracker.startTime;
+      this.debug(`Request failed after ${elapsed}ms: ${tracker.url.substring(0, 50)}...`);
+      this.activeRequests.delete(requestId);
+    }
+  }
+
+  /**
+   * Remove request from tracking when loading finished
+   */
+  private onLoadingFinished(event: any): void {
+    const requestId = event.requestId;
+    this.activeRequests.delete(requestId);
+  }
+
+  /**
+   * Start monitoring loop for network timeouts and health checks
+   */
+  private startMonitoringLoop(): void {
+    if (this.monitoringTask) {
+      return;
+    }
+
+    this.debug('Starting monitoring loop (check interval: 5s)');
+
+    this.monitoringTask = setInterval(async () => {
+      try {
+        await this.checkNetworkTimeouts();
+        await this.checkBrowserHealth();
+      } catch (error: any) {
+        this.error('Error in monitoring loop:', error.message);
+      }
+    }, this.checkIntervalSeconds * 1000);
+  }
+
+  /**
+   * Stop monitoring loop
+   */
+  private async stopMonitoring(): Promise<void> {
+    if (this.monitoringTask) {
+      clearInterval(this.monitoringTask);
+      this.monitoringTask = null;
+      this.debug('Monitoring loop stopped');
+    }
+
+    if (this.cdpSession) {
+      try {
+        await this.cdpSession.detach();
+        this.cdpSession = null;
+      } catch (error) {
+        // Ignore detach errors
+      }
+    }
+
+    this.activeRequests.clear();
+  }
+
+  /**
+   * Check for network requests exceeding timeout
+   */
+  private async checkNetworkTimeouts(): Promise<void> {
+    const currentTime = Date.now();
+    const timedOutRequests: [string, NetworkRequestTracker][] = [];
+
+    for (const [requestId, tracker] of this.activeRequests.entries()) {
+      const elapsed = (currentTime - tracker.startTime) / 1000;
+      if (elapsed >= this.networkTimeoutSeconds) {
+        timedOutRequests.push([requestId, tracker]);
+      }
+    }
+
+    // Emit events for timed out requests
+    for (const [requestId, tracker] of timedOutRequests) {
+      this.warn(
+        `Network request timeout after ${this.networkTimeoutSeconds}s: ${tracker.method} ${tracker.url.substring(0, 100)}...`
+      );
+
+      const errorEvent: BrowserErrorEvent = {
+        type: 'browser_error',
+        errorType: 'NetworkTimeout',
+        message: `Network request timed out after ${this.networkTimeoutSeconds}s`,
+        details: {
+          url: tracker.url,
+          method: tracker.method,
+          resourceType: tracker.resourceType,
+          elapsedSeconds: (currentTime - tracker.startTime) / 1000,
+        },
+        timestamp: currentTime,
+      };
+
+      await this.emit('browser_error', errorEvent);
+
+      // Remove from tracking
+      this.activeRequests.delete(requestId);
+    }
+  }
+
+  /**
+   * Check if browser and page are still responsive
+   */
+  private async checkBrowserHealth(): Promise<void> {
+    try {
+      const page = (this.browserController as any).page;
+      if (!page) {
+        this.debug('No page available for health check');
+        return;
+      }
+
+      // Quick ping to check if page is alive - evaluate simple expression
+      this.debug('Running browser health check (1+1 test)');
+
+      const result = await Promise.race([
+        page.evaluate(() => 1 + 1),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Health check timeout')), 1000)
+        ),
+      ]);
+
+      if (result === 2) {
+        this.debug('Browser health check passed');
+      }
+    } catch (error: any) {
+      this.error('❌ Browser health check failed:', error.message);
+
+      const errorEvent: BrowserErrorEvent = {
+        type: 'browser_error',
+        errorType: 'HealthCheckFailed',
+        message: `Browser health check failed: ${error.message}`,
+        details: {
+          error: error.message,
+          type: error.constructor.name,
+        },
+        timestamp: Date.now(),
+      };
+
+      await this.emit('browser_error', errorEvent);
     }
   }
 
@@ -177,6 +421,23 @@ export class CrashWatchdog extends BaseWatchdog {
    */
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Event handler for browser launch
+   */
+  async on_BrowserLaunchEvent(event: any): Promise<void> {
+    if (!this.isEnabled()) return;
+    this.debug('Browser launched, starting enhanced monitoring');
+  }
+
+  /**
+   * Event handler for browser stopped
+   */
+  async on_BrowserStoppedEvent(event: any): Promise<void> {
+    if (!this.isEnabled()) return;
+    this.debug('Browser stopped, ending monitoring');
+    await this.stopMonitoring();
   }
 
   /**
