@@ -50,7 +50,7 @@ export class LLMService {
 
   // LLM 설정
   private readonly LLM_CONFIG = {
-    MAX_ITERATIONS: 15,
+    MAX_ITERATIONS: 100,
     PROMPT_LOG_LENGTH: 50, // 로그에 표시할 프롬프트 길이
     RESPONSE_LOG_LENGTH: 300,
     MAX_HISTORY_ENTRIES: 20, // 히스토리에 보관할 최대 액션 수
@@ -1036,8 +1036,7 @@ BROWSER ACTIONS:
 {"type": "BROWSER_ACTION", "command": "scrollToTop|scrollToBottom"}
 {"type": "BROWSER_ACTION", "command": "createNewTab|switchTab|closeTab|listTabs", "tabId": "<ID>"}
 
-VISION/CAPTCHA TOOLS:
-{"type": "TOOL_ACTION", "tool": "solveCaptcha"} - Auto-detect and solve CAPTCHAs
+VISION TOOLS:
 {"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<VISUAL_DESCRIPTION>"} - Find element by vision when DOM fails
 
 UTILITY TOOLS:
@@ -1055,7 +1054,6 @@ COMPLETION:
 1. DOM actions (clickElement/typeElement) - fastest
 2. takeScreenshot for visual analysis
 3. findElement if DOM fails
-4. solveCaptcha for challenges
 
 **Efficiency Rules:**
 ✓ Complete in 3-5 iterations (don't waste actions)
@@ -1075,10 +1073,8 @@ COMPLETION:
 - Ask comprehensive questions in ONE instruction to minimize iterations
 - After analysis, FINISH or take action (don't screenshot again)
 
-**CAPTCHA Handling:**
-- See reCAPTCHA/CAPTCHA → use solveCaptcha immediately
+**Challenge Page Handling:**
 - captcha_status=cloudflare_waiting → wait max 3 times, then FAIL
-- Don't manually click CAPTCHA elements
 
 **Task Completion:**
 ✓ Use FINISH when task complete OR target clearly not found

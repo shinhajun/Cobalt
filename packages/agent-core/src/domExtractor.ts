@@ -1,4 +1,4 @@
-import { Page, CDPSession } from 'playwright';
+import { Page } from 'playwright';
 
 // Enhanced element information with browser-use style indexing
 export interface InteractiveElement {
@@ -40,7 +40,7 @@ export class DOMExtractor {
     const timestamp = Date.now();
 
     try {
-      // Use JavaScript evaluation to extract elements (simpler than CDP for now)
+      // Use JavaScript evaluation to extract elements (including Shadow DOM and iframes)
       const elements = await page.evaluate(() => {
         const interactiveSelectors = [
           'a[href]',
@@ -53,15 +53,64 @@ export class DOMExtractor {
           '[role="checkbox"]',
           '[role="radio"]',
           '[role="textbox"]',
+          '[role="menuitem"]',
+          '[role="tab"]',
+          '[role="option"]',
+          '[role="gridcell"]',
+          '[role="row"]',
           '[onclick]',
           '[tabindex]',
+          '[contenteditable="true"]',
+          '[draggable="true"]',
         ];
 
         const allElements = new Set<Element>();
-        interactiveSelectors.forEach(selector => {
+
+        // Helper function to extract elements from a root (supports Shadow DOM)
+        const extractFromRoot = (root: Document | ShadowRoot | Element) => {
+          interactiveSelectors.forEach(selector => {
+            try {
+              root.querySelectorAll(selector).forEach(el => allElements.add(el));
+            } catch (_) {}
+          });
+
+          // Recursively traverse Shadow DOM
+          root.querySelectorAll('*').forEach(el => {
+            if (el.shadowRoot) {
+              extractFromRoot(el.shadowRoot);
+            }
+          });
+        };
+
+        // Extract from main document
+        extractFromRoot(document);
+
+        // Extract from iframes (same-origin only)
+        document.querySelectorAll('iframe').forEach(iframe => {
           try {
-            document.querySelectorAll(selector).forEach(el => allElements.add(el));
-          } catch (_) {}
+            const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+            if (iframeDoc) {
+              extractFromRoot(iframeDoc);
+            }
+          } catch (_) {
+            // Cross-origin iframe, skip
+          }
+        });
+
+        // Also detect canvas and SVG interactive areas
+        document.querySelectorAll('canvas, svg').forEach(canvasEl => {
+          const rect = canvasEl.getBoundingClientRect();
+          const style = window.getComputedStyle(canvasEl);
+          const isVisible =
+            rect.width > 0 &&
+            rect.height > 0 &&
+            style.display !== 'none' &&
+            style.visibility !== 'hidden' &&
+            style.opacity !== '0';
+
+          if (isVisible && (canvasEl.hasAttribute('onclick') || canvasEl.hasAttribute('tabindex'))) {
+            allElements.add(canvasEl);
+          }
         });
 
         const extractedElements: any[] = [];
@@ -71,14 +120,16 @@ export class DOMExtractor {
           // Get bounding box
           const rect = el.getBoundingClientRect();
 
-          // Check visibility
+          // Check visibility (enhanced check)
           const style = window.getComputedStyle(el);
           const isVisible =
             rect.width > 0 &&
             rect.height > 0 &&
             style.display !== 'none' &&
             style.visibility !== 'hidden' &&
-            style.opacity !== '0';
+            parseFloat(style.opacity) > 0.1 && // Allow slight transparency
+            rect.top < window.innerHeight && // Within viewport or scrollable area
+            rect.left < window.innerWidth;
 
           if (!isVisible) return; // Skip invisible elements
 
@@ -115,14 +166,25 @@ export class DOMExtractor {
             return element.tagName.toLowerCase();
           };
 
-          // Check if clickable
+          // Check if clickable (enhanced detection)
           const isClickable =
             el.tagName === 'A' ||
             el.tagName === 'BUTTON' ||
             el.tagName === 'INPUT' ||
+            el.tagName === 'SELECT' ||
+            el.tagName === 'TEXTAREA' ||
             el.hasAttribute('onclick') ||
+            el.hasAttribute('onmousedown') ||
+            el.hasAttribute('onmouseup') ||
+            el.hasAttribute('tabindex') ||
             el.getAttribute('role') === 'button' ||
-            el.getAttribute('role') === 'link';
+            el.getAttribute('role') === 'link' ||
+            el.getAttribute('role') === 'menuitem' ||
+            el.getAttribute('role') === 'tab' ||
+            el.getAttribute('role') === 'option' ||
+            el.getAttribute('role') === 'gridcell' ||
+            el.getAttribute('contenteditable') === 'true' ||
+            style.cursor === 'pointer';
 
           // Extract accessibility info
           const accessibility: any = {

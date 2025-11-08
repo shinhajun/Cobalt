@@ -3,7 +3,6 @@ import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { DOMExtractor, InteractiveElementMap, InteractiveElement } from './domExtractor';
-import { CaptchaSolver, CaptchaDetection } from './captchaSolver';
 
 // Control mode for hybrid browser support
 enum ControlMode {
@@ -31,9 +30,6 @@ export class BrowserController extends EventEmitter {
   // DOM extraction support (browser-use style)
   private domExtractor: DOMExtractor = new DOMExtractor();
   private interactiveElementsCache: InteractiveElementMap | null = null;
-
-  // DOM-based CAPTCHA detection
-  private captchaSolver: CaptchaSolver = new CaptchaSolver(this);
 
   // 타임아웃 상수 정의 (빠른 응답을 위해 단축)
   private readonly TIMEOUTS = {
@@ -176,9 +172,6 @@ export class BrowserController extends EventEmitter {
     // Register main page as a tab
     this.tabs.set('main', this.page);
     this.activeTabId = 'main';
-
-    // Set page for CAPTCHA solver
-    this.captchaSolver.setPage(this.page);
 
     this.emitLog('system', { message: 'Browser launched.' });
 
@@ -1775,9 +1768,6 @@ export class BrowserController extends EventEmitter {
     this.activeTabId = tabId;
     this.page = targetPage;
 
-    // Update CAPTCHA solver page reference
-    this.captchaSolver.setPage(targetPage);
-
     // Bring tab to front
     await targetPage.bringToFront();
 
@@ -2622,63 +2612,4 @@ export class BrowserController extends EventEmitter {
     }
   }
 
-  // === CAPTCHA Detection (DOM-Based) ===
-
-  /**
-   * Detect CAPTCHA using DOM analysis (browser-use style)
-   * Fast and accurate - no vision model needed for detection
-   */
-  async detectCaptcha(): Promise<CaptchaDetection> {
-    return await this.captchaSolver.detectCaptcha();
-  }
-
-  /**
-   * Check if current page is Cloudflare challenge
-   */
-  async isCloudflareChallenge(): Promise<boolean> {
-    return await this.captchaSolver.isCloudflareChallenge();
-  }
-
-  /**
-   * Quick check: any CAPTCHA elements present?
-   */
-  async hasCaptchaElements(): Promise<boolean> {
-    return await this.captchaSolver.hasCaptchaElements();
-  }
-
-  /**
-   * Get CAPTCHA information for LLM context
-   */
-  async getCaptchaInfo(): Promise<string> {
-    return await this.captchaSolver.getCaptchaInfo();
-  }
-
-  /**
-   * Detect and solve CAPTCHA (unified method)
-   * DOM-based detection + existing solving methods
-   */
-  async solveCaptcha(): Promise<import('./captchaSolver').CaptchaSolveResult> {
-    return await this.captchaSolver.solve();
-  }
-
-  /**
-   * Set vision model for CAPTCHA solver
-   */
-  setCaptchaVisionModel(visionModel: any, buildVisionContentParts: any): void {
-    this.captchaSolver.setVisionModel(visionModel, buildVisionContentParts);
-  }
-
-  /**
-   * Extract reCAPTCHA tiles from DOM (browser-use style)
-   */
-  async extractRecaptchaTiles(): Promise<import('./captchaSolver').RecaptchaTile[]> {
-    return await this.captchaSolver.extractRecaptchaTiles();
-  }
-
-  /**
-   * Click reCAPTCHA tiles by indices using DOM coordinates
-   */
-  async clickRecaptchaTilesByIndices(indices: number[]): Promise<boolean> {
-    return await this.captchaSolver.clickRecaptchaTilesByIndices(indices);
-  }
 }
