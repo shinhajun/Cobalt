@@ -56,8 +56,8 @@ export class BrowserSession extends EventEmitter {
   // Browser context from Playwright
   private context: BrowserContext;
 
-  // Current main page
-  private currentPage: Page | null = null;
+  // Current main page (public for Page/Mouse classes)
+  public currentPage: Page | null = null;
 
   // Session timeout (30 seconds of inactivity)
   private readonly SESSION_TIMEOUT = 30000;

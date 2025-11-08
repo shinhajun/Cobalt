@@ -3,9 +3,15 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController.js";
+import { info } from "./utils/logger.js";
+import { Registry, registerDefaultActions } from "./tools/index.js";
 
 export type AgentLogCallback = (log: { type: 'thought' | 'observation' | 'system' | 'error', data: any }) => void;
 
+/**
+ * Legacy ActionResult (for backward compatibility)
+ * @deprecated Use ActionResult from tools/registry.ts instead
+ */
 export interface ActionResult {
   success: boolean;
   observation: string;
@@ -19,75 +25,38 @@ export interface AgentOutput {
   iterations: number;
 }
 
-// Action types matching browser-use
-interface ClickElementAction {
-  type: 'click_element';
-  index: number;
+/**
+ * Action with type field (for LLM responses)
+ */
+interface TypedAction {
+  type: string;
+  [key: string]: any;
 }
 
-interface InputTextAction {
-  type: 'input_text';
-  index: number;
-  text: string;
-  clear?: boolean;
+export interface LLMServiceConfig {
+  openaiApiKey?: string;
+  googleApiKey?: string;
+  claudeApiKey?: string;
 }
-
-interface NavigateAction {
-  type: 'navigate';
-  url: string;
-  new_tab?: boolean;
-}
-
-interface ScrollAction {
-  type: 'scroll';
-  down: boolean;
-  pages?: number;
-}
-
-interface SendKeysAction {
-  type: 'send_keys';
-  keys: string;
-}
-
-interface SwitchTabAction {
-  type: 'switch_tab';
-  tab_id: string;
-}
-
-interface CloseTabAction {
-  type: 'close_tab';
-  tab_id: string;
-}
-
-interface DoneAction {
-  type: 'done';
-  text: string;
-  success?: boolean;
-}
-
-type BrowserAction =
-  | ClickElementAction
-  | InputTextAction
-  | NavigateAction
-  | ScrollAction
-  | SendKeysAction
-  | SwitchTabAction
-  | CloseTabAction
-  | DoneAction;
 
 export class LLMService {
   private model: any;
   private maxIterations: number = 100;
+  private registry: Registry;
 
-  constructor(modelName: string = "gpt-4o-mini") {
-    const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-    const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
-    const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY;
+  constructor(modelName: string = "gpt-4o-mini", config?: LLMServiceConfig) {
+    // Initialize Tools Registry
+    this.registry = new Registry();
+    registerDefaultActions(this.registry);
+    // Allow direct API key injection, fallback to environment variables
+    const OPENAI_API_KEY = config?.openaiApiKey || process.env.OPENAI_API_KEY;
+    const GOOGLE_API_KEY = config?.googleApiKey || process.env.GOOGLE_API_KEY;
+    const CLAUDE_API_KEY = config?.claudeApiKey || process.env.CLAUDE_API_KEY;
 
     const isGemini = (name: string) => /^gemini[-\d\.]/.test(name);
     const isClaude = (name: string) => /^claude[-\d\.]/.test(name);
 
-    console.log("[LLMService] Initializing with model:", modelName);
+    info("[LLMService] Initializing with model:", modelName);
 
     if (isClaude(modelName)) {
       if (!CLAUDE_API_KEY) {
@@ -118,35 +87,19 @@ export class LLMService {
   }
 
   /**
-   * Get system prompt for the agent
+   * Get system prompt for the agent (uses Registry for action descriptions)
    */
   private getSystemPrompt(): string {
+    // Get action descriptions from Registry
+    const actions = this.registry.getAll();
+    const actionDescriptions = actions.map((action, index) => {
+      return `${index + 1}. ${action.name}: ${action.description}`;
+    }).join('\n');
+
     return `You are a browser automation agent. Your task is to accomplish user goals by interacting with web pages.
 
 AVAILABLE ACTIONS:
-1. click_element: Click on an interactive element by its index
-   Example: {"type": "click_element", "index": 5}
-
-2. input_text: Type text into an input field
-   Example: {"type": "input_text", "index": 3, "text": "search query", "clear": true}
-
-3. navigate: Go to a URL
-   Example: {"type": "navigate", "url": "https://example.com", "new_tab": false}
-
-4. scroll: Scroll the page up or down
-   Example: {"type": "scroll", "down": true, "pages": 1.0}
-
-5. send_keys: Send keyboard keys (Enter, Escape, PageDown, etc.) or shortcuts (Control+a)
-   Example: {"type": "send_keys", "keys": "Enter"}
-
-6. switch_tab: Switch to another tab by ID
-   Example: {"type": "switch_tab", "tab_id": "0001"}
-
-7. close_tab: Close a tab by ID
-   Example: {"type": "close_tab", "tab_id": "0002"}
-
-8. done: Mark the task as complete
-   Example: {"type": "done", "text": "Successfully completed the task", "success": true}
+${actionDescriptions}
 
 INSTRUCTIONS:
 - Think step by step about what you need to do
@@ -154,12 +107,12 @@ INSTRUCTIONS:
 - Choose the most appropriate action to progress toward the goal
 - Always respond with valid JSON containing a "thinking" field and an "action" field
 - The "thinking" field should contain your reasoning
-- The "action" field should contain one of the actions above
+- The "action" field should contain one of the actions above with a "type" field
 
 RESPONSE FORMAT:
 {
-  "thinking": "I need to click the search button to submit the query",
-  "action": {"type": "click_element", "index": 5}
+  "thinking": "I need to search for Python tutorials",
+  "action": {"type": "search", "query": "Python tutorials", "engine": "google"}
 }
 
 Remember:
@@ -259,8 +212,8 @@ Remember:
         if (action.type === 'done') {
           isComplete = true;
           finalResult = {
-            text: (action as DoneAction).text,
-            success: (action as DoneAction).success ?? true,
+            text: action.text || 'Task completed',
+            success: action.success ?? true,
           };
         }
 
@@ -330,7 +283,7 @@ Remember:
   /**
    * Parse LLM response to extract thinking and action
    */
-  private parseLLMResponse(responseText: string): { thinking: string; action: BrowserAction } | null {
+  private parseLLMResponse(responseText: string): { thinking: string; action: TypedAction } | null {
     try {
       // Try to extract JSON from markdown code blocks if present
       let jsonText = responseText;
@@ -354,7 +307,7 @@ Remember:
 
       return {
         thinking: parsed.thinking,
-        action: parsed.action as BrowserAction,
+        action: parsed.action as TypedAction,
       };
     } catch (error) {
       return null;
@@ -362,102 +315,22 @@ Remember:
   }
 
   /**
-   * Execute a browser action
+   * Execute a browser action using Tools Registry
    */
-  private async executeAction(action: BrowserAction, browserController: BrowserController): Promise<ActionResult> {
+  private async executeAction(action: TypedAction, browserController: BrowserController): Promise<ActionResult> {
     try {
-      switch (action.type) {
-        case 'click_element': {
-          const result = await browserController.clickElement(action.index);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Clicked element at index ${action.index}`
-              : `Failed to click element: ${result.error}`,
-            error: result.error,
-          };
-        }
+      // Use Registry to execute action
+      const result = await this.registry.execute(action.type, action, browserController);
 
-        case 'input_text': {
-          const result = await browserController.inputText(action.index, action.text, action.clear ?? true);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Typed "${action.text}" into element at index ${action.index}`
-              : `Failed to type text: ${result.error}`,
-            error: result.error,
-          };
-        }
+      // Convert new ActionResult format to legacy format
+      const observation = result.extractedContent || result.longTermMemory || result.error || 'Action completed';
+      const success = !result.error;
 
-        case 'navigate': {
-          const result = await browserController.navigate(action.url, action.new_tab ?? false);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Navigated to ${action.url}`
-              : `Failed to navigate: ${result.error}`,
-            error: result.error,
-          };
-        }
-
-        case 'scroll': {
-          const result = await browserController.scroll(action.down, action.pages ?? 1.0);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Scrolled ${action.down ? 'down' : 'up'} ${action.pages ?? 1.0} pages`
-              : `Failed to scroll: ${result.error}`,
-            error: result.error,
-          };
-        }
-
-        case 'send_keys': {
-          const result = await browserController.sendKeys(action.keys);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Sent keys: ${action.keys}`
-              : `Failed to send keys: ${result.error}`,
-            error: result.error,
-          };
-        }
-
-        case 'switch_tab': {
-          const result = await browserController.switchTab(action.tab_id);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Switched to tab ${action.tab_id}`
-              : `Failed to switch tab: ${result.error}`,
-            error: result.error,
-          };
-        }
-
-        case 'close_tab': {
-          const result = await browserController.closeTab(action.tab_id);
-          return {
-            success: result.success,
-            observation: result.success
-              ? `Closed tab ${action.tab_id}`
-              : `Failed to close tab: ${result.error}`,
-            error: result.error,
-          };
-        }
-
-        case 'done': {
-          return {
-            success: true,
-            observation: `Task completed: ${action.text}`,
-          };
-        }
-
-        default:
-          return {
-            success: false,
-            observation: 'Unknown action type',
-            error: `Unknown action type: ${(action as any).type}`,
-          };
-      }
+      return {
+        success,
+        observation,
+        error: result.error,
+      };
     } catch (error: any) {
       return {
         success: false,

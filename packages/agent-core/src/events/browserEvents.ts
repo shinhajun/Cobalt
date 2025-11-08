@@ -114,10 +114,14 @@ export interface BrowserStateRequestEvent extends BaseEvent {
 
 export interface FileDownloadedEvent extends BaseEvent {
   type: 'file_downloaded';
-  fileName: string;
-  filePath: string;
-  size: number;
   url: string;
+  path: string; // Full path to downloaded file
+  fileName: string; // File name only
+  fileSize: number; // Size in bytes
+  fileType?: string; // Extension (e.g., 'pdf', 'zip')
+  mimeType?: string; // MIME type (e.g., 'application/pdf')
+  fromCache?: boolean; // Whether file was served from cache
+  autoDownload?: boolean; // Whether it was auto-downloaded (e.g., PDF)
 }
 
 // ============================================================================

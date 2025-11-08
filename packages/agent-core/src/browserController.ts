@@ -23,6 +23,7 @@ import { BaseWatchdog, createDefaultWatchdogs, destroyWatchdogs } from './watchd
 import { BrowserError, ElementNotFoundError } from './errors/index.js';
 import { BrowserSession } from './browser/BrowserSession.js';
 import { Element } from './actor/Element.js';
+import { debug, info, warn, error as logError } from './utils/logger.js';
 
 export interface BrowserStateSummary {
   url: string;
@@ -165,14 +166,14 @@ export class BrowserController {
 
     // Initialize BrowserSession for CDP session management
     this.browserSession = new BrowserSession(context, this.page);
-    console.log('[BrowserController] BrowserSession initialized');
+    debug('[BrowserController] BrowserSession initialized');
 
     // Initialize watchdogs
     try {
       this.watchdogs = await createDefaultWatchdogs(this.eventBus, this);
-      console.log('[BrowserController] Watchdogs initialized:', this.watchdogs.map(w => w.getName()));
+      debug('[BrowserController] Watchdogs initialized:', this.watchdogs.map(w => w.getName()));
     } catch (error: any) {
-      console.error('[BrowserController] Failed to initialize watchdogs:', error.message);
+      logError('[BrowserController] Failed to initialize watchdogs:', error.message);
     }
 
     // Emit launch result
@@ -182,7 +183,7 @@ export class BrowserController {
       timestamp: Date.now(),
     } as BrowserLaunchResult);
 
-    console.log('[BrowserController] Browser launched successfully');
+    info('[BrowserController] Browser launched successfully');
   }
 
   async close(): Promise<void> {
@@ -190,9 +191,9 @@ export class BrowserController {
     if (this.browserSession) {
       try {
         await this.browserSession.destroy();
-        console.log('[BrowserController] BrowserSession destroyed');
+        debug('[BrowserController] BrowserSession destroyed');
       } catch (error: any) {
-        console.error('[BrowserController] Failed to destroy BrowserSession:', error.message);
+        logError('[BrowserController] Failed to destroy BrowserSession:', error.message);
       }
       this.browserSession = null;
     }
@@ -201,9 +202,9 @@ export class BrowserController {
     if (this.watchdogs.length > 0) {
       try {
         await destroyWatchdogs(this.watchdogs);
-        console.log('[BrowserController] Watchdogs destroyed');
+        debug('[BrowserController] Watchdogs destroyed');
       } catch (error: any) {
-        console.error('[BrowserController] Failed to destroy watchdogs:', error.message);
+        logError('[BrowserController] Failed to destroy watchdogs:', error.message);
       }
       this.watchdogs = [];
     }
@@ -226,7 +227,7 @@ export class BrowserController {
       timestamp: Date.now(),
     } as BrowserStoppedEvent);
 
-    console.log('[BrowserController] Browser closed');
+    info('[BrowserController] Browser closed');
   }
 
   /**
@@ -396,7 +397,7 @@ export class BrowserController {
 
       return { success: true };
     } catch (error: any) {
-      console.error('[BrowserController] Click error:', error);
+      logError('[BrowserController] Click error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -434,7 +435,7 @@ export class BrowserController {
 
       return { success: true };
     } catch (error: any) {
-      console.error('[BrowserController] Input text error:', error);
+      logError('[BrowserController] Input text error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -645,254 +646,7 @@ export class BrowserController {
   }
 
   // ==================== CDP Helper Methods ====================
-
-  private async clickByBackendNodeId(backendNodeId: number): Promise<void> {
-    if (!this.page) {
-      throw new Error('Page not initialized');
-    }
-
-    const cdp = await this.page.context().newCDPSession(this.page);
-
-    try {
-      const { object } = await cdp.send('DOM.resolveNode', { backendNodeId });
-      const boxModel = await cdp.send('DOM.getBoxModel', { objectId: object.objectId });
-
-      if (!boxModel || !boxModel.model) {
-        throw new Error('Could not get box model for element');
-      }
-
-      // Get center point of element
-      const quad = boxModel.model.content;
-      const centerX = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
-      const centerY = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
-
-      // Dispatch mouse events
-      await cdp.send('Input.dispatchMouseEvent', {
-        type: 'mousePressed',
-        x: centerX,
-        y: centerY,
-        button: 'left',
-        clickCount: 1,
-      });
-
-      await cdp.send('Input.dispatchMouseEvent', {
-        type: 'mouseReleased',
-        x: centerX,
-        y: centerY,
-        button: 'left',
-        clickCount: 1,
-      });
-    } finally {
-      await cdp.detach();
-    }
-  }
-
-  private async typeByBackendNodeId(backendNodeId: number, text: string, clearFirst: boolean = true): Promise<void> {
-    if (!this.page) {
-      throw new Error('Page not initialized');
-    }
-
-    const cdp = await this.page.context().newCDPSession(this.page);
-
-    try {
-      const { object } = await cdp.send('DOM.resolveNode', { backendNodeId });
-
-      // === browser-use style 3-tier focus strategy ===
-      // Strategy 1: Try CDP DOM.focus with backendNodeId (not objectId!)
-      let focusSucceeded = false;
-      try {
-        await cdp.send('DOM.focus', { backendNodeId }); // Use backendNodeId like browser-use
-        focusSucceeded = true;
-        console.log('[BrowserController] CDP DOM.focus succeeded');
-        await this.page.waitForTimeout(100);
-      } catch (focusError: any) {
-        console.log('[BrowserController] CDP DOM.focus failed:', focusError.message);
-
-        // Strategy 2: Try clicking the element using coordinates
-        try {
-          const boxModel = await cdp.send('DOM.getBoxModel', { backendNodeId });
-          if (boxModel && boxModel.model) {
-            const quad = boxModel.model.content;
-            // Calculate center point from quad coordinates
-            const centerX = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
-            const centerY = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
-
-            console.log(`[BrowserController] Trying click fallback at (${centerX}, ${centerY})`);
-
-            // Dispatch mouse click events
-            await cdp.send('Input.dispatchMouseEvent', {
-              type: 'mousePressed',
-              x: centerX,
-              y: centerY,
-              button: 'left',
-              clickCount: 1,
-            });
-            await cdp.send('Input.dispatchMouseEvent', {
-              type: 'mouseReleased',
-              x: centerX,
-              y: centerY,
-              button: 'left',
-              clickCount: 1,
-            });
-            await this.page.waitForTimeout(50);
-            focusSucceeded = true;
-            console.log('[BrowserController] Click fallback succeeded');
-          }
-        } catch (clickError: any) {
-          console.log('[BrowserController] Click fallback also failed:', clickError.message);
-          // Strategy 3: Continue anyway - element might already be focused (common in Google Sheets)
-          console.log('[BrowserController] Continuing with typing anyway (element might already be focused)');
-        }
-      }
-
-      // Clear if needed - browser-use style with JavaScript
-      if (clearFirst) {
-        try {
-          // Strategy 1: Direct JavaScript value setting (most reliable)
-          // Set value to empty multiple times to handle autocomplete
-          await cdp.send('Runtime.callFunctionOn', {
-            functionDeclaration: `function() {
-              // Clear any existing value
-              this.value = "";
-
-              // Try to select all text first
-              try {
-                this.select();
-                this.setSelectionRange(0, 0);
-              } catch (e) {}
-
-              // Set value to empty again
-              this.value = "";
-
-              // Dispatch events to notify React/Vue frameworks
-              this.dispatchEvent(new Event("input", { bubbles: true }));
-              this.dispatchEvent(new Event("change", { bubbles: true }));
-              this.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
-              this.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
-
-              // Blur and focus again to reset any autocomplete
-              this.blur();
-              this.focus();
-
-              return this.value;
-            }`,
-            objectId: object.objectId,
-            returnByValue: true,
-          });
-
-          // Wait a bit for events to process
-          await this.page.waitForTimeout(50);
-
-          // Verify clearing worked
-          const verifyResult = await cdp.send('Runtime.callFunctionOn', {
-            functionDeclaration: 'function() { return this.value; }',
-            objectId: object.objectId,
-            returnByValue: true,
-          });
-
-          const currentValue = verifyResult?.result?.value || '';
-          if (currentValue) {
-            console.log('[BrowserController] JavaScript clear partially failed, field still contains:', currentValue);
-
-            // Fallback: Force clear one more time
-            await cdp.send('Runtime.callFunctionOn', {
-              functionDeclaration: `function() {
-                this.value = "";
-                this.dispatchEvent(new Event("input", { bubbles: true }));
-                return this.value;
-              }`,
-              objectId: object.objectId,
-              returnByValue: true,
-            });
-          }
-        } catch (error) {
-          console.error('[BrowserController] Failed to clear field:', error);
-        }
-      }
-
-      // Wait a bit before typing to ensure field is truly empty
-      await this.page.waitForTimeout(50);
-
-      // Type the text character by character (browser-use style)
-      for (const char of text) {
-        if (char === '\n') {
-          // Handle newline as Enter key
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'keyDown',
-            key: 'Enter',
-            code: 'Enter',
-            windowsVirtualKeyCode: 13,
-          });
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'char',
-            text: '\r',
-            key: 'Enter',
-          });
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'keyUp',
-            key: 'Enter',
-            code: 'Enter',
-            windowsVirtualKeyCode: 13,
-          });
-        } else {
-          // Get proper key info for character
-          const keyCode = this.getKeyCodeForChar(char);
-          const baseKey = char;
-
-          // Send keyDown
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'keyDown',
-            key: baseKey,
-            code: keyCode,
-          });
-
-          // Send char event immediately (this is crucial for text input)
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'char',
-            text: char,
-            key: char,
-          });
-
-          // Send keyUp
-          await cdp.send('Input.dispatchKeyEvent', {
-            type: 'keyUp',
-            key: baseKey,
-            code: keyCode,
-          });
-        }
-
-        // Add minimal delay between keystrokes (1ms is enough for most cases)
-        // browser-use uses 18ms for human-like typing, but we optimize for speed
-        await this.page.waitForTimeout(1);
-      }
-    } finally {
-      await cdp.detach();
-    }
-  }
-
-  /**
-   * Get key code for a character
-   */
-  private getKeyCodeForChar(char: string): string {
-    const keyCodeMap: Record<string, string> = {
-      ' ': 'Space',
-      'Enter': 'Enter',
-      'Tab': 'Tab',
-      'Backspace': 'Backspace',
-      'Delete': 'Delete',
-      'Escape': 'Escape',
-    };
-
-    if (keyCodeMap[char]) {
-      return keyCodeMap[char];
-    } else if (char.match(/[a-zA-Z]/)) {
-      return `Key${char.toUpperCase()}`;
-    } else if (char.match(/[0-9]/)) {
-      return `Digit${char}`;
-    } else {
-      return 'Unidentified';
-    }
-  }
+  // (Removed legacy clickByBackendNodeId, typeByBackendNodeId, getKeyCodeForChar - replaced by Element class)
 
   // ==================== Utility Methods ====================
 
@@ -980,7 +734,7 @@ export class BrowserController {
     // Throttle screenshots to prevent flickering
     const now = Date.now();
     if (!force && now - this.lastScreenshotTime < this.SCREENSHOT_THROTTLE_MS) {
-      console.log(`[BrowserController] Screenshot throttled (last: ${now - this.lastScreenshotTime}ms ago)`);
+      debug(`[BrowserController] Screenshot throttled (last: ${now - this.lastScreenshotTime}ms ago)`);
       return;
     }
 
@@ -998,7 +752,7 @@ export class BrowserController {
         url,
       } as ScreenshotEvent);
     } catch (error: any) {
-      console.error('[BrowserController] Failed to emit screenshot:', error.message);
+      logError('[BrowserController] Failed to emit screenshot:', error.message);
     }
   }
 

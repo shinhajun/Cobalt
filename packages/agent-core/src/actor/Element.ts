@@ -1,5 +1,6 @@
 import { CDPSession, Page } from 'playwright';
 import { BrowserSession, TargetID, SessionID } from '../browser/BrowserSession.js';
+import { debug, warn, error } from '../utils/logger.js';
 
 /**
  * Mouse button type
@@ -210,7 +211,7 @@ export class Element {
 
       // If we still don't have quads, fall back to JS click
       if (quads.length === 0) {
-        console.log('[Element] No quads found, falling back to JavaScript click');
+        debug('[Element] No quads found, falling back to JavaScript click');
         await this.clickViaJavaScript();
         return;
       }
@@ -319,10 +320,10 @@ export class Element {
           modifiers: modifierValue,
         });
 
-        console.log(`[Element] Clicked at (${clampedX.toFixed(1)}, ${clampedY.toFixed(1)})`);
+        debug(`[Element] Clicked at (${clampedX.toFixed(1)}, ${clampedY.toFixed(1)})`);
       } catch (error) {
         // Fall back to JavaScript click
-        console.log('[Element] CDP click failed, falling back to JavaScript click');
+        debug('[Element] CDP click failed, falling back to JavaScript click');
         await this.clickViaJavaScript();
       }
     } catch (error: any) {
@@ -380,7 +381,7 @@ export class Element {
         });
         await page.waitForTimeout(10);
       } catch (error) {
-        console.warn('[Element] Failed to scroll element into view:', error);
+        warn('[Element] Failed to scroll element into view:', error);
       }
 
       // Get object ID for the element
@@ -408,7 +409,7 @@ export class Element {
           };
         }
       } catch (error) {
-        console.warn('[Element] Could not get element coordinates:', error);
+        warn('[Element] Could not get element coordinates:', error);
       }
 
       // Step 1: Focus the element (3-tier fallback)
@@ -418,12 +419,12 @@ export class Element {
       if (clear) {
         const cleared = await this.clearTextField(objectId, inputCoordinates);
         if (!cleared) {
-          console.warn('[Element] Text field clearing failed, typing may append to existing text');
+          warn('[Element] Text field clearing failed, typing may append to existing text');
         }
       }
 
       // Step 3: Type the text character by character with human-like delays
-      console.log(`[Element] Typing text character by character: "${value}"`);
+      debug(`[Element] Typing text character by character: "${value}"`);
 
       for (const char of value) {
         if (char === '\n') {
@@ -497,33 +498,33 @@ export class Element {
 
     // Strategy 1: CDP focus (most reliable)
     try {
-      console.log('[Element] Focusing element using CDP focus');
+      debug('[Element] Focusing element using CDP focus');
       await (cdpSession as any).send('DOM.focus', {
         backendNodeId: this.backendNodeId,
       });
-      console.log('[Element] Element focused successfully using CDP focus');
+      debug('[Element] Element focused successfully using CDP focus');
       return true;
     } catch (error) {
-      console.log('[Element] CDP focus failed, trying JavaScript focus');
+      debug('[Element] CDP focus failed, trying JavaScript focus');
     }
 
     // Strategy 2: JavaScript focus (fallback)
     try {
-      console.log('[Element] Focusing element using JavaScript focus');
+      debug('[Element] Focusing element using JavaScript focus');
       await (cdpSession as any).send('Runtime.callFunctionOn', {
         functionDeclaration: 'function() { this.focus(); }',
         objectId,
       });
-      console.log('[Element] Element focused successfully using JavaScript');
+      debug('[Element] Element focused successfully using JavaScript');
       return true;
     } catch (error) {
-      console.log('[Element] JavaScript focus failed, trying click focus');
+      debug('[Element] JavaScript focus failed, trying click focus');
     }
 
     // Strategy 3: Click to focus (last resort)
     if (coordinates) {
       try {
-        console.log(`[Element] Focusing element by clicking at coordinates: (${coordinates.x}, ${coordinates.y})`);
+        debug(`[Element] Focusing element by clicking at coordinates: (${coordinates.x}, ${coordinates.y})`);
         await (cdpSession as any).send('Input.dispatchMouseEvent', {
           type: 'mousePressed',
           x: coordinates.x,
@@ -538,10 +539,10 @@ export class Element {
           button: 'left',
           clickCount: 1,
         });
-        console.log('[Element] Element focused using click');
+        debug('[Element] Element focused using click');
         return true;
       } catch (error) {
-        console.warn('[Element] Click focus failed:', error);
+        warn('[Element] Click focus failed:', error);
       }
     }
 
@@ -557,7 +558,7 @@ export class Element {
 
     // Strategy 1: Direct JavaScript value setting (most reliable)
     try {
-      console.log('[Element] Clearing text field using JavaScript value setting');
+      debug('[Element] Clearing text field using JavaScript value setting');
 
       await (cdpSession as any).send('Runtime.callFunctionOn', {
         functionDeclaration: `
@@ -582,19 +583,19 @@ export class Element {
 
       const currentValue = verifyResult?.result?.value || '';
       if (!currentValue) {
-        console.log('[Element] Text field cleared successfully using JavaScript');
+        debug('[Element] Text field cleared successfully using JavaScript');
         return true;
       } else {
-        console.log(`[Element] JavaScript clear partially failed, field still contains: "${currentValue}"`);
+        debug(`[Element] JavaScript clear partially failed, field still contains: "${currentValue}"`);
       }
     } catch (error) {
-      console.log('[Element] JavaScript clear failed:', error);
+      debug('[Element] JavaScript clear failed:', error);
     }
 
     // Strategy 2: Triple-click + Delete (fallback)
     if (coordinates) {
       try {
-        console.log('[Element] Fallback: Clearing using triple-click + Delete');
+        debug('[Element] Fallback: Clearing using triple-click + Delete');
 
         // Triple-click to select all text
         await (cdpSession as any).send('Input.dispatchMouseEvent', {
@@ -624,10 +625,10 @@ export class Element {
           code: 'Delete',
         });
 
-        console.log('[Element] Text field cleared using triple-click + Delete');
+        debug('[Element] Text field cleared using triple-click + Delete');
         return true;
       } catch (error) {
-        console.log('[Element] Triple-click clear failed:', error);
+        debug('[Element] Triple-click clear failed:', error);
       }
     }
 

@@ -1101,6 +1101,14 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       // 브라우저 시작
       await browserController.launch();
 
+      // === EVENTBUS BRIDGE: Forward internal events to Chat UI ===
+      // This allows watchdog/navigation logs to appear in the UI
+      browserController.eventBus.on('*', (event) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('agent-internal-event', event);
+        }
+      });
+
       // === AUTO SCREENSHOT STREAMING ===
       // BrowserController doesn't auto-emit screenshot events in Electron environment
       // So we manually capture screenshots every 1 second and stream to Chat UI + BrowserView overlay
