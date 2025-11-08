@@ -990,8 +990,9 @@ No explanation, only JSON.`;
         1.  {"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL_TO_NAVIGATE_TO>"}
         2.  {"type": "BROWSER_ACTION", "command": "clickElement", "index": <ELEMENT_INDEX>} - Click element by index from "DOM Interactive Elements"
         3.  {"type": "BROWSER_ACTION", "command": "typeElement", "index": <ELEMENT_INDEX>, "text": "<TEXT>"} - Type into element by index
-        4.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} - Get full page text content
-        5.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} - Press keyboard key (e.g., "Enter", "Escape")
+        4.  {"type": "BROWSER_ACTION", "command": "pressKeyOnElement", "index": <ELEMENT_INDEX>, "key": "<KEY>"} - Press keyboard key on specific element (e.g., "Enter" on search box)
+        5.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} - Get full page text content
+        6.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} - Press keyboard key on selector (legacy, prefer pressKeyOnElement)
 
         Scroll Actions (Page-Based like Browser-Use):
         10. {"type": "BROWSER_ACTION", "command": "scrollDown", "pages": <PAGES>} - Scroll down by viewport pages (range: 0.5-10.0, default: 1.0)
@@ -1066,7 +1067,11 @@ No explanation, only JSON.`;
           * Use scrollToBottom to load more content on infinite scroll pages
           * After scrolling, new DOM elements will appear - check updated element list
 
-        - After typing into a search box, always press Enter key to submit the search
+        - **Pressing Keys:**
+          * To submit a form after typing, use pressKeyOnElement with the SAME index: {"command": "pressKeyOnElement", "index": 14, "key": "Enter"}
+          * This is more accurate than pressKey on "body" - targets the exact element
+          * Example workflow: typeElement → pressKeyOnElement on same index
+          * Legacy pressKey with selector still works but is less preferred
         - After any click action, check observation for "Page changed" or "Page URL unchanged" to verify success
 
         CAPTCHA/Cloudflare Handling:
@@ -1200,6 +1205,18 @@ No explanation, only JSON.`;
                   if(!typeSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: index or text missing for typeElement."; }
                 break;
+
+              case "pressKeyOnElement":
+                // Press a key on a specific element by index (e.g., Enter on search box)
+                if (typeof action.index === 'number' && action.key) {
+                  const pressSuccess = await browserController.pressKeyOnElement(action.index, action.key);
+                  actionObservation = pressSuccess
+                    ? `Pressed key '${action.key}' on element [${action.index}].`
+                    : `Failed to press key '${action.key}' on element [${action.index}].`;
+                  if(!pressSuccess) actionError = true;
+                } else { actionError = true; actionObservation = "Error: index or key missing for pressKeyOnElement."; }
+                break;
+
               case "getPageContent":
                 const content = await browserController.getPageContent();
                 // LLM이 내용을 볼 수 있도록 충분한 텍스트 포함 (최대 5000자)

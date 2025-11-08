@@ -3,6 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
 import { DOMExtractor, InteractiveElementMap, InteractiveElement } from './domExtractor';
+import { CaptchaSolver, CaptchaDetection } from './captchaSolver';
 
 // Control mode for hybrid browser support
 enum ControlMode {
@@ -30,6 +31,9 @@ export class BrowserController extends EventEmitter {
   // DOM extraction support (browser-use style)
   private domExtractor: DOMExtractor = new DOMExtractor();
   private interactiveElementsCache: InteractiveElementMap | null = null;
+
+  // DOM-based CAPTCHA detection
+  private captchaSolver: CaptchaSolver = new CaptchaSolver(this);
 
   // 타임아웃 상수 정의 (빠른 응답을 위해 단축)
   private readonly TIMEOUTS = {
@@ -172,6 +176,9 @@ export class BrowserController extends EventEmitter {
     // Register main page as a tab
     this.tabs.set('main', this.page);
     this.activeTabId = 'main';
+
+    // Set page for CAPTCHA solver
+    this.captchaSolver.setPage(this.page);
 
     this.emitLog('system', { message: 'Browser launched.' });
 
@@ -1097,8 +1104,8 @@ export class BrowserController extends EventEmitter {
     return { imageBase64: buf.toString('base64'), width: size?.width || 0, height: size?.height || 0 };
   }
 
-  // Internal helper for coordinate-based clicking (used by CAPTCHA solver)
-  private async clickViewport(x: number, y: number): Promise<boolean> {
+  // Internal helper for coordinate-based clicking (used by CAPTCHA solver and vision tools)
+  async clickViewport(x: number, y: number): Promise<boolean> {
     if (!this.page) return false;
     try {
       await this.page.mouse.move(x, y);
@@ -1753,6 +1760,9 @@ export class BrowserController extends EventEmitter {
     this.activeTabId = tabId;
     this.page = targetPage;
 
+    // Update CAPTCHA solver page reference
+    this.captchaSolver.setPage(targetPage);
+
     // Bring tab to front
     await targetPage.bringToFront();
 
@@ -2002,56 +2012,13 @@ export class BrowserController extends EventEmitter {
         message: `[DOM] Found element ${index}: <${element.tag}> "${element.text}" at (${element.coordinates.x}, ${element.coordinates.y})`,
       });
 
-      // Try multiple click strategies
-
-      // Strategy 1: Try by XPath
-      try {
-        const xpathHandle = await this.page.waitForSelector(`xpath=${element.xpath}`, {
-          timeout: this.TIMEOUTS.SELECTOR_WAIT,
-          state: 'visible',
-        });
-
-        if (xpathHandle) {
-          await xpathHandle.click();
-          await this.streamScreenshot(`clicked-element-${index}-xpath`);
-          this.emitLog('system', { message: `[DOM] Successfully clicked element ${index} by XPath` });
-          return true;
-        }
-      } catch (xpathError) {
-        this.emitLog('system', { message: `[DOM] XPath click failed, trying selector...` });
-      }
-
-      // Strategy 2: Try by CSS selector
-      try {
-        const selectorHandle = await this.page.waitForSelector(element.selector, {
-          timeout: this.TIMEOUTS.SELECTOR_WAIT,
-          state: 'visible',
-        });
-
-        if (selectorHandle) {
-          await selectorHandle.click();
-          await this.streamScreenshot(`clicked-element-${index}-selector`);
-          this.emitLog('system', { message: `[DOM] Successfully clicked element ${index} by selector` });
-          return true;
-        }
-      } catch (selectorError) {
-        this.emitLog('system', { message: `[DOM] Selector click failed, trying coordinates...` });
-      }
-
-      // Strategy 3: Fallback to coordinates
-      try {
-        await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
-        await this.streamScreenshot(`clicked-element-${index}-coords`);
-        this.emitLog('system', {
-          message: `[DOM] Successfully clicked element ${index} by coordinates (${element.coordinates.x}, ${element.coordinates.y})`,
-        });
-        return true;
-      } catch (coordError) {
-        this.emitLog('error', {
-          message: `[DOM] All click strategies failed for element ${index}: ${(coordError as Error).message}`,
-        });
-        return false;
-      }
+      // Click directly using coordinates from DOM (fastest and most reliable)
+      await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
+      await this.streamScreenshot(`clicked-element-${index}`);
+      this.emitLog('system', {
+        message: `[DOM] Successfully clicked element ${index} at (${element.coordinates.x}, ${element.coordinates.y})`,
+      });
+      return true;
     } catch (error) {
       console.error(`[BrowserController] Error clicking element by index ${index}:`, error);
       this.emitLog('error', {
@@ -2063,6 +2030,7 @@ export class BrowserController extends EventEmitter {
 
   /**
    * Type text into an element by index
+   * Clicks element by coordinates then types using keyboard
    */
   async typeElementByIndex(index: number, text: string): Promise<boolean> {
     if (!this.page) {
@@ -2081,46 +2049,67 @@ export class BrowserController extends EventEmitter {
         return false;
       }
 
-      // Try by XPath first, then selector
-      try {
-        const handle = await this.page.waitForSelector(`xpath=${element.xpath}`, {
-          timeout: this.TIMEOUTS.SELECTOR_WAIT,
-          state: 'visible',
-        });
+      // Click to focus element using coordinates
+      await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
+      await this.page.waitForTimeout(100); // Brief wait for focus
 
-        if (handle) {
-          await handle.fill(text);
-          await this.streamScreenshot(`typed-element-${index}`);
-          this.emitLog('system', { message: `[DOM] Successfully typed into element ${index}` });
-          return true;
-        }
-      } catch (error) {
-        // Try selector fallback
-        try {
-          const handle = await this.page.waitForSelector(element.selector, {
-            timeout: this.TIMEOUTS.SELECTOR_WAIT,
-            state: 'visible',
-          });
+      // Clear existing text first (Ctrl+A then type)
+      await this.page.keyboard.press('Control+A');
 
-          if (handle) {
-            await handle.fill(text);
-            await this.streamScreenshot(`typed-element-${index}`);
-            this.emitLog('system', { message: `[DOM] Successfully typed into element ${index} (selector)` });
-            return true;
-          }
-        } catch (fallbackError) {
-          this.emitLog('error', {
-            message: `[DOM] Failed to type into element ${index}: ${(fallbackError as Error).message}`,
-          });
-          return false;
-        }
-      }
+      // Type the text
+      await this.page.keyboard.type(text, { delay: 20 }); // 20ms delay between keystrokes
 
-      return false;
+      await this.streamScreenshot(`typed-element-${index}`);
+      this.emitLog('system', { message: `[DOM] Successfully typed into element ${index}` });
+      return true;
     } catch (error) {
       console.error(`[BrowserController] Error typing into element ${index}:`, error);
       this.emitLog('error', {
         message: `[DOM] Error typing into element ${index}: ${(error as Error).message}`,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Press a key on an element by index (DOM-based, browser-use style)
+   * Clicks element to focus, then presses the key
+   * @param index The element index from DOM extraction
+   * @param key The key to press (e.g., 'Enter', 'Escape', 'Tab')
+   * @returns true if successful
+   */
+  async pressKeyOnElement(index: number, key: string): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[DOM] Pressing key '${key}' on element ${index}` });
+
+      // Get element map
+      const elementMap = await this.getInteractiveElements();
+      const element = this.domExtractor.findElementByIndex(elementMap, index);
+
+      if (!element) {
+        this.emitLog('error', { message: `[DOM] Element with index ${index} not found` });
+        return false;
+      }
+
+      // Click to focus element using coordinates
+      await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
+      await this.page.waitForTimeout(100); // Brief wait for focus
+
+      // Press the key
+      await this.page.keyboard.press(key);
+      await this.page.waitForTimeout(500); // Wait for key press to process
+
+      await this.streamScreenshot(`pressed-key-${key}-element-${index}`);
+      this.emitLog('system', { message: `[DOM] Successfully pressed '${key}' on element ${index}` });
+      return true;
+    } catch (error) {
+      console.error(`[BrowserController] Error pressing key on element ${index}:`, error);
+      this.emitLog('error', {
+        message: `[DOM] Error pressing key on element ${index}: ${(error as Error).message}`,
       });
       return false;
     }
@@ -2383,5 +2372,65 @@ export class BrowserController extends EventEmitter {
       console.error('[BrowserController] Error getting scroll info:', error);
       return { scrollY: 0, scrollHeight: 0, viewportHeight: 0, atBottom: false, atTop: true };
     }
+  }
+
+  // === CAPTCHA Detection (DOM-Based) ===
+
+  /**
+   * Detect CAPTCHA using DOM analysis (browser-use style)
+   * Fast and accurate - no vision model needed for detection
+   */
+  async detectCaptcha(): Promise<CaptchaDetection> {
+    return await this.captchaSolver.detectCaptcha();
+  }
+
+  /**
+   * Check if current page is Cloudflare challenge
+   */
+  async isCloudflareChallenge(): Promise<boolean> {
+    return await this.captchaSolver.isCloudflareChallenge();
+  }
+
+  /**
+   * Quick check: any CAPTCHA elements present?
+   */
+  async hasCaptchaElements(): Promise<boolean> {
+    return await this.captchaSolver.hasCaptchaElements();
+  }
+
+  /**
+   * Get CAPTCHA information for LLM context
+   */
+  async getCaptchaInfo(): Promise<string> {
+    return await this.captchaSolver.getCaptchaInfo();
+  }
+
+  /**
+   * Detect and solve CAPTCHA (unified method)
+   * DOM-based detection + existing solving methods
+   */
+  async solveCaptcha(): Promise<import('./captchaSolver').CaptchaSolveResult> {
+    return await this.captchaSolver.solve();
+  }
+
+  /**
+   * Set vision model for CAPTCHA solver
+   */
+  setCaptchaVisionModel(visionModel: any, buildVisionContentParts: any): void {
+    this.captchaSolver.setVisionModel(visionModel, buildVisionContentParts);
+  }
+
+  /**
+   * Extract reCAPTCHA tiles from DOM (browser-use style)
+   */
+  async extractRecaptchaTiles(): Promise<import('./captchaSolver').RecaptchaTile[]> {
+    return await this.captchaSolver.extractRecaptchaTiles();
+  }
+
+  /**
+   * Click reCAPTCHA tiles by indices using DOM coordinates
+   */
+  async clickRecaptchaTilesByIndices(indices: number[]): Promise<boolean> {
+    return await this.captchaSolver.clickRecaptchaTilesByIndices(indices);
   }
 }
