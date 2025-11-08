@@ -37,8 +37,16 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
 
   // 홈 검색 실행
   executeHomeSearch: (query) => {
-    console.log('[BrowserView Preload] executeHomeSearch called with query:', query);
-    ipcRenderer.send('execute-home-search', query);
+    console.log('[BrowserView Preload] executeHomeSearch called');
+    console.log('[BrowserView Preload] Query:', query);
+    console.log('[BrowserView Preload] Query type:', typeof query);
+    console.log('[BrowserView Preload] Query length:', query.length);
+    console.log('[BrowserView Preload] Query charCodes:', Array.from(query).map(c => c.charCodeAt(0)));
+
+    // Send with explicit UTF-8 encoding
+    const utf8Query = query.toString();
+    console.log('[BrowserView Preload] Sending query via IPC:', utf8Query);
+    ipcRenderer.send('execute-home-search', utf8Query);
   }
 });
 

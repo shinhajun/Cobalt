@@ -117,12 +117,15 @@ function init() {
   // IPC listeners (via postMessage from parent window)
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type) {
+      console.log('[Chat] Received message:', event.data.type, event.data);
       switch (event.data.type) {
         case 'execute-search':
+          console.log('[Chat] Execute search with query:', event.data.query);
           // Create new chat tab and execute the search query
           createNewChatRoom();
           // Wait for the new tab to be active
           setTimeout(() => {
+            console.log('[Chat] Setting task input and running task');
             taskInput.value = event.data.query;
             // Trigger run task
             runTask();

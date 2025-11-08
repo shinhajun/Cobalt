@@ -22,6 +22,7 @@
 
     .content {
       text-align: center;
+      width: 100%;
     }
 
     .logo-container {
@@ -34,10 +35,10 @@
     }
 
     .search-container {
-      width: 100%;
-      max-width: 800px;
+      width: 600px;
+      max-width: 90%;
       margin: 0 auto;
-      padding: 0 20px;
+      padding: 0;
     }
 
     .search-input {
@@ -83,9 +84,13 @@
         e.preventDefault();
         const query = searchInput.value.trim();
         if (query) {
-          console.log('[Cobalt Home] Executing search:', query);
+          console.log('[Cobalt Home] Search input value:', query);
+          console.log('[Cobalt Home] Query length:', query.length);
+          console.log('[Cobalt Home] Query charCodes:', Array.from(query).map(c => c.charCodeAt(0)));
+
           // Use the exposed API from preload script
           if (window.__browserViewAPI && window.__browserViewAPI.executeHomeSearch) {
+            console.log('[Cobalt Home] Calling executeHomeSearch');
             window.__browserViewAPI.executeHomeSearch(query);
             // Clear the input
             searchInput.value = '';

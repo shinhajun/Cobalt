@@ -292,7 +292,7 @@
   <!-- Tab bar -->
   <div class="tab-bar" id="tabBar">
     <div class="tab active" data-tab-id="0" draggable="true">
-      <img class="tab-favicon" id="tab-favicon-0" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='8' y='12' text-anchor='middle' font-size='12'%3E📄%3C/text%3E%3C/svg%3E" alt="">
+      <img class="tab-favicon" id="tab-favicon-0" src="cobalt_logo.png" alt="">
       <span class="tab-title" id="tab-title-0">New Tab</span>
       <span class="tab-close">×</span>
     </div>
@@ -387,36 +387,74 @@
     // 드래그 앤 드롭 관련 변수
     let draggedTab = null;
     let draggedTabId = null;
+    let isCreatingTab = false; // Prevent duplicate tab creation
 
     // 탭 생성
     function createNewTab() {
-      const tabId = nextTabId++;
-      // 새 탭도 Cobalt 로고로 시작
-      tabs.push({ id: tabId, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' });
+      // Prevent duplicate calls
+      if (isCreatingTab) {
+        console.warn('[Toolbar] Tab creation already in progress, ignoring duplicate call');
+        return;
+      }
 
-      const tabElement = document.createElement('div');
-      tabElement.className = 'tab';
-      tabElement.setAttribute('data-tab-id', tabId);
-      tabElement.setAttribute('draggable', 'true');
-      tabElement.innerHTML = `
-        <img class="tab-favicon" id="tab-favicon-${tabId}" src="cobalt_logo.png" alt="">
-        <span class="tab-title" id="tab-title-${tabId}">New Tab</span>
-        <span class="tab-close">×</span>
-      `;
+      isCreatingTab = true;
 
-      tabElement.addEventListener('click', (e) => {
-        if (e.target.classList.contains('tab-close')) {
-          closeTab(tabId);
-        } else {
-          switchTab(tabId);
+      try {
+        const tabId = nextTabId++;
+        console.log('[Toolbar] Creating new tab with ID:', tabId);
+        console.log('[Toolbar] Current tabs before creation:', tabs.map(t => ({ id: t.id, title: t.title })));
+
+        // Check if tab already exists in DOM
+        const existingTab = document.querySelector(`[data-tab-id="${tabId}"]`);
+        if (existingTab) {
+          console.error('[Toolbar] Tab with ID', tabId, 'already exists in DOM! Aborting.');
+          nextTabId--; // Rollback ID
+          return;
         }
-      });
 
-      // 드래그 이벤트
-      setupTabDragEvents(tabElement, tabId);
+        // Check if tab already exists in array
+        const existingInArray = tabs.find(t => t.id === tabId);
+        if (existingInArray) {
+          console.error('[Toolbar] Tab with ID', tabId, 'already exists in array! Aborting.');
+          nextTabId--; // Rollback ID
+          return;
+        }
 
-      tabBar.insertBefore(tabElement, newTabBtn);
-      switchTab(tabId);
+        // 새 탭도 Cobalt 로고로 시작
+        tabs.push({ id: tabId, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' });
+        console.log('[Toolbar] Tab added to array. Total tabs:', tabs.length);
+
+        const tabElement = document.createElement('div');
+        tabElement.className = 'tab';
+        tabElement.setAttribute('data-tab-id', tabId);
+        tabElement.setAttribute('draggable', 'true');
+        tabElement.innerHTML = `
+          <img class="tab-favicon" id="tab-favicon-${tabId}" src="cobalt_logo.png" alt="">
+          <span class="tab-title" id="tab-title-${tabId}">New Tab</span>
+          <span class="tab-close">×</span>
+        `;
+
+        tabElement.addEventListener('click', (e) => {
+          if (e.target.classList.contains('tab-close')) {
+            closeTab(tabId);
+          } else {
+            switchTab(tabId);
+          }
+        });
+
+        // 드래그 이벤트
+        setupTabDragEvents(tabElement, tabId);
+
+        tabBar.insertBefore(tabElement, newTabBtn);
+        console.log('[Toolbar] Tab element added to DOM. DOM tabs count:', document.querySelectorAll('.tab').length);
+
+        switchTab(tabId);
+      } finally {
+        // Reset flag after a short delay to allow the operation to complete
+        setTimeout(() => {
+          isCreatingTab = false;
+        }, 100);
+      }
     }
 
     // 탭 드래그 이벤트 설정
@@ -471,11 +509,15 @@
 
     // 탭 전환
     function switchTab(tabId) {
+      console.log('[Toolbar] Switching to tab:', tabId);
+      console.log('[Toolbar] Current tab before switch:', currentTabId);
+
       currentTabId = tabId;
 
       // UI 업데이트
       document.querySelectorAll('.tab').forEach(tab => {
-        if (parseInt(tab.getAttribute('data-tab-id')) === tabId) {
+        const tabIdAttr = parseInt(tab.getAttribute('data-tab-id'));
+        if (tabIdAttr === tabId) {
           tab.classList.add('active');
         } else {
           tab.classList.remove('active');
@@ -484,46 +526,95 @@
 
       // 탭 정보 가져오기
       const tab = tabs.find(t => t.id === tabId);
-      if (tab && tab.url) {
+      if (!tab) {
+        console.error('[Toolbar] Tab not found in array:', tabId);
+        return;
+      }
+
+      console.log('[Toolbar] Tab info:', { id: tab.id, title: tab.title, url: tab.url });
+
+      if (tab.url) {
         // URL이 비어있지 않은지 확인
         const urlToLoad = tab.url.startsWith('http') || tab.url.startsWith('file://')
           ? tab.url
           : homePageUrl;
-        ipcRenderer.invoke('switch-tab', { tabId, url: urlToLoad });
+
+        console.log('[Toolbar] Invoking switch-tab with URL:', urlToLoad);
+        ipcRenderer.invoke('switch-tab', { tabId, url: urlToLoad })
+          .then(() => {
+            console.log('[Toolbar] Successfully switched to tab:', tabId);
+          })
+          .catch(err => {
+            console.error('[Toolbar] Failed to switch tab:', err);
+          });
       }
     }
 
     // 탭 닫기
     function closeTab(tabId) {
+      console.log('[Toolbar] Closing tab:', tabId);
+      console.log('[Toolbar] Current tabs before close:', tabs.map(t => ({ id: t.id, title: t.title })));
+
       if (tabs.length === 1) {
         alert('The last tab cannot be closed.');
         return;
       }
+
+      // Notify electron to destroy the BrowserView
+      ipcRenderer.invoke('close-tab', { tabId }).catch(err => {
+        console.error('[Toolbar] Failed to close tab in electron:', err);
+      });
 
       // 탭 제거
       tabs = tabs.filter(t => t.id !== tabId);
       const tabElement = tabBar.querySelector(`[data-tab-id="${tabId}"]`);
       if (tabElement) {
         tabElement.remove();
+        console.log('[Toolbar] Tab element removed from DOM');
       }
+
+      console.log('[Toolbar] Tabs after close:', tabs.map(t => ({ id: t.id, title: t.title })));
+      console.log('[Toolbar] DOM tabs count:', document.querySelectorAll('.tab').length);
 
       // 현재 탭이 닫힌 경우 다른 탭으로 전환
       if (currentTabId === tabId) {
-        switchTab(tabs[0].id);
+        const nextTab = tabs[tabs.length - 1]; // Switch to last tab
+        if (nextTab) {
+          console.log('[Toolbar] Switching to tab:', nextTab.id);
+          switchTab(nextTab.id);
+        }
       }
     }
 
+    // Initialize first tab with event listeners
+    function initializeFirstTab() {
+      const firstTab = document.querySelector('.tab[data-tab-id="0"]');
+      if (firstTab) {
+        // Remove any existing listeners by cloning
+        const newFirstTab = firstTab.cloneNode(true);
+        firstTab.parentNode.replaceChild(newFirstTab, firstTab);
+
+        // Add click event
+        newFirstTab.addEventListener('click', (e) => {
+          if (e.target.classList.contains('tab-close')) {
+            closeTab(0);
+          } else {
+            switchTab(0);
+          }
+        });
+
+        // Add drag events
+        setupTabDragEvents(newFirstTab, 0);
+
+        console.log('[Toolbar] First tab initialized');
+      }
+    }
+
+    // Initialize first tab
+    initializeFirstTab();
+
     // 새 탭 버튼 클릭 이벤트
     newTabBtn.addEventListener('click', createNewTab);
-
-    // 첫 탭 클릭 이벤트
-    document.querySelector('.tab').addEventListener('click', (e) => {
-      if (e.target.classList.contains('tab-close')) {
-        closeTab(0);
-      } else {
-        switchTab(0);
-      }
-    });
 
     // 뒤로 가기
     backBtn.addEventListener('click', () => {
@@ -702,27 +793,45 @@
     });
 
     // Handle execute-home-search event
+    console.log('[Toolbar] Registering execute-home-search listener');
     ipcRenderer.on('execute-home-search', async (event, query) => {
-      console.log('[Toolbar] Execute home search:', query);
+      console.log('[Toolbar] Execute home search received');
+      console.log('[Toolbar] Query value:', query);
+      console.log('[Toolbar] Query type:', typeof query);
+      console.log('[Toolbar] Current chatVisible:', chatVisible);
 
-      // Get chat iframe
-      const chatFrame = document.getElementById('chatFrame');
-      if (!chatFrame || !chatFrame.contentWindow) {
-        console.error('[Toolbar] Chat iframe not found');
-        return;
-      }
+      console.log('[Toolbar] Chat iframe found:', !!chatIframe);
 
       // Show chat if hidden
-      ipcRenderer.send('toggle-chat');
+      if (!chatVisible) {
+        console.log('[Toolbar] Opening chat...');
+        chatVisible = true;
+        chatIframe.classList.remove('hidden');
+        toolbar.classList.remove('full-width');
+        tabBar.classList.remove('full-width');
+        await ipcRenderer.invoke('toggle-chat', { visible: true });
+        console.log('[Toolbar] Chat opened, chatVisible now:', chatVisible);
+      } else {
+        console.log('[Toolbar] Chat already visible');
+      }
 
       // Wait a bit for chat to be visible
       setTimeout(() => {
+        console.log('[Toolbar] Sending execute-search to chat iframe');
+        console.log('[Toolbar] Query being sent:', query);
+
+        if (!chatIframe.contentWindow) {
+          console.error('[Toolbar] Chat iframe contentWindow not available');
+          return;
+        }
+
         // Send message to chat iframe to create new tab and execute query
-        chatFrame.contentWindow.postMessage({
+        chatIframe.contentWindow.postMessage({
           type: 'execute-search',
           query: query
         }, '*');
-      }, 100);
+        console.log('[Toolbar] Message sent to chat iframe');
+      }, 300);
     });
 
     // 초기 탭에 드래그 이벤트 설정

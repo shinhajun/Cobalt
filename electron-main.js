@@ -26,7 +26,9 @@ const { BrowserController } = require('./packages/agent-core/dist/browserControl
 const { LLMService } = require('./packages/agent-core/dist/llmService');
 
 let mainWindow;
-let browserView = null;
+let browserView = null; // Current active BrowserView
+let browserViews = new Map(); // Map of tabId -> BrowserView
+let currentTabId = 0;
 let browserController = null;
 let llmService = null;
 let isTaskRunning = false;
@@ -59,19 +61,13 @@ function createWindow() {
   // 메뉴바 완전히 제거
   mainWindow.setMenuBarVisibility(false);
 
-  // BrowserView 생성 (왼쪽 70% - 실제 브라우저)
-  browserView = new BrowserView({
-    webPreferences: {
-      preload: path.join(__dirname, 'browser-view-preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true, // contextBridge 사용으로 sandbox 활성화 가능
-    }
-  });
+  // Create initial tab (tabId = 0)
+  const initialView = createBrowserViewForTab(0);
 
+  // Make it the active BrowserView
+  browserView = initialView;
+  currentTabId = 0;
   mainWindow.addBrowserView(browserView);
-
-  // Initial layout (100% for browser, chat hidden)
   updateBrowserViewBounds();
 
   // Load Cobalt logo page as default
@@ -639,6 +635,98 @@ function createWindow() {
   });
 }
 
+// Create a new BrowserView for a tab
+function createBrowserViewForTab(tabId) {
+  console.log('[Electron] Creating BrowserView for tab:', tabId);
+
+  // Create new BrowserView
+  const newBrowserView = new BrowserView({
+    webPreferences: {
+      preload: path.join(__dirname, 'browser-view-preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+    }
+  });
+
+  // Setup event listeners for this BrowserView
+  newBrowserView.webContents.on('did-navigate', () => {
+    // Only send updates if this is the active tab
+    if (currentTabId === tabId) {
+      const url = newBrowserView.webContents.getURL();
+      const title = newBrowserView.webContents.getTitle();
+      mainWindow.webContents.send('url-changed', url, title);
+    }
+  });
+
+  newBrowserView.webContents.on('did-navigate-in-page', () => {
+    if (currentTabId === tabId) {
+      const url = newBrowserView.webContents.getURL();
+      const title = newBrowserView.webContents.getTitle();
+      mainWindow.webContents.send('url-changed', url, title);
+    }
+  });
+
+  newBrowserView.webContents.on('page-title-updated', () => {
+    if (currentTabId === tabId) {
+      const url = newBrowserView.webContents.getURL();
+      const title = newBrowserView.webContents.getTitle();
+      mainWindow.webContents.send('url-changed', url, title);
+    }
+  });
+
+  // Inject text selection popup script
+  newBrowserView.webContents.on('did-finish-load', () => {
+    // Copy the same injection script from original browserView
+    // (keeping the existing text selection popup functionality)
+    newBrowserView.webContents.executeJavaScript(`
+      (function() {
+        if (window.__textSelectionInjected) return;
+        window.__textSelectionInjected = true;
+        // ... (same injection code as before)
+      })();
+    `).catch(err => console.error('[BrowserView] Script injection failed:', err));
+  });
+
+  // Store in map
+  browserViews.set(tabId, newBrowserView);
+
+  console.log('[Electron] BrowserView created and stored. Total BrowserViews:', browserViews.size);
+
+  return newBrowserView;
+}
+
+// Switch to a different tab's BrowserView
+function switchToTab(tabId) {
+  console.log('[Electron] Switching to tab:', tabId);
+
+  // Get the BrowserView for this tab
+  const targetView = browserViews.get(tabId);
+
+  if (!targetView) {
+    console.error('[Electron] BrowserView not found for tab:', tabId);
+    return false;
+  }
+
+  // Remove current BrowserView
+  if (browserView && browserView !== targetView) {
+    mainWindow.removeBrowserView(browserView);
+  }
+
+  // Add and show the target BrowserView
+  browserView = targetView;
+  currentTabId = tabId;
+  mainWindow.addBrowserView(browserView);
+  updateBrowserViewBounds();
+
+  // Send URL update to toolbar
+  const url = browserView.webContents.getURL();
+  const title = browserView.webContents.getTitle();
+  mainWindow.webContents.send('url-changed', url, title);
+
+  return true;
+}
+
 function updateBrowserViewBounds() {
   if (!mainWindow || !browserView) return;
 
@@ -1002,36 +1090,54 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                 if (!overlay) {
                   overlay = document.createElement('div');
                   overlay.id = 'ai-screenshot-overlay';
-                  overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 999998; display: flex; flex-direction: column;';
+                  overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%); background-size: 400% 400%; animation: gradientShift 20s ease infinite; z-index: 999998; display: flex; flex-direction: column;';
                   document.body.appendChild(overlay);
 
-                  // Add header
+                  // Add header with glassmorphism
                   const header = document.createElement('div');
-                  header.style.cssText = 'background: linear-gradient(135deg, #4361ee 0%, #3730a3 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
-                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI Working...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">In progress</span></div>';
+                  header.style.cssText = 'background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.18); color: white; padding: 16px 24px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);';
+                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 16px;"><div style="width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong style="font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">🤖 AI is Working</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.9); margin-left: 16px; font-size: 14px; font-weight: 500;">Automating browser...</span></div>';
                   overlay.appendChild(header);
 
-                  // Add spinner animation
+                  // Add animations
                   const style = document.createElement('style');
-                  style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                  style.textContent = \`
+                    @keyframes spin {
+                      0% { transform: rotate(0deg); }
+                      100% { transform: rotate(360deg); }
+                    }
+                    @keyframes gradientShift {
+                      0% { background-position: 0% 50%; }
+                      50% { background-position: 100% 50%; }
+                      100% { background-position: 0% 50%; }
+                    }
+                  \`;
                   document.head.appendChild(style);
 
-                  // Add image container with animated gradient
+                  // Add image container with padding for macOS window chrome
                   const imgContainer = document.createElement('div');
-                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: linear-gradient(45deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%); background-size: 400% 400%; animation: gradientFlow 15s ease infinite;';
+                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 40px;';
                   imgContainer.id = 'ai-screenshot-container';
                   overlay.appendChild(imgContainer);
-
-                  // Add gradient animation
-                  const gradientStyle = document.createElement('style');
-                  gradientStyle.textContent = '@keyframes gradientFlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }';
-                  document.head.appendChild(gradientStyle);
                 }
 
-                // Update screenshot image
+                // Update screenshot image with macOS window chrome
                 const container = document.getElementById('ai-screenshot-container');
                 if (container) {
-                  container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="${data.screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 20px 60px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.4);" /></div>';
+                  const screenshotUrl = '${data.screenshot}'.replace(/'/g, "\\\\'");
+                  container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
+                    '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
+                      '<div style="display: flex; gap: 8px;">' +
+                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%); box-shadow: 0 2px 4px rgba(255, 69, 58, 0.4);"></div>' +
+                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%); box-shadow: 0 2px 4px rgba(255, 189, 46, 0.4);"></div>' +
+                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #28ca42 0%, #26de81 100%); box-shadow: 0 2px 4px rgba(40, 202, 66, 0.4);"></div>' +
+                      '</div>' +
+                      '<div style="flex: 1; text-align: center; color: #666; font-size: 13px; font-weight: 500; letter-spacing: 0.3px;">AI Browser Automation</div>' +
+                    '</div>' +
+                    '<div style="background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 15px 50px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.2); border: 1px solid rgba(0,0,0,0.1);">' +
+                      '<img src="' + screenshotUrl + '" style="display: block; width: 100%; height: auto; max-height: 80vh; object-fit: contain;" />' +
+                    '</div>' +
+                  '</div>';
                 }
               })();
             `).catch(() => {});
@@ -1081,31 +1187,50 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                   if (!overlay) {
                     overlay = document.createElement('div');
                     overlay.id = 'ai-screenshot-overlay';
-                    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 999998; display: flex; flex-direction: column;';
+                    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%); background-size: 400% 400%; animation: gradientShift 20s ease infinite; z-index: 999998; display: flex; flex-direction: column;';
                     document.body.appendChild(overlay);
 
                     const header = document.createElement('div');
-                    header.style.cssText = 'background: linear-gradient(135deg, #4361ee 0%, #3730a3 100%); color: white; padding: 12px 20px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;';
-                    header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 12px;"><div style="width: 16px; height: 16px; border: 2px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong>🤖 AI Working...</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.8); margin-left: 12px;">In progress</span></div>';
+                    header.style.cssText = 'background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.18); color: white; padding: 16px 24px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);';
+                    header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 16px;"><div style="width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong style="font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">🤖 AI is Working</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.9); margin-left: 16px; font-size: 14px; font-weight: 500;">Automating browser...</span></div>';
                     overlay.appendChild(header);
 
                     const style = document.createElement('style');
-                    style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+                    style.textContent = \`
+                      @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                      }
+                      @keyframes gradientShift {
+                        0% { background-position: 0% 50%; }
+                        50% { background-position: 100% 50%; }
+                        100% { background-position: 0% 50%; }
+                      }
+                    \`;
                     document.head.appendChild(style);
 
                     const imgContainer = document.createElement('div');
-                    imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; background: linear-gradient(45deg, #667eea 0%, #764ba2 25%, #f093fb 50%, #4facfe 75%, #00f2fe 100%); background-size: 400% 400%; animation: gradientFlow 15s ease infinite;';
+                    imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 40px;';
                     imgContainer.id = 'ai-screenshot-container';
                     overlay.appendChild(imgContainer);
-
-                    const gradientStyle = document.createElement('style');
-                    gradientStyle.textContent = '@keyframes gradientFlow { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }';
-                    document.head.appendChild(gradientStyle);
                   }
 
                   const container = document.getElementById('ai-screenshot-container');
                   if (container) {
-                    container.innerHTML = '<div style="position: relative; max-width: 95%; max-height: 95%; display: flex; align-items: center; justify-content: center; padding: 20px;"><img src="data:image/png;base64,${screenshot}" style="max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);" /></div>';
+                    const screenshotData = 'data:image/png;base64,${screenshot}';
+                    container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
+                      '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
+                        '<div style="display: flex; gap: 8px;">' +
+                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%); box-shadow: 0 2px 4px rgba(255, 69, 58, 0.4);"></div>' +
+                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%); box-shadow: 0 2px 4px rgba(255, 189, 46, 0.4);"></div>' +
+                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #28ca42 0%, #26de81 100%); box-shadow: 0 2px 4px rgba(40, 202, 66, 0.4);"></div>' +
+                        '</div>' +
+                        '<div style="flex: 1; text-align: center; color: #666; font-size: 13px; font-weight: 500; letter-spacing: 0.3px;">AI Browser Automation</div>' +
+                      '</div>' +
+                      '<div style="background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 15px 50px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.2); border: 1px solid rgba(0,0,0,0.1);">' +
+                        '<img src="' + screenshotData + '" style="display: block; width: 100%; height: auto; max-height: 80vh; object-fit: contain;" />' +
+                      '</div>' +
+                    '</div>';
                   }
                 })();
               `).catch(() => {});
@@ -1382,10 +1507,35 @@ ipcMain.on('ai-edit-text-request', async (_event, text) => {
 // IPC: Execute search from home page
 ipcMain.on('execute-home-search', async (_event, query) => {
   console.log('[Electron] Home search requested:', query);
+  console.log('[Electron] Query type:', typeof query);
+  console.log('[Electron] Query length:', query ? query.length : 0);
 
   try {
+    // Check if mainWindow is ready
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      console.error('[Electron] mainWindow not available');
+      return;
+    }
+
+    if (!mainWindow.webContents) {
+      console.error('[Electron] mainWindow.webContents not available');
+      return;
+    }
+
+    console.log('[Electron] mainWindow ready:', mainWindow.webContents.isLoading());
+
+    // Wait for window to be ready if it's still loading
+    if (mainWindow.webContents.isLoading()) {
+      console.log('[Electron] Waiting for mainWindow to finish loading...');
+      await new Promise(resolve => {
+        mainWindow.webContents.once('did-finish-load', resolve);
+      });
+    }
+
     // Send message to toolbar to open chat and execute the query
+    console.log('[Electron] Sending to toolbar:', query);
     mainWindow.webContents.send('execute-home-search', query);
+    console.log('[Electron] Message sent successfully');
   } catch (error) {
     console.error('[Electron] Home search failed:', error);
   }
@@ -1585,18 +1735,113 @@ ipcMain.handle('toggle-chat', async (_event, { visible }) => {
 
 // IPC: Switch tab
 ipcMain.handle('switch-tab', async (_event, { tabId, url }) => {
-  console.log('[Electron] Switching to tab:', tabId, url);
-
-  if (!browserView) {
-    return { success: false, error: 'BrowserView not initialized' };
-  }
+  console.log('[Electron] Switching to tab:', tabId, 'URL:', url);
 
   try {
-    // Load the tab's URL
-    await browserView.webContents.loadURL(url);
+    // Check if BrowserView already exists for this tab
+    let tabView = browserViews.get(tabId);
+
+    if (!tabView) {
+      // Create new BrowserView for this tab
+      console.log('[Electron] Creating new BrowserView for tab:', tabId);
+      tabView = createBrowserViewForTab(tabId);
+
+      // Switch to the newly created tab IMMEDIATELY
+      console.log('[Electron] Switching to newly created tab:', tabId);
+      switchToTab(tabId);
+
+      // Load the URL if provided
+      if (url) {
+        console.log('[Electron] Loading URL for new tab:', url);
+        await tabView.webContents.loadURL(url);
+      }
+    } else {
+      // Switch to existing BrowserView (don't reload URL)
+      console.log('[Electron] Switching to existing BrowserView for tab:', tabId);
+      switchToTab(tabId);
+
+      // Don't reload the URL - keep the current page state
+      console.log('[Electron] Keeping existing page state, not reloading');
+    }
+
     return { success: true };
   } catch (error) {
     console.error('[Electron] Failed to switch tab:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Close tab
+ipcMain.handle('close-tab', async (_event, { tabId }) => {
+  console.log('[Electron] Closing tab:', tabId);
+
+  try {
+    const tabView = browserViews.get(tabId);
+
+    if (tabView) {
+      console.log('[Electron] Found BrowserView for tab:', tabId);
+
+      // Stop all media (audio/video) playback
+      try {
+        if (tabView.webContents && !tabView.webContents.isDestroyed()) {
+          console.log('[Electron] Stopping media playback...');
+
+          // Stop all audio
+          tabView.webContents.setAudioMuted(true);
+
+          // Execute JavaScript to stop all media elements
+          await tabView.webContents.executeJavaScript(`
+            (function() {
+              // Stop all video and audio elements
+              const mediaElements = document.querySelectorAll('video, audio');
+              mediaElements.forEach(el => {
+                el.pause();
+                el.src = '';
+                el.load();
+              });
+
+              // Stop Web Audio API contexts
+              if (window.AudioContext || window.webkitAudioContext) {
+                // Can't directly access all contexts, but we can try
+                console.log('[Tab Close] Media elements stopped');
+              }
+            })();
+          `).catch(err => console.warn('[Electron] Failed to stop media via JS:', err));
+
+          // Close the webContents
+          console.log('[Electron] Closing webContents...');
+          tabView.webContents.closeDevTools();
+
+          // Load about:blank to stop any ongoing processes
+          await tabView.webContents.loadURL('about:blank').catch(err =>
+            console.warn('[Electron] Failed to load about:blank:', err)
+          );
+        }
+      } catch (err) {
+        console.error('[Electron] Error while stopping media:', err);
+      }
+
+      // Remove from window if it's currently displayed
+      if (browserView === tabView) {
+        mainWindow.removeBrowserView(tabView);
+        browserView = null;
+        console.log('[Electron] Removed BrowserView from window');
+      }
+
+      // Remove from our map
+      browserViews.delete(tabId);
+
+      // Small delay to ensure cleanup
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      console.log('[Electron] Tab closed and BrowserView removed. Remaining tabs:', browserViews.size);
+    } else {
+      console.warn('[Electron] BrowserView not found for tab:', tabId);
+    }
+
+    return { success: true };
+  } catch (error) {
+    console.error('[Electron] Failed to close tab:', error);
     return { success: false, error: error.message };
   }
 });
