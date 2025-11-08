@@ -3,7 +3,22 @@ import { DomService } from './dom/service.js';
 import { SerializedDOMState } from './dom/views.js';
 import path from 'path';
 import fs from 'fs';
-import { EventEmitter } from 'events';
+import { EventBus } from './events/EventBus.js';
+import {
+  BrowserEventTypes,
+  BrowserLaunchEvent,
+  BrowserLaunchResult,
+  BrowserStoppedEvent,
+  NavigateToUrlEvent,
+  NavigationStartedEvent,
+  NavigationCompleteEvent,
+  TabCreatedEvent,
+  TabClosedEvent,
+  SwitchTabEvent,
+  ScreenshotEvent,
+  AgentLogEvent,
+} from './events/browserEvents.js';
+import { BrowserProfile } from './browser/BrowserProfile.js';
 
 export interface BrowserStateSummary {
   url: string;
@@ -25,81 +40,71 @@ export interface TabInfo {
   title: string;
 }
 
-export class BrowserController extends EventEmitter {
+export class BrowserController {
   private page: Page | null = null;
   private browser: Browser | null = null;
   private context: BrowserContext | null = null;
   private domService: DomService | null = null;
-  private headless: boolean = true;
   private debugMode: boolean = false;
   private debugDir: string = './debug';
 
-  constructor(debugMode: boolean = false, headless: boolean = true) {
-    super();
+  // Browser profile for configuration
+  public profile: BrowserProfile;
+
+  // EventBus for browser-use style events
+  public eventBus: EventBus;
+
+  constructor(debugMode: boolean = false, profile?: BrowserProfile) {
     this.debugMode = debugMode;
-    this.headless = headless;
+    this.profile = profile || BrowserProfile.createDefault();
+    this.eventBus = new EventBus();
 
     if (this.debugMode && !fs.existsSync(this.debugDir)) {
       fs.mkdirSync(this.debugDir, { recursive: true });
     }
+
+    // Set user data dir if in debug mode
+    if (this.debugMode && !this.profile.userDataDir) {
+      this.profile.userDataDir = this.debugDir;
+    }
   }
 
   async launch(): Promise<void> {
-    const launchArgs = [
-      '--disable-blink-features=AutomationControlled',
-      '--disable-web-security',
-      '--disable-features=IsolateOrigins,site-per-process',
-      '--disable-site-isolation-trials',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--disable-gpu',
-      '--window-size=1920,1080',
-      '--start-maximized',
-      '--disable-infobars',
-      '--disable-notifications',
-      '--disable-popup-blocking',
-    ];
+    // Emit launch event
+    await this.eventBus.emit(BrowserEventTypes.BROWSER_LAUNCH, {
+      type: 'browser_launch',
+      headless: this.profile.headless,
+      userDataDir: this.profile.userDataDir,
+      timestamp: Date.now(),
+    } as BrowserLaunchEvent);
+
+    const launchArgs = this.profile.getLaunchArgs();
 
     try {
       this.browser = await chromium.launch({
         channel: 'chrome',
-        headless: this.headless,
+        headless: this.profile.headless,
         args: launchArgs,
         timeout: 60000,
       });
     } catch (_) {
       this.browser = await chromium.launch({
-        headless: this.headless,
+        headless: this.profile.headless,
         args: launchArgs,
         timeout: 60000,
       });
     }
 
+    // Get context options from profile
+    const contextOptions = this.profile.getContextOptions();
+
+    // Add storage state if exists
     const storageStatePath = path.join(this.debugDir, 'storageState.json');
-    const context = await this.browser.newContext({
-      viewport: { width: 1920, height: 1080 },
-      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      locale: 'ko-KR',
-      acceptDownloads: true,
-      extraHTTPHeaders: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Sec-Fetch-Dest': 'document',
-        'Sec-Fetch-Mode': 'navigate',
-        'Sec-Fetch-Site': 'none',
-        'Sec-Fetch-User': '?1',
-        'Cache-Control': 'max-age=0',
-      },
-      storageState: fs.existsSync(storageStatePath) ? storageStatePath : undefined,
-      bypassCSP: true,
-      ignoreHTTPSErrors: true,
-      javaScriptEnabled: true,
-    });
+    if (fs.existsSync(storageStatePath) && !contextOptions.storageState) {
+      contextOptions.storageState = storageStatePath;
+    }
+
+    const context = await this.browser.newContext(contextOptions);
     this.context = context;
 
     // Anti-detection script
@@ -143,6 +148,13 @@ export class BrowserController extends EventEmitter {
     this.page = await context.newPage();
     this.domService = new DomService(this.page);
 
+    // Emit launch result
+    await this.eventBus.emit(BrowserEventTypes.BROWSER_LAUNCH_RESULT, {
+      type: 'browser_launch_result',
+      success: true,
+      timestamp: Date.now(),
+    } as BrowserLaunchResult);
+
     console.log('[BrowserController] Browser launched successfully');
   }
 
@@ -157,6 +169,14 @@ export class BrowserController extends EventEmitter {
     this.browser = null;
     this.context = null;
     this.domService = null;
+
+    // Emit browser stopped event
+    await this.eventBus.emit(BrowserEventTypes.BROWSER_STOPPED, {
+      type: 'browser_stopped',
+      reason: 'Browser closed by user',
+      timestamp: Date.now(),
+    } as BrowserStoppedEvent);
+
     console.log('[BrowserController] Browser closed');
   }
 
@@ -312,8 +332,8 @@ export class BrowserController extends EventEmitter {
 
       await this.clickByBackendNodeId(element.backendNodeId);
 
-      // Wait a bit for page to react
-      await this.page.waitForTimeout(500);
+      // Wait briefly for click to register (browser-use: 50-80ms)
+      await this.page.waitForTimeout(80);
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Clicked element ${index}`);
@@ -340,10 +360,24 @@ export class BrowserController extends EventEmitter {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
-      await this.typeByBackendNodeId(element.backendNodeId, text, clear);
+      try {
+        await this.typeByBackendNodeId(element.backendNodeId, text, clear);
+      } catch (focusError: any) {
+        // Fallback: If CDP focus fails (like Google Sheets), try direct keyboard typing
+        if (focusError.message.includes('not focusable') || focusError.message.includes('DOM.focus')) {
+          console.log('[BrowserController] CDP focus failed, using direct keyboard typing fallback');
 
-      // Wait a bit for page to react
-      await this.page.waitForTimeout(300);
+          // Just type directly without focusing (element might already be focused)
+          for (const char of text) {
+            await this.page.keyboard.type(char, { delay: 1 });
+          }
+        } else {
+          throw focusError;
+        }
+      }
+
+      // Wait briefly for input to register (browser-use: 50ms)
+      await this.page.waitForTimeout(50);
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Input text into element ${index}`);
@@ -363,22 +397,70 @@ export class BrowserController extends EventEmitter {
         throw new Error('Browser not launched');
       }
 
+      // Emit navigate event
+      await this.eventBus.emit(BrowserEventTypes.NAVIGATE_TO_URL, {
+        type: 'navigate_to_url',
+        url,
+        newTab,
+        timestamp: Date.now(),
+      } as NavigateToUrlEvent);
+
+      // Emit navigation started event
+      await this.eventBus.emit(BrowserEventTypes.NAVIGATION_STARTED, {
+        type: 'navigation_started',
+        url,
+        timestamp: Date.now(),
+      } as NavigationStartedEvent);
+
       if (newTab) {
         const newPage = await this.context.newPage();
+
+        // Emit tab created event
+        await this.eventBus.emit(BrowserEventTypes.TAB_CREATED, {
+          type: 'tab_created',
+          tab: {
+            id: (this.context.pages().length - 1).toString().padStart(4, '0'),
+            url: 'about:blank',
+            title: 'New Tab',
+          },
+          timestamp: Date.now(),
+        } as TabCreatedEvent);
+
         await newPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         this.page = newPage; // Switch to new page
       } else {
         await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
 
-      // Wait for page to stabilize
-      await this.page.waitForTimeout(1000);
+      // Wait for page to stabilize (browser-use: minimal wait)
+      await this.page.waitForTimeout(100);
+
+      const title = await this.page.title();
+
+      // Emit navigation complete event
+      await this.eventBus.emit(BrowserEventTypes.NAVIGATION_COMPLETE, {
+        type: 'navigation_complete',
+        url,
+        title,
+        success: true,
+        timestamp: Date.now(),
+      } as NavigationCompleteEvent);
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Navigated to ${url}`);
 
       return { success: true };
     } catch (error: any) {
+      // Emit navigation complete with error
+      await this.eventBus.emit(BrowserEventTypes.NAVIGATION_COMPLETE, {
+        type: 'navigation_complete',
+        url,
+        title: '',
+        success: false,
+        error: error.message,
+        timestamp: Date.now(),
+      } as NavigationCompleteEvent);
+
       return { success: false, error: error.message };
     }
   }
@@ -398,8 +480,8 @@ export class BrowserController extends EventEmitter {
         window.scrollBy(0, scrollAmount);
       }, { down, pages });
 
-      // Wait for page to stabilize after scroll
-      await this.page.waitForTimeout(500);
+      // Wait for scroll to settle (browser-use: 200ms for DOM update)
+      await this.page.waitForTimeout(200);
 
       return { success: true };
     } catch (error: any) {
@@ -432,7 +514,8 @@ export class BrowserController extends EventEmitter {
         await this.page.keyboard.press(keys);
       }
 
-      await this.page.waitForTimeout(300);
+      // Wait briefly for key press to register
+      await this.page.waitForTimeout(50);
 
       return { success: true };
     } catch (error: any) {
@@ -456,8 +539,17 @@ export class BrowserController extends EventEmitter {
         return { success: false, error: `Tab ${tabId} not found` };
       }
 
+      const previousPage = this.page;
       this.page = pages[tabIndex];
       await this.page.bringToFront();
+
+      // Emit switch tab event
+      await this.eventBus.emit(BrowserEventTypes.SWITCH_TAB, {
+        type: 'switch_tab',
+        tabId,
+        previousTabId: previousPage ? pages.indexOf(previousPage).toString().padStart(4, '0') : undefined,
+        timestamp: Date.now(),
+      } as SwitchTabEvent);
 
       return { success: true };
     } catch (error: any) {
@@ -482,6 +574,13 @@ export class BrowserController extends EventEmitter {
       }
 
       await pages[tabIndex].close();
+
+      // Emit tab closed event
+      await this.eventBus.emit(BrowserEventTypes.TAB_CLOSED, {
+        type: 'tab_closed',
+        tabId,
+        timestamp: Date.now(),
+      } as TabClosedEvent);
 
       // If we closed current page, switch to first available
       if (this.page === pages[tabIndex] && pages.length > 1) {
@@ -549,36 +648,154 @@ export class BrowserController extends EventEmitter {
 
       // Focus the element first
       await cdp.send('DOM.focus', { objectId: object.objectId });
+      await this.page.waitForTimeout(100); // Wait longer for focus and autocomplete
 
-      // Clear if needed
+      // Clear if needed - browser-use style with JavaScript
       if (clearFirst) {
-        await cdp.send('Input.dispatchKeyEvent', {
-          type: 'keyDown',
-          key: 'Control',
-        });
-        await cdp.send('Input.dispatchKeyEvent', {
-          type: 'char',
-          text: 'a',
-        });
-        await cdp.send('Input.dispatchKeyEvent', {
-          type: 'keyUp',
-          key: 'Control',
-        });
-        await cdp.send('Input.dispatchKeyEvent', {
-          type: 'char',
-          text: '',
-        });
+        try {
+          // Strategy 1: Direct JavaScript value setting (most reliable)
+          // Set value to empty multiple times to handle autocomplete
+          await cdp.send('Runtime.callFunctionOn', {
+            functionDeclaration: `function() {
+              // Clear any existing value
+              this.value = "";
+
+              // Try to select all text first
+              try {
+                this.select();
+                this.setSelectionRange(0, 0);
+              } catch (e) {}
+
+              // Set value to empty again
+              this.value = "";
+
+              // Dispatch events to notify React/Vue frameworks
+              this.dispatchEvent(new Event("input", { bubbles: true }));
+              this.dispatchEvent(new Event("change", { bubbles: true }));
+              this.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+              this.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+
+              // Blur and focus again to reset any autocomplete
+              this.blur();
+              this.focus();
+
+              return this.value;
+            }`,
+            objectId: object.objectId,
+            returnByValue: true,
+          });
+
+          // Wait a bit for events to process
+          await this.page.waitForTimeout(50);
+
+          // Verify clearing worked
+          const verifyResult = await cdp.send('Runtime.callFunctionOn', {
+            functionDeclaration: 'function() { return this.value; }',
+            objectId: object.objectId,
+            returnByValue: true,
+          });
+
+          const currentValue = verifyResult?.result?.value || '';
+          if (currentValue) {
+            console.log('[BrowserController] JavaScript clear partially failed, field still contains:', currentValue);
+
+            // Fallback: Force clear one more time
+            await cdp.send('Runtime.callFunctionOn', {
+              functionDeclaration: `function() {
+                this.value = "";
+                this.dispatchEvent(new Event("input", { bubbles: true }));
+                return this.value;
+              }`,
+              objectId: object.objectId,
+              returnByValue: true,
+            });
+          }
+        } catch (error) {
+          console.error('[BrowserController] Failed to clear field:', error);
+        }
       }
 
-      // Type the text
+      // Wait a bit before typing to ensure field is truly empty
+      await this.page.waitForTimeout(50);
+
+      // Type the text character by character (browser-use style)
       for (const char of text) {
-        await cdp.send('Input.dispatchKeyEvent', {
-          type: 'char',
-          text: char,
-        });
+        if (char === '\n') {
+          // Handle newline as Enter key
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: 'Enter',
+            code: 'Enter',
+            windowsVirtualKeyCode: 13,
+          });
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'char',
+            text: '\r',
+            key: 'Enter',
+          });
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: 'Enter',
+            code: 'Enter',
+            windowsVirtualKeyCode: 13,
+          });
+        } else {
+          // Get proper key info for character
+          const keyCode = this.getKeyCodeForChar(char);
+          const baseKey = char;
+
+          // Send keyDown
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyDown',
+            key: baseKey,
+            code: keyCode,
+          });
+
+          // Send char event immediately (this is crucial for text input)
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'char',
+            text: char,
+            key: char,
+          });
+
+          // Send keyUp
+          await cdp.send('Input.dispatchKeyEvent', {
+            type: 'keyUp',
+            key: baseKey,
+            code: keyCode,
+          });
+        }
+
+        // Add minimal delay between keystrokes (1ms is enough for most cases)
+        // browser-use uses 18ms for human-like typing, but we optimize for speed
+        await this.page.waitForTimeout(1);
       }
     } finally {
       await cdp.detach();
+    }
+  }
+
+  /**
+   * Get key code for a character
+   */
+  private getKeyCodeForChar(char: string): string {
+    const keyCodeMap: Record<string, string> = {
+      ' ': 'Space',
+      'Enter': 'Enter',
+      'Tab': 'Tab',
+      'Backspace': 'Backspace',
+      'Delete': 'Delete',
+      'Escape': 'Escape',
+    };
+
+    if (keyCodeMap[char]) {
+      return keyCodeMap[char];
+    } else if (char.match(/[a-zA-Z]/)) {
+      return `Key${char.toUpperCase()}`;
+    } else if (char.match(/[0-9]/)) {
+      return `Digit${char}`;
+    } else {
+      return 'Unidentified';
     }
   }
 
@@ -607,7 +824,36 @@ export class BrowserController extends EventEmitter {
   async goTo(url: string): Promise<void> {
     if (!this.page) throw new Error('Page not initialized');
     await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await this.page.waitForTimeout(1000);
+    await this.page.waitForTimeout(100); // Reduced from 1000ms to 100ms
+  }
+
+  /**
+   * Get enhanced DOM (for browserState.ts compatibility)
+   */
+  async getEnhancedDOM(): Promise<{ selectorMap: any; llmRepresentation: string; timing: Record<string, number> } | null> {
+    if (!this.domService) return null;
+    const result = await this.domService.getSerializedDOMTree();
+    return {
+      selectorMap: result.state.selectorMap,
+      llmRepresentation: result.llmRepresentation,
+      timing: result.timing || {},
+    };
+  }
+
+  /**
+   * Get scroll info
+   */
+  async getScrollInfo(): Promise<{ scrollY: number }> {
+    if (!this.page) return { scrollY: 0 };
+    const scrollY = await this.page.evaluate(() => window.scrollY);
+    return { scrollY };
+  }
+
+  /**
+   * List all tabs
+   */
+  async listTabs(): Promise<TabInfo[]> {
+    return this.getAllTabs();
   }
 
   // ==================== Getters ====================
@@ -628,21 +874,34 @@ export class BrowserController extends EventEmitter {
 
   /**
    * Emit screenshot event with current page state
+   * Throttled to prevent rapid screenshot spam
    */
-  private async emitScreenshot(action: string): Promise<void> {
+  private lastScreenshotTime: number = 0;
+  private readonly SCREENSHOT_THROTTLE_MS = 500; // Minimum 500ms between screenshots
+
+  private async emitScreenshot(action: string, force: boolean = false): Promise<void> {
     if (!this.page) return;
 
+    // Throttle screenshots to prevent flickering
+    const now = Date.now();
+    if (!force && now - this.lastScreenshotTime < this.SCREENSHOT_THROTTLE_MS) {
+      console.log(`[BrowserController] Screenshot throttled (last: ${now - this.lastScreenshotTime}ms ago)`);
+      return;
+    }
+
     try {
+      this.lastScreenshotTime = now;
       const screenshot = await this.page.screenshot({ type: 'png', fullPage: false });
       const image = Buffer.from(screenshot).toString('base64');
       const url = this.page.url();
 
-      this.emit('screenshot', {
+      await this.eventBus.emit(BrowserEventTypes.SCREENSHOT, {
+        type: 'screenshot',
         image,
         action,
         timestamp: Date.now(),
         url,
-      });
+      } as ScreenshotEvent);
     } catch (error: any) {
       console.error('[BrowserController] Failed to emit screenshot:', error.message);
     }
@@ -651,7 +910,12 @@ export class BrowserController extends EventEmitter {
   /**
    * Emit log event
    */
-  emitLog(type: 'thought' | 'observation' | 'system' | 'error', data: any): void {
-    this.emit('log', { type, data });
+  async emitLog(logType: 'thought' | 'observation' | 'system' | 'error', data: any): Promise<void> {
+    await this.eventBus.emit(BrowserEventTypes.AGENT_LOG, {
+      type: 'agent_log',
+      logType,
+      data,
+      timestamp: Date.now(),
+    } as AgentLogEvent);
   }
 }

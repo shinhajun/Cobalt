@@ -7,6 +7,7 @@ import dotenv from 'dotenv';
 import fs from 'fs'; // Import fs for debugging
 import { BrowserController } from './browserController'; // Make sure this path is correct
 import { LLMService } from './llmService'; // Make sure this path is correct
+import { BrowserEventTypes } from './events/browserEvents.js';
 
 const envPath = path.resolve(process.cwd(), '.env');
 console.log(`[Server] Attempting to load .env file from: ${envPath}`);
@@ -71,13 +72,54 @@ app.post('/api/tasks', async (req, res) => {
     browserControllerInstance = new BrowserController(true); // 디버그 모드 활성화
     llmServiceInstance = new LLMService(aiModel || 'gpt-5-mini');
 
-    // BrowserController 이벤트 핸들러
-    browserControllerInstance.on('screenshot', (data) => {
-      io.emit('screenshot', { image: data.image, action: data.action, timestamp: data.timestamp, url: data.url });
+    // Subscribe to EventBus events and forward to Socket.io
+    // Screenshot events
+    browserControllerInstance.eventBus.on(BrowserEventTypes.SCREENSHOT, (event: any) => {
+      io.emit('screenshot', {
+        image: event.image,
+        action: event.action,
+        timestamp: event.timestamp,
+        url: event.url
+      });
     });
 
-    browserControllerInstance.on('log', (log) => {
-      io.emit('agent-log', log); // type: 'thought', 'observation', or 'system', data: { ... }
+    // Log events
+    browserControllerInstance.eventBus.on(BrowserEventTypes.AGENT_LOG, (event: any) => {
+      io.emit('agent-log', {
+        type: event.logType,
+        data: event.data
+      });
+    });
+
+    // Browser lifecycle events
+    browserControllerInstance.eventBus.on(BrowserEventTypes.BROWSER_LAUNCH, (event: any) => {
+      io.emit('browser-event', { type: 'browser_launch', data: event });
+    });
+
+    browserControllerInstance.eventBus.on(BrowserEventTypes.BROWSER_STOPPED, (event: any) => {
+      io.emit('browser-event', { type: 'browser_stopped', data: event });
+    });
+
+    // Navigation events
+    browserControllerInstance.eventBus.on(BrowserEventTypes.NAVIGATION_STARTED, (event: any) => {
+      io.emit('browser-event', { type: 'navigation_started', data: event });
+    });
+
+    browserControllerInstance.eventBus.on(BrowserEventTypes.NAVIGATION_COMPLETE, (event: any) => {
+      io.emit('browser-event', { type: 'navigation_complete', data: event });
+    });
+
+    // Tab events
+    browserControllerInstance.eventBus.on(BrowserEventTypes.TAB_CREATED, (event: any) => {
+      io.emit('browser-event', { type: 'tab_created', data: event });
+    });
+
+    browserControllerInstance.eventBus.on(BrowserEventTypes.TAB_CLOSED, (event: any) => {
+      io.emit('browser-event', { type: 'tab_closed', data: event });
+    });
+
+    browserControllerInstance.eventBus.on(BrowserEventTypes.SWITCH_TAB, (event: any) => {
+      io.emit('browser-event', { type: 'switch_tab', data: event });
     });
 
     io.emit('agent-started', { task: instructions });
