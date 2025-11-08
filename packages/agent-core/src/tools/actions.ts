@@ -41,10 +41,40 @@ export class InputTextAction implements BaseActionParams {
 export class ScrollAction implements BaseActionParams {
   down!: boolean;
   pages?: number = 1.0;
+  index?: number; // optional: container element index to scroll inside
 }
 
 export class SendKeysAction implements BaseActionParams {
   keys!: string;
+}
+
+export class ScrollToTextAction implements BaseActionParams {
+  text!: string; // visible text to find
+  partial?: boolean = true; // partial match by default
+}
+
+// ============================================================================
+// Navigation Helpers / Utility Actions
+// ============================================================================
+
+export class GoBackAction implements BaseActionParams {}
+
+export class WaitAction implements BaseActionParams {
+  seconds?: number = 3;
+}
+
+export class SelectDropdownAction implements BaseActionParams {
+  index!: number;
+  option!: string; // visible text or value
+}
+
+export class GetDropdownOptionsAction implements BaseActionParams {
+  index!: number;
+}
+
+export class UploadFileAction implements BaseActionParams {
+  index!: number;
+  filePath!: string; // absolute or workspace-relative path
 }
 
 // ============================================================================
@@ -79,6 +109,12 @@ export type BrowserActionParams =
   | InputTextAction
   | ScrollAction
   | SendKeysAction
+  | ScrollToTextAction
+  | GoBackAction
+  | WaitAction
+  | SelectDropdownAction
+  | GetDropdownOptionsAction
+  | UploadFileAction
   | SwitchTabAction
   | CloseTabAction
   | DoneAction;

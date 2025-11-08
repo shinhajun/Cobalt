@@ -32,7 +32,9 @@ export interface LLMServiceConfig {
 export class LLMService {
   private model: any;
   private maxIterations: number = 100;
+  private maxActionsPerStep: number = 5;
   private registry: Registry;
+  private recentActions: Array<{ type: string; params: any; ts: number }> = [];
 
   constructor(modelName: string = "gpt-4o-mini", config?: LLMServiceConfig) {
     // Initialize Tools Registry
@@ -97,10 +99,9 @@ CRITICAL PARAMETER RULES:
 INSTRUCTIONS:
 - Think step by step about what you need to do
 - Examine the current page state carefully (URL, title, interactive elements)
-- Choose the most appropriate action to progress toward the goal
-- Always respond with valid JSON containing a "thinking" field and an "action" field
-- The "thinking" field should contain your reasoning
-- The "action" field should contain one of the actions above with a "type" field
+- Choose the most appropriate action(s) to progress toward the goal
+- Always respond with valid JSON containing a "thinking" field and either an "action" object or an "actions" array of objects
+- Each action object must include a "type" field
 
 CORRECT RESPONSE FORMAT EXAMPLES:
 
@@ -120,6 +121,33 @@ Input text example (use "index", NOT "element_index"):
 {
   "thinking": "I need to type into the search box at index 15",
   "action": {"type": "input_text", "index": 15, "text": "hello world", "clear": true}
+}
+
+Scroll to text example:
+{
+  "thinking": "I should go to the Price filters section",
+  "action": {"type": "scroll_to_text", "text": "Price"}
+}
+
+Container scroll example:
+{
+  "thinking": "Scroll the results list container without moving the page",
+  "action": {"type": "scroll", "down": true, "pages": 1, "index": 812}
+}
+
+Select dropdown example:
+{
+  "thinking": "Choose United States from the country dropdown",
+  "actions": [
+    {"type": "get_dropdown_options", "index": 120},
+    {"type": "select_dropdown", "index": 120, "option": "United States"}
+  ]
+}
+
+Upload file example:
+{
+  "thinking": "Upload the prepared image",
+  "action": {"type": "upload_file", "index": 33, "filePath": "./fixtures/image.png"}
 }
 
 Remember:
@@ -201,38 +229,55 @@ Remember:
           continue;
         }
 
-        const { thinking, action } = parsed;
+        const { thinking, actions } = parsed;
 
         emitLog('thought', { thinking });
 
         // Add LLM response to messages
         messages.push(new AIMessage(responseText));
 
-        // Phase 5: Execute action
-        const actionResult = await this.executeAction(action, browserController);
-        const actionSucceeded = !actionResult.error;
-        const observation = actionResult.extractedContent || actionResult.longTermMemory || actionResult.error || 'Action completed';
+        // Phase 5: Execute up to maxActionsPerStep actions
+        const toRun = actions.slice(0, this.maxActionsPerStep);
 
-        emitLog('observation', {
-          action: action.type,
-          success: actionSucceeded,
-          observation,
-        });
-
-        // Check if task is complete
-        if (action.type === 'done') {
-          isComplete = true;
-          finalResult = {
-            text: action.text || 'Task completed',
-            success: action.success ?? true,
-          };
+        // Anti-oscillation guard: if alternating scrolls detected and
+        // next plan only contains scroll, nudge model to use targeted navigation
+        if (this.isScrollOscillating() && toRun.every(a => a.type === 'scroll')) {
+          emitLog('system', { message: 'Detected alternating scroll directions. Nudging model to use targeted navigation.' });
+          messages.push(new HumanMessage(
+            'You are alternating scroll directions without progress. Avoid toggling up/down blindly. '
+            + 'Use scroll_to_text to navigate to specific sections (e.g., "Price", "Filters", "Add to cart") or scroll within a container using the index parameter. '
+            + 'Return an action that targets the relevant section directly.'
+          ));
+          continue;
         }
+        for (const act of toRun) {
+          const actionResult = await this.executeAction(act, browserController);
+          const actionSucceeded = !actionResult.error;
+          const observation = actionResult.extractedContent || actionResult.longTermMemory || actionResult.error || 'Action completed';
 
-        // Add action result to messages
-        if (actionSucceeded) {
-          messages.push(new HumanMessage(`Action result: ${observation}`));
-        } else {
-          messages.push(new HumanMessage(`Action failed: ${actionResult.error || 'Unknown error'}`));
+          emitLog('observation', {
+            action: act.type,
+            success: actionSucceeded,
+            observation,
+          });
+
+          if (act.type === 'done') {
+            isComplete = true;
+            finalResult = {
+              text: (act as any).text || 'Task completed',
+              success: (act as any).success ?? true,
+            };
+            break;
+          }
+
+          if (actionSucceeded) {
+            messages.push(new HumanMessage(`Action result: ${observation}`));
+          } else {
+            messages.push(new HumanMessage(`Action failed: ${actionResult.error || 'Unknown error'}`));
+          }
+
+          // Record recent action
+          this.recordRecentAction(act);
         }
 
         // Keep message history manageable
@@ -294,7 +339,7 @@ Remember:
   /**
    * Parse LLM response to extract thinking and action
    */
-  private parseLLMResponse(responseText: string): { thinking: string; action: TypedAction } | null {
+  private parseLLMResponse(responseText: string): { thinking: string; actions: TypedAction[] } | null {
     try {
       // Try to extract JSON from markdown code blocks if present
       let jsonText = responseText;
@@ -312,13 +357,20 @@ Remember:
 
       const parsed = JSON.parse(jsonText);
 
-      if (!parsed.thinking || !parsed.action) {
+      if (!parsed.thinking || (!parsed.action && !parsed.actions)) {
         return null;
+      }
+
+      let actions: TypedAction[] = [];
+      if (Array.isArray(parsed.actions)) {
+        actions = parsed.actions as TypedAction[];
+      } else if (parsed.action) {
+        actions = [parsed.action as TypedAction];
       }
 
       return {
         thinking: parsed.thinking,
-        action: parsed.action as TypedAction,
+        actions,
       };
     } catch (error) {
       return null;
@@ -354,6 +406,35 @@ Remember:
    */
   setMaxIterations(max: number): void {
     this.maxIterations = max;
+  }
+
+  setMaxActionsPerStep(max: number): void {
+    this.maxActionsPerStep = Math.max(1, Math.min(20, Math.floor(max)));
+  }
+
+  private recordRecentAction(action: TypedAction): void {
+    this.recentActions.push({ type: action.type, params: action, ts: Date.now() });
+    if (this.recentActions.length > 10) this.recentActions.shift();
+  }
+
+  private isScrollOscillating(): boolean {
+    const now = Date.now();
+    const windowMs = 6000;
+    const recent = this.recentActions.filter(a => now - a.ts <= windowMs && a.type === 'scroll');
+    if (recent.length < 2) return false;
+    const dirs = recent.map(a => {
+      const v = (a.params as any).down;
+      if (typeof v === 'boolean') return v;
+      const s = String(v).toLowerCase();
+      if (s === 'down' || s === 'true' || s === '1') return true;
+      if (s === 'up' || s === 'false' || s === '0') return false;
+      return true;
+    });
+    let alternations = 0;
+    for (let i = 1; i < dirs.length; i++) {
+      if (dirs[i] !== dirs[i - 1]) alternations++;
+    }
+    return alternations >= 2;
   }
 
   /**

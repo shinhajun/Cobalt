@@ -12,6 +12,12 @@ import {
   InputTextAction,
   ScrollAction,
   SendKeysAction,
+  ScrollToTextAction,
+  GoBackAction,
+  WaitAction,
+  SelectDropdownAction,
+  GetDropdownOptionsAction,
+  UploadFileAction,
   SwitchTabAction,
   CloseTabAction,
   DoneAction,
@@ -175,7 +181,26 @@ export function registerDefaultActions(registry: Registry): void {
     paramModel: ScrollAction,
     handler: async (params: ScrollAction, browserController: BrowserController): Promise<ActionResult> => {
       try {
-        const result = await browserController.scroll(params.down, params.pages ?? 1.0);
+        // Normalize inputs from LLM
+        const downNorm = typeof params.down === 'boolean'
+          ? params.down
+          : ((): boolean => {
+              const s = String(params.down).toLowerCase();
+              if (s === 'down' || s === 'true' || s === '1') return true;
+              if (s === 'up' || s === 'false' || s === '0') return false;
+              return true;
+            })();
+
+        let pagesNum: number = 1.0;
+        if (typeof params.pages === 'number' && isFinite(params.pages)) {
+          pagesNum = params.pages;
+        } else if (params.pages !== undefined) {
+          const parsed = parseFloat(String(params.pages));
+          pagesNum = isFinite(parsed) && !isNaN(parsed) ? parsed : 1.0;
+        }
+        pagesNum = Math.max(0.1, Math.min(10.0, pagesNum));
+
+        const result = await browserController.scroll(downNorm, pagesNum, params.index);
 
         if (!result.success) {
           return {
@@ -183,7 +208,9 @@ export function registerDefaultActions(registry: Registry): void {
           };
         }
 
-        const memory = `Scrolled ${params.down ? 'down' : 'up'} ${params.pages ?? 1.0} pages`;
+        const memory = `Scrolled ${downNorm ? 'down' : 'up'} ${pagesNum} pages${
+          params.index !== undefined ? ` in container ${params.index}` : ''
+        }`;
 
         return {
           extractedContent: memory,
@@ -193,6 +220,124 @@ export function registerDefaultActions(registry: Registry): void {
         return {
           error: `Scroll failed: ${error.message}`,
         };
+      }
+    },
+  });
+
+  // Scroll to text
+  registry.register({
+    name: 'scroll_to_text',
+    description: 'Scroll the page until a visible element containing the given text is centered',
+    paramModel: ScrollToTextAction,
+    handler: async (params: ScrollToTextAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const result = await browserController.scrollToText(params.text, params.partial ?? true);
+        if (!result.success) {
+          return { error: `Failed to scroll to text '${params.text}': ${result.error}` };
+        }
+        const memory = `Scrolled to text '${params.text}'`;
+        return { extractedContent: memory, longTermMemory: memory };
+      } catch (error: any) {
+        return { error: `Scroll to text failed: ${error.message}` };
+      }
+    },
+  });
+
+  // Go back
+  registry.register({
+    name: 'go_back',
+    description: 'Navigate back in browser history',
+    paramModel: GoBackAction,
+    handler: async (_params: GoBackAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const result = await browserController.goBack();
+        if (!result.success) {
+          return { error: `Failed to go back: ${result.error}` };
+        }
+        const memory = 'Navigated back';
+        return { extractedContent: memory, longTermMemory: memory };
+      } catch (error: any) {
+        return { error: `Go back failed: ${error.message}` };
+      }
+    },
+  });
+
+  // Wait
+  registry.register({
+    name: 'wait',
+    description: 'Wait for a number of seconds (max 30)',
+    paramModel: WaitAction,
+    handler: async (params: WaitAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const seconds = Math.min(Math.max(params.seconds ?? 3, 0), 30);
+        await browserController.wait(seconds);
+        const memory = `Waited for ${seconds} seconds`;
+        return { extractedContent: memory, longTermMemory: memory };
+      } catch (error: any) {
+        return { error: `Wait failed: ${error.message}` };
+      }
+    },
+  });
+
+  // Select dropdown option
+  registry.register({
+    name: 'select_dropdown',
+    description: 'Select an option in a <select> by index and visible text/value',
+    paramModel: SelectDropdownAction,
+    handler: async (params: SelectDropdownAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const result = await browserController.selectDropdown(params.index, params.option);
+        if (!result.success) {
+          return { error: `Failed to select dropdown: ${result.error}` };
+        }
+        const memory = `Selected option "${params.option}" on element at index ${params.index}`;
+        return { extractedContent: memory, longTermMemory: memory };
+      } catch (error: any) {
+        return { error: `Select dropdown failed: ${error.message}` };
+      }
+    },
+  });
+
+  // Get dropdown options
+  registry.register({
+    name: 'get_dropdown_options',
+    description: 'Get available options of a <select> by element index',
+    paramModel: GetDropdownOptionsAction,
+    handler: async (params: GetDropdownOptionsAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const result = await browserController.getDropdownOptions(params.index);
+        if (!result.success) {
+          return { error: `Failed to get dropdown options: ${result.error}` };
+        }
+
+        const options = result.options || [];
+        const preview = options.slice(0, 20).map((o: any) => `${o.text} (${o.value})${o.selected ? ' [selected]' : ''}`).join('\n');
+        const memory = options.length > 0 ? `Found ${options.length} options for index ${params.index}` : `No options found for index ${params.index}`;
+        return {
+          extractedContent: preview || memory,
+          longTermMemory: memory,
+        };
+      } catch (error: any) {
+        return { error: `Get dropdown options failed: ${error.message}` };
+      }
+    },
+  });
+
+  // Upload file to input[type=file]
+  registry.register({
+    name: 'upload_file',
+    description: 'Upload a file via an <input type="file"> element by index',
+    paramModel: UploadFileAction,
+    handler: async (params: UploadFileAction, browserController: BrowserController): Promise<ActionResult> => {
+      try {
+        const result = await browserController.uploadFile(params.index, params.filePath);
+        if (!result.success) {
+          return { error: `Failed to upload file: ${result.error}` };
+        }
+        const memory = `Uploaded file '${params.filePath}' to element ${params.index}`;
+        return { extractedContent: memory, longTermMemory: memory };
+      } catch (error: any) {
+        return { error: `Upload file failed: ${error.message}` };
       }
     },
   });
@@ -294,7 +439,8 @@ export function registerDefaultActions(registry: Registry): void {
     description: 'Mark the task as completed',
     paramModel: DoneAction,
     handler: async (params: DoneAction): Promise<ActionResult> => {
-      const memory = `Task completed: ${params.text}`;
+      const message = params.text || 'Task completed';
+      const memory = `Task completed: ${message}`;
 
       return {
         extractedContent: memory,

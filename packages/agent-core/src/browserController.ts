@@ -627,24 +627,111 @@ export class BrowserController {
         timestamp: Date.now(),
       } as NavigationCompleteEvent);
 
-      return { success: false, error: error.message };
+      // Standardize common network errors for clearer LLM guidance
+      const msg = String(error?.message || '')
+      const netErrors = ['ERR_NAME_NOT_RESOLVED', 'ERR_INTERNET_DISCONNECTED', 'ERR_CONNECTION_REFUSED', 'ERR_TIMED_OUT', 'net::']
+      const isNetwork = netErrors.some(e => msg.includes(e))
+      const mapped = isNetwork ? `Navigation failed - site unavailable: ${url}` : msg
+
+      return { success: false, error: mapped };
     }
   }
 
   /**
    * Scroll page
    */
-  async scroll(down: boolean, pages: number = 1.0): Promise<{ success: boolean; error?: string }> {
+  async scroll(
+    down: boolean,
+    pages: number | string = 1.0,
+    index?: number
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       if (!this.page) {
         throw new Error('Browser not launched');
       }
 
-      await this.page.evaluate(({ down, pages }) => {
-        const viewportHeight = window.innerHeight;
-        const scrollAmount = viewportHeight * pages * (down ? 1 : -1);
-        window.scrollBy(0, scrollAmount);
-      }, { down, pages });
+      // Sanitize inputs from LLM
+      const downNorm = typeof down === 'boolean'
+        ? down
+        : (() => {
+            const s = String(down).toLowerCase();
+            if (s === 'down' || s === 'true' || s === '1') return true;
+            if (s === 'up' || s === 'false' || s === '0') return false;
+            return true; // default to down
+          })();
+
+      let pagesNum: number = 1.0;
+      if (typeof pages === 'number' && isFinite(pages)) {
+        pagesNum = pages;
+      } else {
+        const parsed = parseFloat(String(pages));
+        pagesNum = isFinite(parsed) && !isNaN(parsed) ? parsed : 1.0;
+      }
+      // Clamp pages to sane range
+      pagesNum = Math.max(0.1, Math.min(10.0, pagesNum));
+
+      if (typeof index === 'number') {
+        // Scroll inside a specific container element (by LLM index)
+        // Use cached selector map if available
+        const now = Date.now();
+        const cacheAge = now - this.cacheTimestamp;
+        let selectorMap = this.cachedSelectorMap;
+
+        if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+          const state = await this.getBrowserState(false, true);
+          selectorMap = state.selectorMap;
+        }
+
+        const elementData = selectorMap[index];
+        if (!elementData || !elementData.backendNodeId) {
+          return { success: false, error: `Container element at index ${index} not found` };
+        }
+
+        const sessionInfo = await this.browserSession!.getOrCreateCDPSession(undefined, false);
+        const cdpSession = (sessionInfo.cdpSession as any);
+
+        const resolveResult = await cdpSession.send('DOM.resolveNode', {
+          backendNodeId: elementData.backendNodeId,
+        });
+        const objectId = resolveResult?.object?.objectId;
+        if (!objectId) {
+          return { success: false, error: 'Failed to resolve container element' };
+        }
+
+        const res = await cdpSession.send('Runtime.callFunctionOn', {
+          objectId,
+          functionDeclaration: `function(args){
+            try{
+              const el = this;
+              const vh = window.innerHeight || document.documentElement.clientHeight || 800;
+              const pagesVal = Number(args.pages);
+              const amount = vh * (isFinite(pagesVal) && pagesVal > 0 ? pagesVal : 1.0) * (args.down ? 1 : -1);
+              if (el && (el.scrollHeight > el.clientHeight || getComputedStyle(el).overflowY === 'scroll' || getComputedStyle(el).overflowY === 'auto')){
+                el.scrollBy(0, amount);
+                return {ok:true, target:'container'};
+              } else {
+                window.scrollBy(0, amount);
+                return {ok:true, target:'window'};
+              }
+            }catch(e){ return {ok:false, reason: String(e && e.message || e)} }
+          }`,
+          arguments: [{ value: { down: downNorm, pages: pagesNum } }],
+          returnByValue: true,
+        });
+        const ok = res?.result?.value?.ok === true;
+        if (!ok) {
+          const reason = res?.result?.value?.reason || 'unknown error';
+          return { success: false, error: `Container scroll failed: ${reason}` };
+        }
+      } else {
+        await this.page.evaluate(({ down, pages }) => {
+          const viewportHeight = window.innerHeight;
+          const pagesVal = Number(pages);
+          const p = (isFinite(pagesVal) && pagesVal > 0 ? pagesVal : 1.0);
+          const scrollAmount = viewportHeight * p * (down ? 1 : -1);
+          window.scrollBy(0, scrollAmount);
+        }, { down: downNorm, pages: pagesNum });
+      }
 
       // Wait for scroll to settle (browser-use: 200ms for DOM update)
       await this.page.waitForTimeout(200);
@@ -689,6 +776,247 @@ export class BrowserController {
     }
   }
 
+  /**
+   * Navigate back in history
+   */
+  async goBack(): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+      await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
+      // Small settle time
+      await this.page.waitForTimeout(150);
+      // Invalidate DOM cache
+      this.invalidateDOMCache();
+      await this.emitScreenshot('Navigated back');
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Wait helper
+   */
+  async wait(seconds: number): Promise<void> {
+    if (!this.page) throw new Error('Browser not launched');
+    await this.page.waitForTimeout(Math.max(0, Math.floor(seconds * 1000)));
+  }
+
+  /**
+   * Select dropdown option by element index.
+   * Option can be the visible text or the value attribute.
+   */
+  async selectDropdown(index: number, option: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page || !this.domService || !this.browserSession) {
+        throw new Error('Browser not launched');
+      }
+
+      // Ensure we have fresh/cached selector map
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+      let selectorMap = this.cachedSelectorMap;
+      if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+        const state = await this.getBrowserState(false, true);
+        selectorMap = state.selectorMap;
+      }
+
+      const elementData = selectorMap[index];
+      if (!elementData || !elementData.backendNodeId) {
+        return { success: false, error: `Element at index ${index} not found` };
+      }
+
+      // Resolve node and run JS to select option
+      const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
+      const cdpSession = sessionInfo.cdpSession as any;
+
+      const resolveResult = await cdpSession.send('DOM.resolveNode', {
+        backendNodeId: elementData.backendNodeId,
+      });
+      const objectId = resolveResult?.object?.objectId;
+      if (!objectId) {
+        return { success: false, error: 'Failed to resolve select element' };
+      }
+
+      const result = await cdpSession.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function(opt) {
+          try {
+            const el = this;
+            if (!el || el.tagName !== 'SELECT') return { ok: false, reason: 'Not a <select>' };
+            const match = Array.from(el.options).find(o => (o.value === opt) || (o.textContent || '').trim() === opt);
+            if (!match) return { ok: false, reason: 'Option not found' };
+            el.value = match.value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+            return { ok: true };
+          } catch (e) { return { ok: false, reason: String(e && e.message || e) } }
+        }`,
+        arguments: [{ value: option }],
+        returnByValue: true,
+      });
+
+      const ok = result?.result?.value?.ok === true;
+      if (!ok) {
+        const reason = result?.result?.value?.reason || 'unknown error';
+        return { success: false, error: `Select failed: ${reason}` };
+      }
+
+      await this.page.waitForTimeout(50);
+      await this.emitScreenshot(`Selected option '${option}' on element ${index}`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Scroll to the first element containing the given visible text
+   */
+  async scrollToText(text: string, partial: boolean = true): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      const found = await this.page.evaluate(({ text, partial }) => {
+        const makeMatcher = (isPartial: boolean) => (t: string | null | undefined) => {
+          if (!t) return false;
+          const norm = (t || '').replace(/\s+/g, ' ').trim().toLowerCase();
+          const needle = text.toLowerCase();
+          return isPartial ? norm.includes(needle) : norm === needle;
+        };
+
+        const search = (isPartial: boolean) => {
+          const match = makeMatcher(isPartial);
+          const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_ELEMENT);
+          let node: Node | null = walker.currentNode;
+          while ((node = walker.nextNode())) {
+            const el = node as HTMLElement;
+            if (!el || !el.getBoundingClientRect) continue;
+            const style = window.getComputedStyle(el);
+            if (style.visibility === 'hidden' || style.display === 'none') continue;
+            // Try innerText first, fallback to aria-label or title
+            if (match((el as any).innerText) || match(el.getAttribute('aria-label')) || match(el.getAttribute('title'))) {
+              el.scrollIntoView({ behavior: 'instant', block: 'center' });
+              return true;
+            }
+          }
+          return false;
+        };
+
+        // Try exact match first; if not found and partial allowed, try partial
+        if (search(false)) return true;
+        if (partial && search(true)) return true;
+        return false;
+      }, { text, partial });
+
+      if (!found) return { success: false, error: 'Text not found' };
+
+      await this.page.waitForTimeout(150);
+      await this.emitScreenshot(`Scrolled to text '${text}'`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Get dropdown options for a select element by index
+   */
+  async getDropdownOptions(index: number): Promise<{ success: boolean; error?: string; options?: Array<{ value: string; text: string; selected: boolean; disabled: boolean }> }> {
+    try {
+      if (!this.page || !this.domService || !this.browserSession) {
+        throw new Error('Browser not launched');
+      }
+
+      // Ensure we have selector map
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+      let selectorMap = this.cachedSelectorMap;
+      if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+        const state = await this.getBrowserState(false, true);
+        selectorMap = state.selectorMap;
+      }
+
+      const elementData = selectorMap[index];
+      if (!elementData || !elementData.backendNodeId) {
+        return { success: false, error: `Element at index ${index} not found` };
+      }
+
+      const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
+      const cdpSession = sessionInfo.cdpSession as any;
+      const resolveResult = await cdpSession.send('DOM.resolveNode', { backendNodeId: elementData.backendNodeId });
+      const objectId = resolveResult?.object?.objectId;
+      if (!objectId) {
+        return { success: false, error: 'Failed to resolve select element' };
+      }
+
+      const result = await cdpSession.send('Runtime.callFunctionOn', {
+        objectId,
+        functionDeclaration: `function(){
+          try{
+            const el = this;
+            if (!el || el.tagName !== 'SELECT') return { ok:false, reason:'Not a <select>' };
+            const opts = Array.from(el.options).map(o => ({ value: o.value, text: (o.textContent||'').trim(), selected: !!o.selected, disabled: !!o.disabled }));
+            return { ok:true, options: opts };
+          }catch(e){ return { ok:false, reason:String(e && e.message || e) } }
+        }`,
+        returnByValue: true,
+      });
+
+      if (!result?.result?.value?.ok) {
+        const reason = result?.result?.value?.reason || 'unknown error';
+        return { success: false, error: `Get options failed: ${reason}` };
+      }
+      const options = result.result.value.options as Array<{ value: string; text: string; selected: boolean; disabled: boolean }>;
+      return { success: true, options };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Upload a file to an <input type="file"> element by index using CDP DOM.setFileInputFiles
+   */
+  async uploadFile(index: number, filePath: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page || !this.domService || !this.browserSession) {
+        throw new Error('Browser not launched');
+      }
+
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+      let selectorMap = this.cachedSelectorMap;
+      if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+        const state = await this.getBrowserState(false, true);
+        selectorMap = state.selectorMap;
+      }
+
+      const elementData = selectorMap[index];
+      if (!elementData || !elementData.backendNodeId) {
+        return { success: false, error: `Element at index ${index} not found` };
+      }
+
+      // Resolve absolute path and check existence
+      const absPath = path.isAbsolute(filePath) ? filePath : path.resolve(process.cwd(), filePath);
+      if (!fs.existsSync(absPath)) {
+        return { success: false, error: `File not found: ${absPath}` };
+      }
+
+      const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
+      const cdpSession = sessionInfo.cdpSession as any;
+
+      await cdpSession.send('DOM.setFileInputFiles', {
+        files: [absPath],
+        backendNodeId: elementData.backendNodeId,
+      });
+
+      await this.page.waitForTimeout(100);
+      await this.emitScreenshot(`Uploaded file to element ${index}`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
   /**
    * Switch to tab by ID
    */
