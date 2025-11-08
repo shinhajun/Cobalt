@@ -114,19 +114,21 @@ function init() {
     });
   }
 
-  // Example item clicks
-  document.querySelectorAll('.example-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const text = item.textContent.replace('💡 ', '');
-      taskInput.value = text;
-      taskInput.focus();
-    });
-  });
-
   // IPC listeners (via postMessage from parent window)
   window.addEventListener('message', (event) => {
     if (event.data && event.data.type) {
       switch (event.data.type) {
+        case 'execute-search':
+          // Create new chat tab and execute the search query
+          createNewChatRoom();
+          // Wait for the new tab to be active
+          setTimeout(() => {
+            taskInput.value = event.data.query;
+            // Trigger run task
+            runTask();
+          }, 50);
+          break;
+
         case 'agent-started':
           addSystemMessage('Task started: ' + event.data.data.task);
           break;
@@ -282,25 +284,13 @@ function removeThinkingIndicator() {
 function clearMessages() {
   messagesContainer.innerHTML = `
     <div class="welcome-message">
-      <div class="welcome-icon">👋</div>
-      <h2>Welcome to AI Browser Agent</h2>
-      <p>I can help you automate web tasks, solve CAPTCHAs, extract data, and more!</p>
-      <div class="welcome-examples">
-        <div class="example-item">💡 "Search AI news on Google"</div>
-        <div class="example-item">💡 "Extract pricing info on this page"</div>
-        <div class="example-item">💡 "Open 3 sites and compare headlines"</div>
+      <div class="welcome-icon">
+        <img src="cobalt_logo.png" alt="Cobalt" style="width: 80px; height: 80px;">
       </div>
+      <h2>Cobalt AI</h2>
+      <p>Ask me to automate web tasks</p>
     </div>
   `;
-
-  // Re-attach example click handlers
-  document.querySelectorAll('.example-item').forEach(item => {
-    item.addEventListener('click', () => {
-      const text = item.textContent.replace('💡 ', '');
-      taskInput.value = text;
-      taskInput.focus();
-    });
-  });
 }
 
 // API Keys Management

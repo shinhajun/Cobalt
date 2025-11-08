@@ -94,31 +94,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      position: relative;
+      flex-shrink: 0;
+      color: #5f6368;
     }
 
-    .url-icon::before {
-      content: '';
-      position: absolute;
-      width: 10px;
-      height: 12px;
-      border: 2px solid #5f6368;
-      border-radius: 3px;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-    }
-
-    .url-icon::after {
-      content: '';
-      position: absolute;
-      width: 6px;
-      height: 4px;
-      background: #5f6368;
-      border-radius: 1px 1px 0 0;
-      top: 20%;
-      left: 50%;
-      transform: translateX(-50%);
+    .url-icon svg {
+      width: 16px;
+      height: 16px;
     }
 
     .chat-toggle-btn {
@@ -323,7 +305,12 @@
     <button class="nav-button" id="refreshBtn" title="Reload">↻</button>
 
     <div class="url-container">
-      <span class="url-icon"></span>
+      <span class="url-icon" id="urlIcon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="5" y="11" width="14" height="10" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+      </span>
       <input
         type="text"
         class="url-input"
@@ -357,7 +344,8 @@
     let currentTabId = 0;
     // 초기 탭의 URL을 절대 경로로 설정
     const homePageUrl = `file:///${__dirname.replace(/\\/g, '/')}/cobalt-home.html`;
-    let tabs = [{ id: 0, title: 'New Tab', url: homePageUrl, favicon: null }];
+    // 초기 탭은 Cobalt 로고로 시작
+    let tabs = [{ id: 0, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' }];
     let nextTabId = 1;
 
     // 기본 favicon (빈 페이지용)
@@ -403,14 +391,15 @@
     // 탭 생성
     function createNewTab() {
       const tabId = nextTabId++;
-      tabs.push({ id: tabId, title: 'New Tab', url: homePageUrl, favicon: defaultFavicon });
+      // 새 탭도 Cobalt 로고로 시작
+      tabs.push({ id: tabId, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' });
 
       const tabElement = document.createElement('div');
       tabElement.className = 'tab';
       tabElement.setAttribute('data-tab-id', tabId);
       tabElement.setAttribute('draggable', 'true');
       tabElement.innerHTML = `
-        <img class="tab-favicon" id="tab-favicon-${tabId}" src="${defaultFavicon}" alt="">
+        <img class="tab-favicon" id="tab-favicon-${tabId}" src="cobalt_logo.png" alt="">
         <span class="tab-title" id="tab-title-${tabId}">New Tab</span>
         <span class="tab-close">×</span>
       `;
@@ -556,6 +545,12 @@
       if (e.key === 'Enter') {
         let url = urlInput.value.trim();
 
+        // 주소창이 비어있으면 홈 페이지로 이동
+        if (!url) {
+          ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: homePageUrl });
+          return;
+        }
+
         // URL이 아니면 Google 검색으로 처리
         if (!url.startsWith('http://') && !url.startsWith('https://')) {
           if (url.includes('.') && !url.includes(' ')) {
@@ -573,7 +568,13 @@
 
     // BrowserView URL 변경 시 주소창 업데이트
     ipcRenderer.on('url-changed', (event, url, title) => {
-      urlInput.value = url;
+      // cobalt-home.html일 때는 주소창을 비워서 깔끔하게 표시
+      const isCobaltHome = url.includes('cobalt-home.html');
+      if (isCobaltHome) {
+        urlInput.value = '';
+      } else {
+        urlInput.value = url;
+      }
 
       // 현재 탭 정보 업데이트
       const currentTab = tabs.find(t => t.id === currentTabId);
@@ -581,8 +582,8 @@
         currentTab.url = url;
         currentTab.title = title || 'New Tab';
 
-        // Favicon 업데이트
-        const faviconUrl = getFaviconUrl(url);
+        // Favicon 업데이트 - cobalt-home이면 로고 사용
+        const faviconUrl = isCobaltHome ? 'cobalt_logo.png' : getFaviconUrl(url);
         currentTab.favicon = faviconUrl;
 
         // 탭 제목 업데이트
@@ -698,6 +699,30 @@
         notification.textContent = 'AI 수정 실패';
         setTimeout(() => notification.remove(), 3000);
       }
+    });
+
+    // Handle execute-home-search event
+    ipcRenderer.on('execute-home-search', async (event, query) => {
+      console.log('[Toolbar] Execute home search:', query);
+
+      // Get chat iframe
+      const chatFrame = document.getElementById('chatFrame');
+      if (!chatFrame || !chatFrame.contentWindow) {
+        console.error('[Toolbar] Chat iframe not found');
+        return;
+      }
+
+      // Show chat if hidden
+      ipcRenderer.send('toggle-chat');
+
+      // Wait a bit for chat to be visible
+      setTimeout(() => {
+        // Send message to chat iframe to create new tab and execute query
+        chatFrame.contentWindow.postMessage({
+          type: 'execute-search',
+          query: query
+        }, '*');
+      }, 100);
     });
 
     // 초기 탭에 드래그 이벤트 설정

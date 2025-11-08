@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, protocol } = require('electron');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -8,6 +8,19 @@ dotenv.config({ path: envPath });
 
 // Note: .env is only used as fallback. Primary API keys come from Settings tab (localStorage)
 console.log('[Electron] API keys will be loaded from Settings tab (preferred) or .env (fallback)');
+
+// Register custom protocol for cobalt:// URLs BEFORE app is ready
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: 'cobalt',
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      corsEnabled: true
+    }
+  }
+]);
 
 const { BrowserController } = require('./packages/agent-core/dist/browserController');
 const { LLMService } = require('./packages/agent-core/dist/llmService');
@@ -1363,6 +1376,18 @@ ipcMain.on('ai-edit-text-request', async (_event, text) => {
     mainWindow.webContents.send('ai-edit-text', { text });
   } catch (error) {
     console.error('[Electron] AI edit request failed:', error);
+  }
+});
+
+// IPC: Execute search from home page
+ipcMain.on('execute-home-search', async (_event, query) => {
+  console.log('[Electron] Home search requested:', query);
+
+  try {
+    // Send message to toolbar to open chat and execute the query
+    mainWindow.webContents.send('execute-home-search', query);
+  } catch (error) {
+    console.error('[Electron] Home search failed:', error);
   }
 });
 

@@ -33,6 +33,12 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
   requestAIEdit: (text, prompt) => {
     console.log('[BrowserView Preload] requestAIEdit called');
     ipcRenderer.send('browserview-edit-request', { text, prompt });
+  },
+
+  // 홈 검색 실행
+  executeHomeSearch: (query) => {
+    console.log('[BrowserView Preload] executeHomeSearch called with query:', query);
+    ipcRenderer.send('execute-home-search', query);
   }
 });
 
