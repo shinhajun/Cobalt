@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Omnibox</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: transparent;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .box {
+      width: 100%;
+      height: 100%;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-top: none;
+      border-radius: 0 0 20px 20px;
+      box-shadow: 0 16px 40px rgba(0,0,0,0.18);
+      overflow: auto;
+      transition: opacity 80ms ease;
+    }
+    .box.refreshing { opacity: 0; }
+    /* Force full layout reset while updating after delete */
+    .box.hidden { display: none !important; }
+    .item { padding: 12px 14px; font-size: 13px; display: flex; gap: 10px; align-items: center; cursor: pointer; }
+    .item:hover { background: #f1f3f4; }
+    .item.hovering { background: #f1f3f4; }
+    .item.selected { background: #e8f0fe; }
+    .icon { width: 16px; height: 16px; flex: 0 0 16px; opacity: 0.9; }
+    .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #202124; }
+    .url { color: #5f6368; font-size: 12px; margin-left: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+    .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef2ff; color: #4f46e5; margin-left: 10px; }
+    /* Remove button visibility */
+    .remove-btn {
+      margin-left: 10px;
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: transparent;
+      color: #9aa0a6;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    }
+    .item:hover .remove-btn,
+    .item:focus-within .remove-btn {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .remove-btn:hover { background: #eceff3; color: #1f2937; }
+    .remove-btn {
+      margin-left: 10px;
+      width: 20px;
+      height: 20px;
+      border: none;
+      background: transparent;
+      color: #9aa0a6;
+      border-radius: 10px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .remove-btn:hover { background: #eceff3; color: #1f2937; }
+  </style>
+</head>
+<body>
+  <div class="box" id="box"></div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    const box = document.getElementById('box');
+
+    let state = {
+      items: [],
+      selected: -1,
+      query: '',
+    };
+
+    function highlight(text, query) {
+      if (!query) return text;
+      try {
+        const esc = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const re = new RegExp(esc, 'ig');
+        return text.replace(re, (m) => `<mark style="background:#fff3bf">${m}</mark>`);
+      } catch { return text; }
+    }
+
+    function render(items, query = '') {
+      box.innerHTML = '';
+      const list = Array.isArray(items) && items.length ? items : [
+        { title: 'Type to search or paste a URL', url: '', type: 'hint' }
+      ];
+      list.forEach((it, idx) => {
+        const el = document.createElement('div');
+        el.className = 'item' + (idx === state.selected ? ' selected' : '') + (it.type ? (' type-' + it.type) : '');
+        el.dataset.index = String(idx);
+        let icon;
+        if (it.icon) {
+          icon = `<img class=\"icon\" src=\"${it.icon}\">`;
+        } else if (it.type === 'search') {
+          icon = `<svg class=\"icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><line x1=\"21\" y1=\"21\" x2=\"16.65\" y2=\"16.65\"/></svg>`;
+        } else if (it.type === 'history') {
+          icon = `<svg class=\"icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><polyline points=\"1 4 1 10 7 10\"></polyline><path d=\"M3.51 15a9 9 0 1 0 .49-5\"></path><line x1=\"12\" y1=\"7\" x2=\"12\" y2=\"12\"/><line x1=\"12\" y1=\"12\" x2=\"15\" y2=\"15\"/></svg>`;
+        } else if (it.type === 'go') {
+          icon = `<svg class=\"icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M2 12h20\"/><path d=\"M12 2a15.3 15.3 0 0 1 0 20\"/></svg>`;
+        } else {
+          icon = `<svg class=\"icon\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/></svg>`;
+        }
+        const tag = it.type && it.type !== 'hint' ? `<span class="tag">${it.type}</span>` : '';
+        const title = highlight(it.title || '', query);
+        const displayUrl = it.url ? formatUrlForDisplay(it.url) : '';
+        const url = displayUrl ? `<span class=\"url\">${highlight(displayUrl, query)}</span>` : '';
+        const isHistory = it.type === 'history';
+        const remove = isHistory ? `<button class=\"remove-btn\" title=\"Remove from history\">×</button>` : '';
+        el.innerHTML = `${icon}<span class="title">${title}</span>${url}${tag}${remove}`;
+        el.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          ipcRenderer.send('omnibox-choose', it);
+        });
+        if (isHistory) {
+          const btn = el.querySelector('.remove-btn');
+          if (btn) {
+            btn.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              // Hard hide to reset native :hover state entirely
+              try { box.classList.add('hidden'); } catch (_) {}
+              // Optimistically remove from current overlay list for instant UI response
+              try {
+                state.items = (state.items || []).filter(x => !(x && x.type === 'history' && x.url === it.url));
+                if (state.selected >= state.items.length) state.selected = state.items.length - 1;
+                render(state.items, state.query);
+              } catch (_) {}
+              // Persist removal via toolbar/main
+              ipcRenderer.send('omnibox-remove-history', it.url);
+              setTimeout(() => {
+                box.classList.remove('hidden');
+              }, 100);
+              // Keep overlay open; toolbar handles closing to keep URL bar state correct
+            });
+          }
+        }
+        box.appendChild(el);
+      });
+    }
+
+    function formatUrlForDisplay(url) {
+      try {
+        const u = new URL(url);
+        const host = (u.hostname || '').replace(/^www\./, '');
+        let path = decodeURIComponent(u.pathname || '/');
+        if (path.length > 40) {
+          const parts = path.split('/').filter(Boolean);
+          if (parts.length > 2) path = '/' + parts.slice(0, 2).join('/') + '…';
+          else path = path.slice(0, 40) + '…';
+        }
+        return host + (path === '/' ? '' : path);
+      } catch {
+        return url.length > 60 ? (url.slice(0, 60) + '…') : url;
+      }
+    }
+
+    function applySelectedClass() {
+      const nodes = box.querySelectorAll('.item');
+      nodes.forEach((n, i) => {
+        if (i === state.selected) n.classList.add('selected'); else n.classList.remove('selected');
+      });
+    }
+    function setSelectedIndex(idx) {
+      if (typeof idx !== 'number' || idx < 0 || idx >= (state.items || []).length) return;
+      state.selected = idx;
+      applySelectedClass();
+      const selectedItem = state.items[state.selected] || null;
+      ipcRenderer.send('omnibox-selection', selectedItem);
+    }
+
+    function setItems(items, opts = {}) {
+      state.items = Array.isArray(items) ? items : [];
+      state.query = opts.query || '';
+      // reset selection to first actionable item
+      state.selected = state.items.findIndex(x => x && (x.url || x.action));
+      render(state.items, state.query);
+      const selectedItem = state.items[state.selected] || null;
+      ipcRenderer.send('omnibox-selection', selectedItem);
+      // Reveal list now that it refreshed
+      const reveal = () => {
+        box.classList.remove('hidden');
+      };
+      try {
+        requestAnimationFrame(reveal);
+      } catch (_) {
+        reveal();
+      }
+    }
+
+    function moveSelection(delta) {
+      if (!state.items.length) return;
+      let idx = state.selected;
+      const n = state.items.length;
+      for (let i = 0; i < n; i++) {
+        idx = (idx + delta + n) % n;
+        const it = state.items[idx];
+        if (it && (it.url || it.action)) { state.selected = idx; break; }
+      }
+      render(state.items, state.query);
+      const selectedItem = state.items[state.selected] || null;
+      ipcRenderer.send('omnibox-selection', selectedItem);
+    }
+
+    ipcRenderer.on('omnibox-set-items', (_e, items, opts) => {
+      setItems(items, opts || {});
+    });
+
+    ipcRenderer.on('omnibox-key', (_e, action) => {
+      switch (action) {
+        case 'down': moveSelection(1); break;
+        case 'up': moveSelection(-1); break;
+        case 'home': state.selected = state.items.findIndex(x => x && (x.url || x.action)); render(state.items, state.query); ipcRenderer.send('omnibox-selection', state.items[state.selected] || null); break;
+        case 'end': state.selected = state.items.length - 1; render(state.items, state.query); ipcRenderer.send('omnibox-selection', state.items[state.selected] || null); break;
+        case 'enter': if (state.selected >= 0) ipcRenderer.send('omnibox-choose', state.items[state.selected]); break;
+        default: break;
+      }
+    });
+
+    // Close overlay when clicking anywhere that is NOT a list item.
+    // Forward a close-request so the toolbar also updates its UI state.
+    document.addEventListener('mousedown', (e) => {
+        // Ask toolbar to close (will also call omnibox-close under the hood)
+        ipcRenderer.send('omnibox-close-request');
+      
+    });
+
+    // initial render
+    render([], '');
+  </script>
+</body>
+</html>

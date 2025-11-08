@@ -36,6 +36,11 @@ export class LLMService {
   private registry: Registry;
   private recentActions: Array<{ type: string; params: any; ts: number }> = [];
 
+  // DOM differential update tracking
+  private lastSentDOMHash: string | null = null;
+  private lastSentDOM: string = '';
+  private lastSentURL: string = '';
+
   constructor(modelName: string = "gpt-5-mini", config?: LLMServiceConfig) {
     // Initialize Tools Registry
     this.registry = new Registry();
@@ -81,6 +86,17 @@ export class LLMService {
       if (!requiresDefaultTemp) {
         openAIConfig.temperature = 0.0;
       }
+
+      // FIX 5: Enable JSON mode for compatible OpenAI models to enforce JSON responses
+      // JSON mode is supported in gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106 and later
+      const supportsJsonMode = /^(gpt-4o|gpt-4-turbo|gpt-3\.5-turbo-1106|gpt-3\.5-turbo-0125)/.test(modelName);
+      if (supportsJsonMode) {
+        openAIConfig.modelKwargs = {
+          response_format: { type: "json_object" }
+        };
+        info("[LLMService] JSON mode enabled for", modelName);
+      }
+
       this.model = new ChatOpenAI(openAIConfig);
     }
   }
@@ -156,10 +172,18 @@ INSTRUCTIONS:
 - Always respond with valid JSON containing a "thinking" field and either an "action" object or an "actions" array of objects
 - Each action object must include a "type" field
 
-FORMAT RULES:
-- Output must be raw JSON only. Do not include code fences, markdown, or extra prose.
-- Do not add fields other than "thinking", "action" or "actions".
-- For multiple steps in one turn, use an "actions" array (ordered). For a single step, use an "action" object.
+FORMAT RULES (CRITICAL - NON-COMPLIANCE WILL CAUSE FAILURE):
+- Output must be PURE JSON ONLY - start with { and end with }
+- Your ENTIRE response must be valid JSON - no other text whatsoever
+- Do NOT use XML tags like <function_calls> or <thinking>
+- Do NOT use markdown code fences like \`\`\`json or \`\`\`
+- Do NOT add any text, explanation, or commentary before or after the JSON object
+- Do NOT write summaries, conclusions, or natural language responses
+- Do not add fields other than "thinking", "action" or "actions"
+- For multiple steps in one turn, use an "actions" array (ordered). For a single step, use an "action" object
+- Use double quotes for all strings, not single quotes
+- Do not use trailing commas
+- IMPORTANT: If you return anything other than pure JSON, your response will be rejected and you will waste an iteration
 
 
 CORRECT RESPONSE FORMAT EXAMPLES:
@@ -226,6 +250,11 @@ Remember:
     logCallback?: AgentLogCallback,
     stopSignal?: () => boolean
   ): Promise<AgentOutput> {
+    // Reset DOM cache for new task (differential updates)
+    this.lastSentDOMHash = null;
+    this.lastSentDOM = '';
+    this.lastSentURL = '';
+
     const emitLog = (type: 'thought' | 'observation' | 'system' | 'error', data: any) => {
       if (logCallback) {
         logCallback({ type, data });
@@ -242,6 +271,8 @@ Remember:
     let iterationCount = 0;
     let isComplete = false;
     let finalResult: any = null;
+    let consecutiveParseFailures = 0; // FIX 6: Track parse failures separately
+    const MAX_PARSE_RETRIES = 2; // Allow 2 parse retries before counting as iteration
 
     while (iterationCount < this.maxIterations && !isComplete) {
       if (stopSignal && stopSignal()) {
@@ -281,13 +312,33 @@ Remember:
 
         if (!parsed) {
           emitLog('error', { message: 'Failed to parse LLM response' });
+          consecutiveParseFailures++;
+
+          // FIX 6: Don't count parse failures as iterations (up to MAX_PARSE_RETRIES)
+          // This prevents wasting iterations on simple format errors
+          if (consecutiveParseFailures <= MAX_PARSE_RETRIES) {
+            iterationCount--; // Refund the iteration
+            emitLog('system', {
+              message: `Parse failure ${consecutiveParseFailures}/${MAX_PARSE_RETRIES} - retrying without counting as iteration`
+            });
+          } else {
+            emitLog('system', {
+              message: `Parse failures exceeded ${MAX_PARSE_RETRIES} retries - counting as full iteration`
+            });
+          }
+
           messages.push(new AIMessage(responseText));
           messages.push(
-            new HumanMessage('Invalid response format. Please respond with valid JSON containing "thinking" and "action" fields.')
+            new HumanMessage(
+              'CRITICAL ERROR: Your response was not valid JSON. You MUST respond with PURE JSON ONLY - no markdown, no XML tags, no text before or after. ' +
+              'Start with { and end with }. Example: {"thinking": "your thought", "action": {"type": "wait", "seconds": 1}}'
+            )
           );
           continue;
         }
 
+        // Parse succeeded - reset consecutive failure counter
+        consecutiveParseFailures = 0;
         const { thinking, actions } = parsed;
 
         emitLog('thought', { thinking });
@@ -375,7 +426,28 @@ Remember:
   /**
    * Format browser state for LLM
    */
+  /**
+   * Compute simple hash of DOM structure for differential updates
+   */
+  private computeDOMHash(selectorMap: Record<number, any>): string {
+    const keys = Object.keys(selectorMap).sort();
+    const signature = keys.map(k => {
+      const elem = selectorMap[parseInt(k)];
+      return `${elem.tagName}:${elem.text?.substring(0, 20) || ''}:${elem.attributes?.id || ''}`;
+    }).join('|');
+
+    // Simple hash function
+    let hash = 0;
+    for (let i = 0; i < signature.length; i++) {
+      const char = signature.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    return hash.toString(36);
+  }
+
   private formatBrowserStateForLLM(browserState: any): string {
+    // Always include metadata
     let message = `Current Browser State:\n`;
     message += `URL: ${browserState.url}\n`;
     message += `Title: ${browserState.title}\n`;
@@ -390,41 +462,113 @@ Remember:
       message += '\n';
     }
 
-    message += browserState.llmRepresentation;
+    // Compute DOM hash for differential updates
+    const currentDOMHash = this.computeDOMHash(browserState.selectorMap);
+    const urlChanged = this.lastSentURL !== browserState.url;
+
+    // Send full DOM if:
+    // 1. First time (no hash)
+    // 2. DOM structure changed
+    // 3. URL changed (new page)
+    if (!this.lastSentDOMHash || currentDOMHash !== this.lastSentDOMHash || urlChanged) {
+      // Full DOM
+      message += browserState.llmRepresentation;
+
+      // Update cache
+      this.lastSentDOMHash = currentDOMHash;
+      this.lastSentDOM = browserState.llmRepresentation;
+      this.lastSentURL = browserState.url;
+
+      debug(`[LLM] Sent full DOM (${browserState.llmRepresentation.length} chars, ${Object.keys(browserState.selectorMap).length} elements)`);
+    } else {
+      // Differential update - DOM unchanged
+      const elementCount = Object.keys(browserState.selectorMap).length;
+      message += `DOM unchanged since last observation (${elementCount} elements cached).\n`;
+      message += `Use previously observed element indices for interaction.\n`;
+
+      debug(`[LLM] Sent DOM reference only (saved ${this.lastSentDOM.length} chars, ~${Math.floor(this.lastSentDOM.length / 4)} tokens)`);
+    }
 
     return message;
   }
 
   /**
    * Parse LLM response to extract thinking and action
+   * Multi-stage parsing strategy to handle various LLM output formats
    */
   private parseLLMResponse(responseText: string): { thinking: string; actions: TypedAction[] } | null {
+    // Stage 1: Try markdown JSON code blocks
+    const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+    if (jsonMatch) {
+      const result = this.tryParseJSON(jsonMatch[1]);
+      if (result) return result;
+    }
+
+    // Stage 2: Try to find JSON object in the text
+    const objectMatch = responseText.match(/\{[\s\S]*\}/);
+    if (objectMatch) {
+      const result = this.tryParseJSON(objectMatch[0]);
+      if (result) return result;
+    }
+
+    // Stage 3: Try to extract from XML-style function_calls tags
+    const xmlMatch = responseText.match(/<function_calls>\s*(\{[\s\S]*?\})\s*<\/function_calls>/);
+    if (xmlMatch) {
+      const result = this.tryParseJSON(xmlMatch[1]);
+      if (result) return result;
+    }
+
+    // Stage 4: Try cleaning common JSON issues (trailing commas, single quotes)
+    const cleaned = responseText
+      .replace(/,(\s*[}\]])/g, '$1') // Remove trailing commas
+      .replace(/'/g, '"'); // Replace single quotes with double quotes
+
+    const cleanedMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (cleanedMatch) {
+      const result = this.tryParseJSON(cleanedMatch[0]);
+      if (result) return result;
+    }
+
+    return null;
+  }
+
+  /**
+   * Helper to try parsing JSON and validate structure
+   */
+  private tryParseJSON(jsonText: string): { thinking: string; actions: TypedAction[] } | null {
     try {
-      // Try to extract JSON from markdown code blocks if present
-      let jsonText = responseText;
-
-      const jsonMatch = responseText.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      if (jsonMatch) {
-        jsonText = jsonMatch[1];
-      } else {
-        // Try to find JSON object in the text
-        const objectMatch = responseText.match(/\{[\s\S]*\}/);
-        if (objectMatch) {
-          jsonText = objectMatch[0];
-        }
-      }
-
       const parsed = JSON.parse(jsonText);
 
-      if (!parsed.thinking || (!parsed.action && !parsed.actions)) {
+      // Enhanced validation: Check thinking field
+      if (!parsed.thinking || typeof parsed.thinking !== 'string' || parsed.thinking.trim() === '') {
+        debug('[LLM] Parse failed: missing or invalid thinking field');
+        return null;
+      }
+
+      // Enhanced validation: Check action/actions fields
+      if (!parsed.action && !parsed.actions) {
+        debug('[LLM] Parse failed: missing both action and actions fields');
         return null;
       }
 
       let actions: TypedAction[] = [];
       if (Array.isArray(parsed.actions)) {
-        actions = parsed.actions as TypedAction[];
+        actions = parsed.actions;
       } else if (parsed.action) {
-        actions = [parsed.action as TypedAction];
+        actions = [parsed.action];
+      }
+
+      // Enhanced validation: Check each action has required fields
+      for (let i = 0; i < actions.length; i++) {
+        const action = actions[i];
+        if (!action || typeof action !== 'object') {
+          debug(`[LLM] Parse failed: action at index ${i} is not an object`);
+          return null;
+        }
+        if (!action.type || typeof action.type !== 'string') {
+          debug(`[LLM] Parse failed: action at index ${i} missing or invalid type field`, action);
+          return null;
+        }
       }
 
       return {
@@ -432,6 +576,7 @@ Remember:
         actions,
       };
     } catch (error) {
+      debug('[LLM] JSON parse error:', error);
       return null;
     }
   }

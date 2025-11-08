@@ -66,16 +66,36 @@
       flex: 1;
       display: flex;
       align-items: center;
-      background: white;
-      border: 1px solid #dadce0;
-      border-radius: 24px;
-      padding: 0 16px;
-      height: 36px;
+      background: #fff;
+      border: 1px solid #e0e3e7;
+      border-radius: 20px;
+      padding: 0 12px;
+      height: 38px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    }
+
+    .url-container.open {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      border-bottom-color: transparent;
+      box-shadow: 0 6px 16px rgba(32,33,36,.18);
     }
 
     .url-container:focus-within {
-      background: white;
-      box-shadow: 0 1px 6px rgba(32,33,36,.28);
+      background: #fff;
+      box-shadow: 0 4px 16px rgba(32,33,36,.18);
+      border-color: #c7d2fe;
+    }
+
+    /* Disabled state when AI controls navigation */
+    .url-container.disabled {
+      opacity: 0.6;
+      pointer-events: none;
+    }
+    .url-input:disabled {
+      background: #f3f4f6;
+      cursor: not-allowed;
+      color: #9aa0a6;
     }
 
     .url-input {
@@ -85,10 +105,11 @@
       font-size: 14px;
       color: #202124;
       background: transparent;
+      padding: 0 6px;
     }
 
     .url-icon {
-      margin-right: 8px;
+      margin-right: 6px;
       width: 16px;
       height: 16px;
       display: flex;
@@ -102,6 +123,35 @@
       width: 16px;
       height: 16px;
     }
+
+    /* Omnibox dropdown (history/suggestions) */
+    .omnibox-dropdown {
+      position: fixed;
+      top: 72px; /* default under tab(32) + toolbar(40); will be repositioned in JS */
+      left: 8px;
+      width: 50%;
+      max-height: 280px;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-top: none;
+      border-radius: 0 0 12px 12px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+      z-index: 10002; /* Above toolbar/status bar */
+    }
+    .omnibox-dropdown.hidden { display: none; }
+    .omnibox-item {
+      padding: 10px 14px;
+      font-size: 13px;
+      color: #202124;
+      cursor: pointer;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .omnibox-item:hover { background: #f1f3f4; }
+    .omnibox-item .title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .omnibox-item .url { color: #5f6368; font-size: 12px; }
 
     .chat-toggle-btn {
       border: none;
@@ -468,6 +518,22 @@
       display: none;
       pointer-events: none;
     }
+
+    .url-clear-btn {
+      appearance: none;
+      border: none;
+      background: transparent;
+      color: #9aa0a6;
+      width: 24px;
+      height: 24px;
+      border-radius: 12px;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+    }
+    .url-clear-btn:hover { background: #eef2ff; color: #4f46e5; }
   </style>
 </head>
 <body>
@@ -508,6 +574,7 @@
         id="urlInput"
         placeholder="Search or enter a URL"
       />
+      <button class="url-clear-btn" id="urlClearBtn" title="Clear">×</button>
     </div>
 
     <button class="record-btn" id="recordBtn" title="Record Macro">
@@ -519,6 +586,8 @@
       AI Chat
     </button>
   </div>
+
+  <!-- Omnibox dropdown overlay (rendered in a separate BrowserView) -->
 
   <!-- Find in page bar -->
   <div class="find-bar" id="findBar">
@@ -541,11 +610,13 @@
     const forwardBtn = document.getElementById('forwardBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const urlInput = document.getElementById('urlInput');
+    const urlClearBtn = document.getElementById('urlClearBtn');
     const recordBtn = document.getElementById('recordBtn');
     const chatToggleBtn = document.getElementById('chatToggleBtn');
     const chatIframe = document.getElementById('chatIframe');
     const toolbar = document.getElementById('toolbar');
     const tabBar = document.getElementById('tabBar');
+    const urlContainer = document.querySelector('.url-container');
 
     // Detect macOS and add class for styling (run after tabBar is defined)
     if (platform() === 'darwin' && tabBar) {
@@ -569,6 +640,138 @@
     // 초기 탭은 Cobalt 로고로 시작
     let tabs = [{ id: 0, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' }];
     let nextTabId = 1;
+
+    // ==================
+    // Simple History DB
+    // ==================
+    const HISTORY_KEY = 'nav_history_v1';
+    let historyStore = [];
+
+    function loadHistory() {
+      try {
+        const raw = localStorage.getItem(HISTORY_KEY);
+        historyStore = raw ? JSON.parse(raw) : [];
+        if (!Array.isArray(historyStore)) historyStore = [];
+      } catch (_) { historyStore = []; }
+    }
+
+    function saveHistory() {
+      try { localStorage.setItem(HISTORY_KEY, JSON.stringify(historyStore)); } catch (_) {}
+    }
+
+    function isHttpUrl(u) {
+      try { const p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:'; } catch { return false; }
+    }
+
+    function addHistoryEntry(url, title) {
+      if (!isHttpUrl(url)) return;
+      const now = Date.now();
+      const idx = historyStore.findIndex(h => h.url === url);
+      if (idx >= 0) {
+        historyStore[idx].title = title || historyStore[idx].title || url;
+        historyStore[idx].lastVisit = now;
+        historyStore[idx].count = (historyStore[idx].count || 0) + 1;
+      } else {
+        historyStore.unshift({ url, title: title || url, lastVisit: now, count: 1 });
+        // Cap history size
+        if (historyStore.length > 500) historyStore.length = 500;
+      }
+      saveHistory();
+    }
+
+    function getHistorySuggestions(query, limit = 6) {
+      const q = (query || '').toLowerCase();
+      const list = historyStore
+        .filter(h => {
+          if (!h || !h.url) return false;
+          if (!q) return true;
+          return (h.title || '').toLowerCase().includes(q) || h.url.toLowerCase().includes(q);
+        })
+        .sort((a, b) => (b.lastVisit || 0) - (a.lastVisit || 0));
+      const unique = [];
+      const seen = new Set();
+      for (const h of list) {
+        if (seen.has(h.url)) continue;
+        seen.add(h.url);
+        unique.push({
+          type: 'history',
+          title: h.title || h.url,
+          url: h.url,
+          icon: getFaviconUrl(h.url)
+        });
+        if (unique.length >= limit) break;
+      }
+      return unique;
+    }
+
+    function removeHistoryByUrl(url) {
+      if (!url) return;
+      try {
+        historyStore = (historyStore || []).filter(h => h && h.url !== url);
+        saveHistory();
+      } catch (_) {}
+      // Refresh dropdown items (overlay will briefly hide itself and resync hover)
+      try {
+        const val = urlInput.value || '';
+        const items = composeOmniboxItems(val);
+        ipcRenderer.invoke('omnibox-set-items', { items, query: val }).catch(() => {});
+      } catch (_) {}
+    }
+
+    // ==================
+    // Inline suggestion
+    // ==================
+    let inlineSuggestion = null; // string of full suggestion placed in input
+    let inlineTyped = '';        // what the user typed before applying suggestion
+
+    function normalizeForMatch(url) {
+      try {
+        let s = url.toLowerCase();
+        s = s.replace(/^https?:\/\//, '');
+        s = s.replace(/^www\./, '');
+        return s;
+      } catch { return url || ''; }
+    }
+
+    function bestInlineSuggestion(typed) {
+      const t = (typed || '').trim();
+      if (!t) return null;
+      if (/\s/.test(t)) return null; // don't inline for queries with spaces
+
+      const candidates = getHistorySuggestions(t, 20);
+      const nt = normalizeForMatch(t);
+      for (const c of candidates) {
+        if (!c || !c.url) continue;
+        const nurl = normalizeForMatch(c.url);
+        // Only inline if the normalized target starts with what the user typed
+        if (nurl.startsWith(nt)) {
+          return { full: c.url, display: nurl };
+        }
+      }
+      // Do not inline-inject prefixes like https://; only show when we can append a suffix to the typed value
+      return null;
+    }
+
+    function applyInlineSuggestionIfAny() {
+      const el = urlInput;
+      const typed = el.value;
+      // Only when caret at end and no selection
+      if (el.selectionStart !== el.selectionEnd || el.selectionStart !== typed.length) {
+        inlineSuggestion = null; inlineTyped = '';
+        return;
+      }
+      const candidate = bestInlineSuggestion(typed);
+      if (!candidate) {
+        inlineSuggestion = null; inlineTyped = '';
+        return;
+      }
+      inlineSuggestion = candidate.full;
+      inlineTyped = typed;
+      // Build display by appending only the completion suffix to what the user typed
+      const suffix = candidate.display.substring(typed.length);
+      el.value = typed + suffix;
+      el.setSelectionRange(typed.length, (typed + suffix).length);
+    }
 
     // === Tab Persistence (save/restore across app restarts) ===
     function saveTabsState() {
@@ -664,6 +867,18 @@
 
     // Attempt to restore tabs from last session
     restoreTabsStateIfAny();
+    // Load history from previous sessions
+    loadHistory();
+
+    // Close omnibox when clicking inside the chat iframe
+    chatIframe.addEventListener('load', () => {
+      try {
+        const doc = chatIframe.contentWindow && chatIframe.contentWindow.document;
+        if (doc) {
+          doc.addEventListener('mousedown', () => closeOmniboxDropdown());
+        }
+      } catch (_) {}
+    });
 
     // Record 버튼 토글
     recordBtn.addEventListener('click', async () => {
@@ -724,6 +939,10 @@
         tabBar.classList.add('full-width');
         ipcRenderer.invoke('toggle-chat', { visible: false });
       }
+
+      // Reposition dropdown overlay if open
+      const b = omniboxBounds();
+      if (b) ipcRenderer.invoke('omnibox-update', b).catch(() => {});
     });
 
     // 드래그 앤 드롭 관련 변수
@@ -981,9 +1200,25 @@
     });
 
     // URL 입력 (Enter 키)
-    urlInput.addEventListener('keypress', (e) => {
+    urlInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
+        e.preventDefault();
+        // If inline suggestion exists, prefer it
+        if (inlineSuggestion) {
+          ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: inlineSuggestion });
+          closeOmniboxDropdown();
+          return;
+        }
         let url = urlInput.value.trim();
+
+        // If a suggestion is selected, prefer it
+        try {
+          if (typeof omniboxSelected === 'object' && omniboxSelected && omniboxSelected.url) {
+            ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: omniboxSelected.url });
+            closeOmniboxDropdown();
+            return;
+          }
+        } catch (_) {}
 
         // 주소창이 비어있으면 홈 페이지로 이동
         if (!url) {
@@ -1003,7 +1238,176 @@
         }
 
         ipcRenderer.invoke('browser-navigation', { action: 'navigate', url });
+        // Close omnibox on navigation
+        closeOmniboxDropdown();
       }
+    });
+
+    // -------------------------------
+    // Omnibox dropdown open/close
+    // -------------------------------
+    function omniboxBounds() {
+      if (!urlContainer) return null;
+      const rect = urlContainer.getBoundingClientRect();
+      return {
+        x: Math.round(rect.left),
+        y: Math.round(rect.bottom),
+        width: Math.round(rect.width),
+        height: 320,
+      };
+    }
+
+    // No extra space is reserved; dropdown overlays the content.
+
+    function buildOmniboxItems(query) {
+      const items = [];
+      const q = (query || '').trim();
+      const isProbablyUrl = /^(https?:\/\/|file:\/\/|about:|localhost|\S+\.\S{2,})/.test(q);
+      const hasSpace = /\s/.test(q);
+      const normalizedUrl = (() => {
+        if (!q) return '';
+        if (/^https?:\/\//i.test(q)) return q;
+        if (q.startsWith('file://') || q.startsWith('about:')) return q;
+        if (!hasSpace && (q.includes('.') || q.startsWith('localhost'))) return 'https://' + q;
+        return '';
+      })();
+      if (q && normalizedUrl) {
+        items.push({ type: 'go', title: `Go to ${q}`, url: normalizedUrl, icon: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(q.replace(/^https?:\/\//,''))}&sz=32` });
+      }
+      if (q) {
+        items.push({ type: 'search', title: `Search Google for "${q}"`, url: `https://www.google.com/search?q=${encodeURIComponent(q)}`, icon: '', action: 'search' });
+      } else {
+        items.push({ type: 'hint', title: 'Type to search or paste a URL' });
+      }
+      return items;
+    }
+
+    // Compose base items with history suggestions
+    function composeOmniboxItems(query) {
+      const base = buildOmniboxItems(query);
+      const q = (query || '').trim();
+      const hist = getHistorySuggestions(q, q ? 6 : 8);
+      if (!q) {
+        // If empty, prefer showing recent history; fallback to hint
+        return hist.length ? hist : base;
+      }
+      return base.concat(hist);
+    }
+
+    function openOmniboxDropdown() {
+      const b = omniboxBounds();
+      if (!b) return;
+      // Visually attach dropdown to the input
+      urlContainer.classList.add('open');
+      const items = composeOmniboxItems(urlInput.value || '');
+      ipcRenderer.invoke('omnibox-open', { ...b, items }).then(() => {
+        ipcRenderer.invoke('omnibox-set-items', { items, query: urlInput.value || '' });
+      }).catch(() => {});
+    }
+
+    function closeOmniboxDropdown() {
+      urlContainer.classList.remove('open');
+      ipcRenderer.invoke('omnibox-close').catch(() => {});
+    }
+
+    urlInput.addEventListener('focus', () => { openOmniboxDropdown(); applyInlineSuggestionIfAny(); });
+    urlInput.addEventListener('input', openOmniboxDropdown);
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        closeOmniboxDropdown();
+        urlInput.blur();
+      }
+    });
+    // Do not auto-close on blur to allow overlay interactions
+    // Close overlay when the content (below) is clicked
+    ipcRenderer.on('omnibox-close-request', () => {
+      closeOmniboxDropdown();
+    });
+    // Remove history from overlay request
+    ipcRenderer.on('omnibox-remove-history', (_e, url) => {
+      removeHistoryByUrl(url);
+    });
+    // Close when clicking toolbar area outside the url container
+    document.addEventListener('mousedown', (e) => {
+      if (!urlContainer.contains(e.target)) {
+        closeOmniboxDropdown();
+      }
+    });
+    window.addEventListener('resize', () => {
+      const b = omniboxBounds();
+      if (b) ipcRenderer.invoke('omnibox-update', b).catch(() => {});
+    });
+
+    // Update overlay items as user types, and show clear button
+    urlInput.addEventListener('input', () => {
+      const val = urlInput.value || '';
+      const items = composeOmniboxItems(val);
+      ipcRenderer.invoke('omnibox-set-items', { items, query: val }).catch(() => {});
+      openOmniboxDropdown();
+      // toggle clear button
+      urlClearBtn.style.display = val ? 'flex' : 'none';
+      // inline suggestion
+      applyInlineSuggestionIfAny();
+    });
+
+    // Clear input
+    urlClearBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      urlInput.value = '';
+      urlInput.focus();
+      const items = composeOmniboxItems('');
+      ipcRenderer.invoke('omnibox-set-items', { items, query: '' }).catch(() => {});
+      openOmniboxDropdown();
+      urlClearBtn.style.display = 'none';
+    });
+
+    // Keyboard navigation for suggestions + inline accept
+    urlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); ipcRenderer.invoke('omnibox-key', 'down'); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); ipcRenderer.invoke('omnibox-key', 'up'); }
+      else if (e.key === 'Home' && (e.metaKey || e.ctrlKey)) { ipcRenderer.invoke('omnibox-key', 'home'); }
+      else if (e.key === 'End' && (e.metaKey || e.ctrlKey)) { ipcRenderer.invoke('omnibox-key', 'end'); }
+      else if (e.key === 'Tab') {
+        if (inlineSuggestion) {
+          e.preventDefault();
+          // Accept inline suggestion: place caret at end
+          urlInput.setSelectionRange(urlInput.value.length, urlInput.value.length);
+          // Keep dropdown open with new query context
+        }
+      }
+    });
+
+    // Receive overlay selection changes and choose events
+    let omniboxSelected = null;
+    ipcRenderer.on('omnibox-selection', (_e, item) => { omniboxSelected = item || null; });
+    ipcRenderer.on('omnibox-choose', (_e, item) => {
+      if (item && item.url) {
+        ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: item.url });
+        closeOmniboxDropdown();
+      }
+    });
+
+    // ========================================
+    // Lock address bar while AI navigates
+    // ========================================
+    function setNavLock(locked) {
+      try {
+        urlInput.disabled = !!locked;
+        if (locked) {
+          urlContainer.classList.add('disabled');
+          closeOmniboxDropdown();
+        } else {
+          urlContainer.classList.remove('disabled');
+        }
+      } catch (_) {}
+    }
+
+    ipcRenderer.on('agent-started', (_e, _data) => {
+      setNavLock(true);
+    });
+    ipcRenderer.on('agent-stopped', (_e, _data) => {
+      setNavLock(false);
     });
 
     // BrowserView URL 변경 시 주소창 업데이트
@@ -1037,6 +1441,11 @@
         if (tabFaviconElement) {
           tabFaviconElement.src = faviconUrl;
         }
+      }
+
+      // Record to history
+      if (!isCobaltHome) {
+        addHistoryEntry(url, title);
       }
 
       // 뒤로/앞으로 버튼 상태 업데이트

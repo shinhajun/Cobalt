@@ -280,6 +280,26 @@ body {
   border-left: 2px solid #ea4335;
 }
 
+.message.screenshot {
+  display: block !important;
+  width: 85% !important;
+  max-width: 85% !important;
+  margin: 12px auto !important;
+  margin-left: auto !important;
+  margin-right: auto !important;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%) !important;
+  border-left: 4px solid #667eea !important;
+  border-radius: 8px !important;
+  padding: 12px !important;
+  cursor: pointer;
+  transition: background 0.2s;
+  box-sizing: border-box !important;
+}
+
+.message.screenshot:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%) !important;
+}
+
 /* Input Area - Minimalist */
 .input-area {
   padding: 16px;

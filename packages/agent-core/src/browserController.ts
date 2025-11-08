@@ -66,19 +66,55 @@ export class BrowserController {
   private cachedDOMState: SerializedDOMState | null = null;
   private cachedSelectorMap: Record<number, any> = {};
   private cacheTimestamp: number = 0;
-  private readonly CACHE_TTL = 500; // ms
+  // FIX 7: Reduced from 5s to 3s for dynamic pages (Amazon, SPAs, etc.)
+  // Shorter TTL prevents stale element indices on pages with frequent DOM updates
+  private readonly CACHE_TTL = 3000; // ms - Optimized for dynamic e-commerce sites
+  private domChangedSinceCache: boolean = false; // Track if DOM potentially changed
+  private lastDOMHash: string = ''; // Track DOM changes via hash comparison
 
   // BrowserSession for CDP session management (browser-use style)
   private browserSession: BrowserSession | null = null;
 
   /**
    * Invalidate DOM cache (called on navigation, tab switch)
+   * @param reason - Reason for invalidation (for logging)
+   * @param forceful - If true, clear cache immediately. If false, just mark as potentially changed
    */
-  private invalidateDOMCache(): void {
-    debug('[BrowserController] DOM cache invalidated');
-    this.cachedDOMState = null;
-    this.cachedSelectorMap = {};
-    this.cacheTimestamp = 0;
+  private invalidateDOMCache(reason: string = 'unknown', forceful: boolean = true): void {
+    debug(`[BrowserController] DOM cache invalidated: ${reason} (forceful=${forceful})`);
+
+    if (forceful) {
+      // Hard invalidation - clear everything
+      this.cachedDOMState = null;
+      this.cachedSelectorMap = {};
+      this.cacheTimestamp = 0;
+      this.domChangedSinceCache = false;
+      this.lastDOMHash = ''; // Reset hash
+    } else {
+      // Soft invalidation - mark as potentially changed, let getBrowserState decide
+      this.domChangedSinceCache = true;
+    }
+  }
+
+  /**
+   * Compute quick DOM hash to detect changes without full DOM collection
+   * Uses URL, title, and element count for fast comparison
+   */
+  private async computeQuickDOMHash(): Promise<string> {
+    if (!this.page) return '';
+
+    try {
+      const hash = await this.page.evaluate(() => {
+        const count = document.querySelectorAll('*').length;
+        const title = document.title;
+        const url = window.location.href;
+        return `${url}:${title}:${count}`;
+      });
+      return hash;
+    } catch (error: any) {
+      debug('[BrowserController] Failed to compute DOM hash:', error.message);
+      return '';
+    }
   }
 
   constructor(debugMode: boolean = false, profile?: BrowserProfile) {
@@ -173,6 +209,20 @@ export class BrowserController {
     });
 
     this.page = await context.newPage();
+
+    // Add navigation listeners for proactive cache invalidation
+    this.page.on('framenavigated', async (frame) => {
+      if (frame === this.page?.mainFrame()) {
+        debug('[BrowserController] Frame navigated, invalidating cache');
+        this.invalidateDOMCache('framenavigated event', true);
+      }
+    });
+
+    this.page.on('load', () => {
+      debug('[BrowserController] Page loaded, invalidating cache');
+      this.invalidateDOMCache('page load event', true);
+    });
+
     this.domService = new DomService(this.page);
 
     // Initialize BrowserSession for CDP session management
@@ -311,15 +361,27 @@ export class BrowserController {
       const now = Date.now();
       const cacheAge = now - this.cacheTimestamp;
 
-      // Use cache if within TTL
-      if (this.cachedDOMState && cacheAge < this.CACHE_TTL) {
-        debug(`[BrowserController] Using cached DOM (age: ${cacheAge}ms)`);
+      // Use cache if: (1) within TTL AND (2) DOM hasn't potentially changed
+      let cacheValid = this.cachedDOMState && cacheAge < this.CACHE_TTL && !this.domChangedSinceCache;
+
+      // Additional validation: Check if DOM actually changed via hash comparison
+      if (cacheValid && this.lastDOMHash) {
+        const currentHash = await this.computeQuickDOMHash();
+        if (currentHash && currentHash !== this.lastDOMHash) {
+          debug(`[BrowserController] DOM hash changed (${this.lastDOMHash.substring(0, 50)}... -> ${currentHash.substring(0, 50)}...), invalidating cache`);
+          cacheValid = false;
+          this.lastDOMHash = currentHash; // Update for next comparison
+        }
+      }
+
+      if (cacheValid) {
+        debug(`[BrowserController] Using cached DOM (age: ${cacheAge}ms, unchanged)`);
         domState = this.cachedDOMState;
         selectorMap = this.cachedSelectorMap;
         llmRepresentation = this.formatDOMForLLM(selectorMap);
         timing.dom = 0; // Cache hit
       } else {
-        // Cache miss or expired - fetch fresh DOM
+        // Cache miss, expired, or DOM changed - fetch fresh DOM
         const domStart = Date.now();
         const domResult = await this.domService.getSerializedDOMTree();
         domState = domResult.state;
@@ -327,11 +389,30 @@ export class BrowserController {
         llmRepresentation = domResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
         timing.dom = Date.now() - domStart;
 
-        // Update cache
+        // FIX 8: Smart wait detection - if DOM is empty, page may still be loading
+        const elementCount = Object.keys(selectorMap).length;
+        if (elementCount === 0 && !title) {
+          debug('[BrowserController] Empty page detected (0 elements, no title) - waiting for page to load...');
+          await this.page.waitForTimeout(1000);
+
+          // Retry DOM collection once
+          const retryResult = await this.domService.getSerializedDOMTree();
+          domState = retryResult.state;
+          selectorMap = domState.selectorMap;
+          llmRepresentation = retryResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
+
+          const retryElementCount = Object.keys(selectorMap).length;
+          debug(`[BrowserController] After retry: ${retryElementCount} elements found`);
+        }
+
+        // Update cache, hash, and reset change flag
         this.cachedDOMState = domState;
         this.cachedSelectorMap = selectorMap;
         this.cacheTimestamp = now;
-        debug(`[BrowserController] DOM cache refreshed (${timing.dom}ms)`);
+        this.domChangedSinceCache = false; // Reset flag after refresh
+        this.lastDOMHash = await this.computeQuickDOMHash(); // Update hash for next comparison
+        const reason = cacheAge >= this.CACHE_TTL ? 'expired' : (this.domChangedSinceCache ? 'changed' : 'initial');
+        debug(`[BrowserController] DOM cache refreshed (${timing.dom}ms, was: ${reason})`);
       }
     }
 
@@ -458,6 +539,9 @@ export class BrowserController {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
+      // Store URL before click to detect navigation
+      const urlBeforeClick = this.page.url();
+
       // Use browser-use style Element class with advanced click
       const element = new Element(
         this.browserSession,
@@ -467,21 +551,70 @@ export class BrowserController {
 
       await element.click();
 
+      // FIX 3: Improved navigation handling after click
+      // Increase timeout from 400ms to 2000ms for JavaScript-triggered navigation
       // Wait for navigation or timeout (race condition fix)
-      // Some clicks trigger navigation - wait for DOMContentLoaded or a short settle, whichever comes first
       await Promise.race([
         this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
-        this.page.waitForTimeout(400),
+        this.page.waitForTimeout(2000), // Increased from 400ms to allow JS navigation
       ]);
 
-      // Invalidate DOM cache after potential DOM change due to click
-      this.invalidateDOMCache();
+      // Additional wait for network idle if navigation occurred
+      const urlAfterClick = this.page.url();
+      const navigationOccurred = urlBeforeClick !== urlAfterClick;
+
+      if (navigationOccurred) {
+        // Navigation detected - wait for page to stabilize
+        await this.page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {
+          debug('[BrowserController] Network idle timeout after click navigation');
+        });
+        this.invalidateDOMCache('click caused navigation', true); // Hard invalidate
+      } else {
+        // No URL change - but DOM might have changed (e.g., SPA, modal, dropdown)
+        // Invalidate cache to be safe
+        this.invalidateDOMCache('click action completed', false); // Soft invalidate
+      }
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Clicked element ${index}`);
 
       return { success: true };
     } catch (error: any) {
+      // Auto-retry on stale node ID
+      if (error.message && error.message.includes('STALE_NODE_ID')) {
+        debug('[BrowserController] Stale node detected, retrying click with fresh DOM');
+        try {
+          // Force refresh DOM
+          this.invalidateDOMCache('stale node detected in click', true);
+          const freshState = await this.getBrowserState(false, true);
+          const freshElementData = freshState.selectorMap[index];
+
+          if (freshElementData && freshElementData.backendNodeId) {
+            // Retry click with fresh element
+            const freshElement = new Element(
+              this.browserSession!,
+              freshElementData.backendNodeId,
+              this.browserSession!.agentFocus.sessionId
+            );
+            await freshElement.click();
+
+            // Wait and check for navigation (same improved timeout as main click)
+            await Promise.race([
+              this.page!.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
+              this.page!.waitForTimeout(2000), // Increased from 400ms
+            ]);
+
+            await this.emitScreenshot(`Clicked element ${index} (retry after stale node)`);
+            return { success: true };
+          } else {
+            return { success: false, error: `Element at index ${index} not found after DOM refresh` };
+          }
+        } catch (retryError: any) {
+          logError('[BrowserController] Click retry failed:', retryError);
+          return { success: false, error: `Click retry failed: ${retryError.message}` };
+        }
+      }
+
       logError('[BrowserController] Click error:', error);
       return { success: false, error: error.message };
     }
@@ -529,11 +662,44 @@ export class BrowserController {
       // Wait briefly for input to register (browser-use: 50ms)
       await this.page.waitForTimeout(50);
 
+      // FIX 7: Invalidate cache after input - typing may trigger autocomplete, dropdowns, or DOM changes
+      this.invalidateDOMCache('text input action', false); // Soft invalidate
+
       // Emit screenshot event after action
       await this.emitScreenshot(`Input text into element ${index}`);
 
       return { success: true };
     } catch (error: any) {
+      // Auto-retry on stale node ID
+      if (error.message && error.message.includes('STALE_NODE_ID')) {
+        debug('[BrowserController] Stale node detected, retrying input with fresh DOM');
+        try {
+          // Force refresh DOM
+          this.invalidateDOMCache('stale node detected in input', true);
+          const freshState = await this.getBrowserState(false, true);
+          const freshElementData = freshState.selectorMap[index];
+
+          if (freshElementData && freshElementData.backendNodeId) {
+            // Retry fill with fresh element
+            const freshElement = new Element(
+              this.browserSession!,
+              freshElementData.backendNodeId,
+              this.browserSession!.agentFocus.sessionId
+            );
+            await freshElement.fill(text, clear);
+            await this.page!.waitForTimeout(50);
+
+            await this.emitScreenshot(`Input text into element ${index} (retry after stale node)`);
+            return { success: true };
+          } else {
+            return { success: false, error: `Element at index ${index} not found after DOM refresh` };
+          }
+        } catch (retryError: any) {
+          logError('[BrowserController] Input retry failed:', retryError);
+          return { success: false, error: `Input retry failed: ${retryError.message}` };
+        }
+      }
+
       logError('[BrowserController] Input text error:', error);
       return { success: false, error: error.message };
     }
@@ -591,6 +757,9 @@ export class BrowserController {
         throw new Error('No target ID available for navigation');
       }
 
+      // CRITICAL FIX: Invalidate cache BEFORE navigation starts to prevent stale DOM
+      this.invalidateDOMCache('page navigation starting', true);
+
       const cdpSession = await this.browserSession.getOrCreateCDPSession(targetId, false);
 
       await (cdpSession.cdpSession as any).send('Page.navigate', {
@@ -598,13 +767,48 @@ export class BrowserController {
         transitionType: 'address_bar',
       });
 
-      // Wait for page to stabilize (browser-use: minimal wait)
-      await this.page.waitForTimeout(300);
+      // Wait for page to stabilize - use multiple strategies to ensure proper loading
+      const page = this.page;
+      await Promise.race([
+        page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {}),
+        page.waitForLoadState('domcontentloaded', { timeout: 3000 })
+          .then(() => page.waitForTimeout(500))
+          .catch(() => {}),
+        page.waitForTimeout(5000), // Fallback timeout
+      ]);
 
-      const title = await this.page.title();
+      // FIX 2: Add mandatory page stabilization to ensure page is fully ready
+      // This prevents empty page states (0 elements) that waste iterations
+      try {
+        // Wait for network to be idle (ensures resources loaded)
+        await page.waitForLoadState('networkidle', { timeout: 2000 }).catch(() => {
+          debug('[BrowserController] Network idle timeout - proceeding anyway');
+        });
 
-      // Invalidate DOM cache after navigation
-      this.invalidateDOMCache();
+        // Additional buffer to ensure DOM has rendered
+        await page.waitForTimeout(300);
+
+        // Verify page is actually ready by checking if we can query the DOM
+        const elementCount = await page.evaluate(() => document.querySelectorAll('*').length).catch(() => 0);
+        if (elementCount === 0) {
+          debug('[BrowserController] Page appears empty, waiting longer...');
+          await page.waitForTimeout(1000);
+        }
+      } catch (error: any) {
+        debug('[BrowserController] Page stabilization check failed:', error.message);
+        // Continue anyway - better to try than to fail completely
+      }
+
+      // FIX 1: Protect title access - can fail during navigation with "execution context destroyed"
+      // This error is NORMAL during navigation and should not fail the entire navigate action
+      let title = '';
+      try {
+        title = await this.page.title();
+      } catch (error: any) {
+        debug('[BrowserController] Failed to get title after navigation (context transition):', error.message);
+        // Use empty title - navigation may still have succeeded
+        title = '';
+      }
 
       // Emit navigation complete event
       await this.eventBus.emit(BrowserEventTypes.NAVIGATION_COMPLETE, {
@@ -1006,8 +1210,8 @@ export class BrowserController {
       await this.page.goBack({ waitUntil: 'domcontentloaded', timeout: 5000 }).catch(() => {});
       // Small settle time
       await this.page.waitForTimeout(150);
-      // Invalidate DOM cache
-      this.invalidateDOMCache();
+      // Invalidate DOM cache (always hard invalidation for navigation)
+      this.invalidateDOMCache('navigation back', true);
       await this.emitScreenshot('Navigated back');
       return { success: true };
     } catch (error: any) {
@@ -1029,8 +1233,22 @@ export class BrowserController {
    */
   async selectDropdown(index: number, option: string): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService || !this.browserSession) {
+      // Enhanced browser state validation
+      if (!this.browser) {
+        return { success: false, error: 'Browser closed - please restart' };
+      }
+      if (!this.page) {
+        return { success: false, error: 'No active page - browser session corrupted' };
+      }
+      if (!this.domService || !this.browserSession) {
         throw new Error('Browser not launched');
+      }
+
+      // Verify page is still responsive
+      try {
+        await this.page.evaluate(() => document.readyState);
+      } catch (error: any) {
+        return { success: false, error: 'Page not responsive - may have navigated or crashed' };
       }
 
       // Ensure we have fresh/cached selector map
@@ -1258,8 +1476,8 @@ export class BrowserController {
       this.page = pages[tabIndex];
       await this.page.bringToFront();
 
-      // Invalidate DOM cache after tab switch
-      this.invalidateDOMCache();
+      // Invalidate DOM cache after tab switch (always hard invalidation)
+      this.invalidateDOMCache('tab switch', true);
 
       // Emit switch tab event
       await this.eventBus.emit(BrowserEventTypes.SWITCH_TAB, {

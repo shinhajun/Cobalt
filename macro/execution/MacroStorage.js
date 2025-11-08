@@ -3,6 +3,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const { app } = require('electron');
+const { validateMacroName } = require('../utils/validation');
 
 class MacroStorage {
   constructor() {
@@ -43,27 +44,10 @@ class MacroStorage {
       throw new Error('Macro must have a valid ID');
     }
 
-    if (!macro.name || typeof macro.name !== 'string') {
-      throw new Error('Macro must have a valid name');
-    }
-
-    const trimmedName = macro.name.trim();
-    if (trimmedName.length === 0) {
-      throw new Error('Macro name cannot be empty or contain only spaces');
-    }
-
-    if (trimmedName.length < 3) {
-      throw new Error('Macro name must be at least 3 characters long');
-    }
-
-    if (trimmedName.length > 100) {
-      throw new Error('Macro name must be less than 100 characters');
-    }
-
-    // Check for invalid filename characters
-    const invalidChars = /[<>:"/\\|?*\x00-\x1f]/g;
-    if (invalidChars.test(trimmedName)) {
-      throw new Error('Macro name contains invalid characters (< > : " / \\ | ? *)');
+    // Validate macro name using shared validation logic
+    const nameError = validateMacroName(macro.name);
+    if (nameError) {
+      throw new Error(nameError);
     }
 
     if (!Array.isArray(macro.steps)) {

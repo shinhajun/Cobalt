@@ -171,6 +171,19 @@ const INJECTION_SCRIPT = `
   }, true);
 
   console.log('[EventCollector] Event listeners installed');
+
+  // Expose flush function for pending input events
+  window.__flushPendingInput = function() {
+    if (inputDebounceTimer) {
+      clearTimeout(inputDebounceTimer);
+      inputDebounceTimer = null;
+    }
+    if (lastInputEvent) {
+      console.log('[EventCollector] Flushing pending input event');
+      window.__browserViewAPI.sendMacroEvent(lastInputEvent);
+      lastInputEvent = null;
+    }
+  };
 })();
 `;
 
@@ -236,13 +249,29 @@ class EventCollector {
       const serialized = EventSerializer.serialize(event);
       this.recordingManager.addEvent(serialized);
 
-      // Re-inject script after page finishes loading (more reliable than setTimeout)
+      // Re-inject script after page finishes loading
+      // Add delay to ensure page is fully interactive (especially for SPAs)
       const finishLoadHandler = () => {
-        if (this.isCollecting) {
-          browserView.webContents.executeJavaScript(INJECTION_SCRIPT).catch(err => {
-            console.error('[EventCollector] Failed to re-inject after navigation:', err);
+        if (!this.isCollecting) return;
+
+        console.log('[EventCollector] Page loaded, re-injecting script with delay...');
+
+        setTimeout(() => {
+          if (!this.isCollecting) return;
+
+          // Double-check the page is still accessible
+          browserView.webContents.executeJavaScript(`
+            document.readyState === 'complete' && document.body !== null
+          `).then(isReady => {
+            if (isReady && this.isCollecting) {
+              browserView.webContents.executeJavaScript(INJECTION_SCRIPT).catch(err => {
+                console.error('[EventCollector] Failed to re-inject after navigation:', err);
+              });
+            }
+          }).catch(err => {
+            console.warn('[EventCollector] Page not ready for injection:', err);
           });
-        }
+        }, 200); // 200ms delay for better reliability
       };
 
       // Listen once for page load completion
@@ -269,17 +298,32 @@ class EventCollector {
 
     this.isCollecting = false;
 
-    // Remove navigation listeners
-    if (this.currentView && this.navigationListener) {
-      this.currentView.webContents.removeListener('did-navigate', this.navigationListener);
-    }
-
-    // Remove injection from page
+    // Flush any pending debounced input events before stopping
     if (this.currentView && this.currentView.webContents) {
       this.currentView.webContents.executeJavaScript(`
-        window.__macroEventCollectorInstalled = false;
-      `).catch(() => {});
+        if (typeof window.__flushPendingInput === 'function') {
+          window.__flushPendingInput();
+        }
+      `).catch(err => {
+        console.warn('[EventCollector] Failed to flush pending input:', err);
+      });
     }
+
+    // Small delay to ensure flush completes
+    setTimeout(() => {
+      // Remove navigation listeners
+      if (this.currentView && this.navigationListener) {
+        this.currentView.webContents.removeListener('did-navigate', this.navigationListener);
+      }
+
+      // Remove injection from page
+      if (this.currentView && this.currentView.webContents) {
+        this.currentView.webContents.executeJavaScript(`
+          window.__macroEventCollectorInstalled = false;
+          delete window.__flushPendingInput;
+        `).catch(() => {});
+      }
+    }, 100);
 
     this.currentView = null;
     this.navigationListener = null;

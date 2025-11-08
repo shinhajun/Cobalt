@@ -320,13 +320,25 @@ export class Element {
           modifiers: modifierValue,
         });
 
-        debug(`[Element] Clicked at (${clampedX.toFixed(1)}, ${clampedY.toFixed(1)})`);
+        // FIX 4: Add wait after click to ensure browser processes the event
+        // This is critical for JavaScript-triggered navigation and event handlers
+        await page.waitForTimeout(100);
+
+        debug(`[Element] CDP click completed at (${clampedX.toFixed(1)}, ${clampedY.toFixed(1)})`);
       } catch (error) {
         // Fall back to JavaScript click
         debug('[Element] CDP click failed, falling back to JavaScript click');
         await this.clickViaJavaScript();
+
+        // Same wait after JavaScript click
+        await page.waitForTimeout(100);
       }
     } catch (error: any) {
+      // Check if error is due to stale node ID
+      const errorMsg = String(error?.message || '');
+      if (errorMsg.includes('No node with given id found') || errorMsg.includes('Could not find node')) {
+        throw new Error(`STALE_NODE_ID: DOM refresh required - ${error.message}`);
+      }
       throw new Error(`Failed to click element: ${error.message}`);
     }
   }
@@ -343,7 +355,7 @@ export class Element {
         backendNodeId: this.backendNodeId,
       });
       if (!resolveResult || !resolveResult.object || !resolveResult.object.objectId) {
-        throw new Error('Failed to resolve element');
+        throw new Error('STALE_NODE_ID: Failed to resolve element');
       }
       const objectId = resolveResult.object.objectId;
 
@@ -353,6 +365,10 @@ export class Element {
       });
       await page.waitForTimeout(50);
     } catch (error: any) {
+      const errorMsg = String(error?.message || '');
+      if (errorMsg.includes('No node with given id found') || errorMsg.includes('Could not find node')) {
+        throw new Error(`STALE_NODE_ID: DOM refresh required - ${error.message}`);
+      }
       throw new Error(`JavaScript click failed: ${error.message}`);
     }
   }
@@ -389,7 +405,7 @@ export class Element {
         backendNodeId: this.backendNodeId,
       });
       if (!resolveResult || !resolveResult.object || !resolveResult.object.objectId) {
-        throw new Error('Failed to get object ID for element');
+        throw new Error('STALE_NODE_ID: Failed to get object ID for element');
       }
       const objectId = resolveResult.object.objectId;
 
@@ -485,6 +501,10 @@ export class Element {
         await page.waitForTimeout(18);
       }
     } catch (error: any) {
+      const errorMsg = String(error?.message || '');
+      if (errorMsg.includes('STALE_NODE_ID') || errorMsg.includes('No node with given id found') || errorMsg.includes('Could not find node')) {
+        throw new Error(`STALE_NODE_ID: DOM refresh required - ${error.message}`);
+      }
       throw new Error(`Failed to fill element: ${error.message}`);
     }
   }

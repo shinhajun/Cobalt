@@ -100,10 +100,44 @@ class ActionAnalyzer {
   isDuplicate(prev, current) {
     if (!prev || !current) return false;
 
-    // Same type and target within short time
-    if (prev.type === current.type &&
-        prev.target?.selector === current.target?.selector &&
-        (current.timestamp - prev.timestamp) < 100) {
+    // Different types are never duplicates
+    if (prev.type !== current.type) return false;
+
+    // Different targets are never duplicates
+    if (prev.target?.selector !== current.target?.selector) return false;
+
+    const timeDiff = current.timestamp - prev.timestamp;
+
+    // For click events, check coordinates and timing
+    if (prev.type === EventType.CLICK) {
+      // Less than 100ms with same/similar coordinates = accidental duplicate
+      if (timeDiff < 100) {
+        const prevCoords = prev.data?.coordinates || prev.coordinates;
+        const currCoords = current.data?.coordinates || current.coordinates;
+
+        if (prevCoords && currCoords) {
+          const dx = Math.abs(prevCoords.x - currCoords.x);
+          const dy = Math.abs(prevCoords.y - currCoords.y);
+
+          // Within 5 pixels = duplicate
+          if (dx <= 5 && dy <= 5) {
+            return true;
+          }
+        } else {
+          // No coordinate info, assume duplicate if same target
+          return true;
+        }
+      }
+
+      // 100-500ms with similar coordinates = potential double-click (NOT a duplicate)
+      // We want to preserve double-clicks as they might be intentional
+      if (timeDiff >= 100 && timeDiff <= 500) {
+        return false; // Keep both clicks
+      }
+    }
+
+    // For other event types, use original simple logic
+    if (timeDiff < 100) {
       return true;
     }
 

@@ -1,5 +1,8 @@
 const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron');
 const path = require('path');
+const { EventEmitter } = require('events');
+// Raise global listener cap to avoid noisy warnings while we ensure no duplicates
+EventEmitter.defaultMaxListeners = 100;
 
 // Note: API keys are loaded from Settings tab (localStorage)
 console.log('[Electron] API keys will be loaded from Settings tab');
@@ -42,6 +45,71 @@ let eventCollector = null;
 // Map of window ID to editing macro (allows multiple flowchart windows)
 const currentEditingMacros = new Map();
 
+// Note: We do not reserve extra overlay space for the omnibox dropdown; it overlays visually.
+
+// Omnibox overlay (a small BrowserView rendered above the main BrowserView)
+let omniboxView = null;
+let omniboxVisible = false;
+let omniboxCloseHandler = null; // detach hook for outside clicks on content
+let omniboxCloseAttachedWC = null; // which webContents the handler is attached to
+
+function ensureOmniboxView() {
+  if (omniboxView) return omniboxView;
+  omniboxView = new BrowserView({
+    webPreferences: {
+      preload: path.join(__dirname, 'electron-preload.js'),
+      nodeIntegration: true,
+      contextIsolation: false,
+    }
+  });
+  try {
+    omniboxView.webContents.loadFile(path.join(__dirname, 'omnibox-overlay.html'));
+  } catch (e) {
+    console.warn('[Electron] Failed to load omnibox overlay:', e.message || e);
+  }
+  return omniboxView;
+}
+
+function bringOmniboxToFrontIfVisible() {
+  if (omniboxVisible && omniboxView && !mainWindow.isDestroyed()) {
+    try {
+      // Re-add order to ensure overlay is on top
+      mainWindow.removeBrowserView(omniboxView);
+      mainWindow.addBrowserView(omniboxView);
+    } catch (_) {}
+  }
+}
+
+function attachOutsideClickCloser() {
+  try {
+    if (!browserView || !browserView.webContents) return;
+    const wc = browserView.webContents;
+    // If already attached to this webContents, skip
+    if (omniboxCloseHandler && omniboxCloseAttachedWC === wc) return;
+    // Reattach to current webContents
+    detachOutsideClickCloser();
+    omniboxCloseHandler = (_event, input) => {
+      if (!omniboxVisible) return;
+      // Close on mouse interactions in the content area
+      if (input && (input.type === 'mouseDown' || input.type === 'mouseUp' || input.type === 'mouseWheel')) {
+        try { mainWindow.webContents.send('omnibox-close-request'); } catch {}
+      }
+    };
+    wc.on('before-input-event', omniboxCloseHandler);
+    omniboxCloseAttachedWC = wc;
+  } catch {}
+}
+
+function detachOutsideClickCloser() {
+  try {
+    if (omniboxCloseHandler && omniboxCloseAttachedWC) {
+      omniboxCloseAttachedWC.removeListener('before-input-event', omniboxCloseHandler);
+    }
+  } catch {}
+  omniboxCloseHandler = null;
+  omniboxCloseAttachedWC = null;
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -66,6 +134,8 @@ function createWindow() {
 
   // 메뉴바 완전히 제거
   mainWindow.setMenuBarVisibility(false);
+  // Avoid MaxListeners warnings when multiple modules add listeners
+  try { mainWindow.setMaxListeners(100); } catch (_) {}
 
   // Create initial tab (tabId = 0)
   const initialView = createBrowserViewForTab(0);
@@ -717,8 +787,10 @@ function createWindow() {
 
   // Window resize 시 BrowserView bounds 업데이트
   mainWindow.on('resize', updateBrowserViewBounds);
+  // Keep omnibox overlay above the content
+  mainWindow.on('resize', bringOmniboxToFrontIfVisible);
 
-  mainWindow.on('closed', () => {
+  mainWindow.once('closed', () => {
     // BrowserView는 윈도우가 닫힐 때 자동으로 파괴되므로 수동 제거 불필요
     browserView = null;
     mainWindow = null;
@@ -882,6 +954,8 @@ function switchToTab(tabId) {
   currentTabId = tabId;
   mainWindow.addBrowserView(browserView);
   updateBrowserViewBounds();
+  bringOmniboxToFrontIfVisible();
+  if (omniboxVisible) attachOutsideClickCloser();
 
   // Send URL update to toolbar
   const url = browserView.webContents.getURL();
@@ -899,7 +973,8 @@ function updateBrowserViewBounds() {
   const browserWidth = width - chatPanelWidth; // 75% or 100% for browser
   const toolbarHeight = 40; // Toolbar height
   const tabBarHeight = 32; // Tab bar height (reduced)
-  const topOffset = toolbarHeight + tabBarHeight; // Total offset (72px)
+  // Keep BrowserView fixed under the tab bar + toolbar (no extra overlay space)
+  const topOffset = toolbarHeight + tabBarHeight;
 
   // BrowserView는 왼쪽에 배치 (toolbar + tab bar 아래)
   browserView.setBounds({
@@ -908,6 +983,7 @@ function updateBrowserViewBounds() {
     width: browserWidth,
     height: height - topOffset
   });
+  // Do not resize omnibox here; toolbar drives its position via IPC
 }
 
 // Macro Execution Overlay Functions
@@ -958,7 +1034,7 @@ async function showMacroExecutionOverlay(macroName, progress, description, scree
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                padding: 40px;
+                padding: 0;
               }
               @keyframes gradient {
                 0% { background-position: 0% 50%; }
@@ -970,10 +1046,12 @@ async function showMacroExecutionOverlay(macroName, progress, description, scree
                 border-radius: 12px;
                 box-shadow: 0 30px 90px rgba(0,0,0,0.4);
                 overflow: hidden;
-                max-width: 92%;
-                max-height: 92%;
+                width: 85vw;
+                height: 85vh;
                 display: flex;
                 flex-direction: column;
+                align-items: center;
+                justify-content: center;
               }
               #__macro_header {
                 background: rgba(246, 246, 246, 0.98);
@@ -982,6 +1060,8 @@ async function showMacroExecutionOverlay(macroName, progress, description, scree
                 align-items: center;
                 gap: 12px;
                 border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                width: 100%;
+                flex-shrink: 0;
               }
               #__macro_dots {
                 display: flex;
@@ -1011,14 +1091,20 @@ async function showMacroExecutionOverlay(macroName, progress, description, scree
               #__macro_img {
                 display: block;
                 width: 100%;
-                max-height: 70vh;
+                height: 100%;
+                max-width: 100%;
+                max-height: 100%;
                 object-fit: contain;
+                object-position: center;
                 background: white;
+                flex: 1;
               }
               #__macro_footer {
                 background: rgba(246, 246, 246, 0.98);
                 padding: 16px;
                 border-top: 1px solid rgba(0, 0, 0, 0.1);
+                width: 100%;
+                flex-shrink: 0;
               }
               #__macro_progress_container {
                 margin-bottom: 8px;
@@ -1535,7 +1621,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
-                                padding: 40px;
+                                padding: 0;
                               }
                               @keyframes gradient {
                                 0% { background-position: 0% 50%; }
@@ -1547,10 +1633,12 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                                 border-radius: 12px;
                                 box-shadow: 0 30px 90px rgba(0,0,0,0.4);
                                 overflow: hidden;
-                                max-width: 92%;
-                                max-height: 92%;
+                                max-width: 85vw;
+                                max-height: 85vh;
                                 display: flex;
                                 flex-direction: column;
+                                align-items: center;
+                                justify-content: center;
                               }
                               #__ai_header {
                                 background: rgba(246, 246, 246, 0.98);
@@ -1559,6 +1647,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                                 align-items: center;
                                 gap: 8px;
                                 border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                                width: 100%;
+                                flex-shrink: 0;
                               }
                               #__ai_dots {
                                 display: flex;
@@ -1581,9 +1671,12 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                               }
                               #__ai_img {
                                 display: block;
-                                width: 100%;
-                                max-height: 80vh;
+                                max-width: 85vw;
+                                max-height: calc(85vh - 50px);
+                                width: auto;
+                                height: auto;
                                 object-fit: contain;
+                                object-position: center;
                                 background: white;
                               }
                             </style>
@@ -2156,6 +2249,92 @@ ipcMain.handle('toggle-chat', async (_event, { visible }) => {
   return { success: true };
 });
 
+// IPC: Open omnibox overlay at given bounds
+ipcMain.handle('omnibox-open', async (_event, { x, y, width, height, items }) => {
+  try {
+    const view = ensureOmniboxView();
+    // Add overlay last to be above content
+    mainWindow.addBrowserView(view);
+    view.setBounds({ x: Math.max(0, x|0), y: Math.max(0, y|0), width: Math.max(50, width|0), height: Math.max(40, height|0) });
+    omniboxVisible = true;
+    // Forward items to overlay
+    try { view.webContents.send('omnibox-set-items', Array.isArray(items) ? items : []); } catch {}
+    attachOutsideClickCloser();
+    return { success: true };
+  } catch (e) {
+    console.error('[Electron] omnibox-open failed:', e);
+    return { success: false, error: String(e) };
+  }
+});
+
+// IPC: Update omnibox overlay bounds
+ipcMain.handle('omnibox-update', async (_event, { x, y, width, height }) => {
+  try {
+    if (!omniboxView || !omniboxVisible) return { success: false };
+    omniboxView.setBounds({ x: Math.max(0, x|0), y: Math.max(0, y|0), width: Math.max(50, width|0), height: Math.max(40, height|0) });
+    bringOmniboxToFrontIfVisible();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+// IPC: Close omnibox overlay
+ipcMain.handle('omnibox-close', async () => {
+  try {
+    if (omniboxView) {
+      try { mainWindow.removeBrowserView(omniboxView); } catch (_) {}
+    }
+    omniboxVisible = false;
+    detachOutsideClickCloser();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+
+// IPC: Update items/query in the overlay
+ipcMain.handle('omnibox-set-items', async (_event, { items, query }) => {
+  try {
+    if (!omniboxView) return { success: false };
+    omniboxView.webContents.send('omnibox-set-items', Array.isArray(items) ? items : [], { query: query || '' });
+    bringOmniboxToFrontIfVisible();
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+// IPC: Forward key actions to the overlay (up/down/enter)
+ipcMain.handle('omnibox-key', async (_event, action) => {
+  try {
+    if (!omniboxView) return { success: false };
+    omniboxView.webContents.send('omnibox-key', action);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: String(e) };
+  }
+});
+
+// Overlay -> Main: selection changed or choose item; forward to toolbar
+ipcMain.on('omnibox-selection', (_event, item) => {
+  try { mainWindow.webContents.send('omnibox-selection', item || null); } catch (_) {}
+});
+ipcMain.on('omnibox-choose', (_event, item) => {
+  try { mainWindow.webContents.send('omnibox-choose', item || null); } catch (_) {}
+});
+ipcMain.on('omnibox-remove-history', (_event, url) => {
+  try { mainWindow.webContents.send('omnibox-remove-history', url || ''); } catch (_) {}
+});
+// Overlay -> Main: request toolbar to close omnibox (e.g., background click in overlay)
+ipcMain.on('omnibox-close-request', () => {
+  try { mainWindow.webContents.send('omnibox-close-request'); } catch (_) {}
+});
+
+// IPC: Reserve/release overlay height under the toolbar (e.g., omnibox dropdown)
+// No-op overlay IPC removed to keep BrowserView position stable
+
 // IPC: Switch tab
 ipcMain.handle('switch-tab', async (_event, { tabId, url, restore }) => {
   console.log('[Electron] Switching to tab:', tabId, 'URL:', url);
@@ -2465,12 +2644,13 @@ ipcMain.handle('macro-show-flowchart', async (event, macro) => {
         contextIsolation: false
       }
     });
+    try { flowchartWindow.setMaxListeners(100); } catch (_) {}
 
     // Store macro for this window
     currentEditingMacros.set(flowchartWindow.id, macro);
 
     // Clean up when window closes
-    flowchartWindow.on('closed', () => {
+    flowchartWindow.once('closed', () => {
       currentEditingMacros.delete(flowchartWindow.id);
     });
 
@@ -2510,6 +2690,10 @@ ipcMain.handle('save-macro', async (event, macroData) => {
     await storage.save(macroData);
 
     console.log('[Electron] Macro saved successfully:', macroData.id);
+
+    // Notify renderer that macro was saved
+    mainWindow.webContents.send('macro-saved', { macroId: macroData.id });
+
     return { success: true, id: macroData.id };
   } catch (error) {
     console.error('[Electron] Failed to save macro:', error.message);
@@ -2784,3 +2968,9 @@ ipcMain.on('macro-resume', (event) => {
   console.log('[Electron] Resume macro - not yet implemented');
   // TODO: Implement resume functionality
 });
+// Increase listener cap for all BrowserWindows to avoid noisy warnings
+try {
+  app.on('browser-window-created', (_e, win) => {
+    try { win.setMaxListeners(100); } catch (_) {}
+  });
+} catch (_) {}

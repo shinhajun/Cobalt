@@ -993,16 +993,6 @@ function updateScreenshotDisplay(screenshotDataURL, tabId) {
     // Create new screenshot message
     lastScreenshotMessageDiv = document.createElement('div');
     lastScreenshotMessageDiv.className = 'message screenshot';
-    lastScreenshotMessageDiv.style.cssText = `
-      padding: 12px;
-      margin-bottom: 12px;
-      background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
-      border-left: 4px solid #667eea;
-      border-radius: 8px;
-      max-width: 100%;
-      cursor: pointer;
-      transition: background 0.2s;
-    `;
 
     // Click handler: Switch to AI working tab
     lastScreenshotMessageDiv.addEventListener('click', () => {
@@ -1018,14 +1008,6 @@ function updateScreenshotDisplay(screenshotDataURL, tabId) {
           });
         }
       }
-    });
-
-    // Hover effects
-    lastScreenshotMessageDiv.addEventListener('mouseenter', () => {
-      lastScreenshotMessageDiv.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%)';
-    });
-    lastScreenshotMessageDiv.addEventListener('mouseleave', () => {
-      lastScreenshotMessageDiv.style.background = 'linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%)';
     });
 
     lastScreenshotMessageDiv.innerHTML = `

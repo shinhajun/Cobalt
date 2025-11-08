@@ -86,6 +86,15 @@ window.addEventListener('auxclick', (e) => {
   } catch {}
 }, true);
 
+// When user interacts with the page (click or scroll), request closing omnibox overlay
+// Capture early to ensure we hear it even if page stops propagation
+window.addEventListener('mousedown', () => {
+  try { ipcRenderer.send('omnibox-close-request'); } catch (_) {}
+}, true);
+window.addEventListener('wheel', () => {
+  try { ipcRenderer.send('omnibox-close-request'); } catch (_) {}
+}, true);
+
 window.addEventListener('click', (e) => {
   try {
     const isAccel = navigator.platform.includes('Mac') ? e.metaKey : e.ctrlKey;

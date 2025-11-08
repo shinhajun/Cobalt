@@ -22,6 +22,9 @@ import EndNode from './nodes/EndNode';
 
 import { getLayoutedElements, getOptimalDirection } from './layout/AutoLayout';
 
+// Import validation utilities
+const { validateMacroName } = window.require('../../utils/validation');
+
 const { ipcRenderer } = window.require('electron');
 
 // Define custom node types
@@ -42,6 +45,21 @@ const MacroFlowViewer = ({ macroData }) => {
   const [isOptimizing, setIsOptimizing] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingNode, setEditingNode] = useState(null);
+
+  // Save modal states
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [macroName, setMacroName] = useState('');
+  const [nameError, setNameError] = useState('');
+
+  // Edit modal states
+  const [editInputMode, setEditInputMode] = useState('static');
+  const [editStaticValue, setEditStaticValue] = useState('');
+  const [editPromptQuestion, setEditPromptQuestion] = useState('');
+  const [editPromptDefault, setEditPromptDefault] = useState('');
+  const [editPromptPlaceholder, setEditPromptPlaceholder] = useState('');
+  const [editAiPrompt, setEditAiPrompt] = useState('');
+  const [editAiModel, setEditAiModel] = useState('gpt-4o-mini');
+  const [editAiTemperature, setEditAiTemperature] = useState(0.7);
 
   // Convert macro steps to React Flow nodes and edges
   const initializeFlow = useCallback(() => {
@@ -155,7 +173,26 @@ const MacroFlowViewer = ({ macroData }) => {
 
   // Handle node edit
   const handleEditNode = useCallback((nodeData) => {
+    console.log('[MacroFlowViewer] Editing node:', nodeData);
     setEditingNode(nodeData);
+
+    // Initialize edit form with node data
+    const mode = nodeData.inputMode || nodeData.mode || 'static';
+    setEditInputMode(mode);
+    setEditStaticValue(nodeData.staticValue || nodeData.value || '');
+
+    // Prompt config
+    const promptCfg = nodeData.promptConfig || {};
+    setEditPromptQuestion(promptCfg.question || '');
+    setEditPromptDefault(promptCfg.defaultValue || nodeData.staticValue || '');
+    setEditPromptPlaceholder(promptCfg.placeholder || '');
+
+    // AI config
+    const aiCfg = nodeData.aiConfig || {};
+    setEditAiPrompt(aiCfg.prompt || '');
+    setEditAiModel(aiCfg.model || 'gpt-4o-mini');
+    setEditAiTemperature(aiCfg.temperature || 0.7);
+
     setShowEditModal(true);
   }, []);
 
@@ -253,27 +290,123 @@ const MacroFlowViewer = ({ macroData }) => {
     }
   };
 
+  // Handle name input change
+  // Note: validateMacroName is imported from shared validation utilities
+  const handleNameChange = (e) => {
+    const newName = e.target.value;
+    setMacroName(newName);
+
+    // Real-time validation - only show error if user has typed something
+    if (newName.trim().length > 0) {
+      const error = validateMacroName(newName);
+      setNameError(error || '');
+    } else {
+      setNameError('');
+    }
+  };
+
+  // Confirm save with validated name
+  const confirmSave = async () => {
+    const error = validateMacroName(macroName);
+    if (error) {
+      setNameError(error);
+      return;
+    }
+
+    // Update macro name and save
+    const updatedMacro = {
+      ...macro,
+      name: macroName.trim(),
+      updatedAt: Date.now()
+    };
+
+    try {
+      const result = await ipcRenderer.invoke('save-macro', updatedMacro);
+
+      if (result.success) {
+        setMacro(updatedMacro);
+        setShowSaveModal(false);
+        alert('✅ Macro saved successfully!');
+      } else {
+        alert('❌ Failed to save macro: ' + result.error);
+      }
+    } catch (error) {
+      console.error('[MacroFlowViewer] Save failed:', error);
+      alert('❌ Failed to save macro: ' + error.message);
+    }
+  };
+
+  // Confirm edit input step
+  const confirmEditInput = () => {
+    if (!editingNode) return;
+
+    console.log('[MacroFlowViewer] Saving edited input step:', editingNode.stepNumber);
+
+    // Find the step in macro
+    const stepIndex = macro.steps.findIndex(s => s.stepNumber === editingNode.stepNumber);
+    if (stepIndex === -1) {
+      alert('❌ Step not found');
+      return;
+    }
+
+    // Update step with new configuration
+    const updatedSteps = [...macro.steps];
+    updatedSteps[stepIndex] = {
+      ...updatedSteps[stepIndex],
+      inputMode: editInputMode,
+      mode: editInputMode, // For compatibility
+      staticValue: editStaticValue,
+      value: editStaticValue, // For compatibility
+      promptConfig: {
+        enabled: editInputMode === 'prompt',
+        question: editPromptQuestion,
+        defaultValue: editPromptDefault,
+        placeholder: editPromptPlaceholder
+      },
+      aiConfig: {
+        enabled: editInputMode === 'ai',
+        prompt: editAiPrompt,
+        model: editAiModel,
+        temperature: editAiTemperature,
+        examples: []
+      },
+      editable: true
+    };
+
+    // Update macro
+    const updatedMacro = {
+      ...macro,
+      steps: updatedSteps,
+      updatedAt: Date.now()
+    };
+
+    setMacro(updatedMacro);
+    setShowEditModal(false);
+
+    console.log('[MacroFlowViewer] Input step updated successfully');
+  };
+
   // Save macro
   const handleSave = async () => {
     console.log('[MacroFlowViewer] Saving macro');
 
     try {
-      // Prompt for name if needed
+      // Check if name needs to be entered/changed
       if (macro.name === 'Untitled Macro' || macro.name === 'New Macro') {
-        const name = prompt('Enter a name for this macro:', macro.name);
-        if (name) {
-          macro.name = name;
-        }
-      }
-
-      macro.updatedAt = Date.now();
-
-      const result = await ipcRenderer.invoke('save-macro', macro);
-
-      if (result.success) {
-        alert('✅ Macro saved successfully!');
+        // Show modal for name input - start with empty string for better UX
+        setMacroName('');
+        setNameError('');
+        setShowSaveModal(true);
       } else {
-        alert('❌ Failed to save macro: ' + result.error);
+        // Direct save without name prompt
+        macro.updatedAt = Date.now();
+        const result = await ipcRenderer.invoke('save-macro', macro);
+
+        if (result.success) {
+          alert('✅ Macro saved successfully!');
+        } else {
+          alert('❌ Failed to save macro: ' + result.error);
+        }
       }
     } catch (error) {
       console.error('[MacroFlowViewer] Save failed:', error);
@@ -416,13 +549,232 @@ const MacroFlowViewer = ({ macroData }) => {
         </ReactFlow>
       </div>
 
-      {/* Edit Modal - will be implemented separately */}
+      {/* Save Macro Modal */}
+      {showSaveModal && (
+        <div className="modal-overlay" onClick={() => setShowSaveModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h3>Save Macro</h3>
+            <p className="modal-description">Enter a name for your macro</p>
+
+            <div className="form-group">
+              <label htmlFor="macro-name">Macro Name:</label>
+              <input
+                id="macro-name"
+                type="text"
+                value={macroName}
+                onChange={handleNameChange}
+                onKeyDown={(e) => {
+                  e.stopPropagation(); // Prevent React Flow from capturing keyboard events
+                  if (e.key === 'Enter' && !nameError) {
+                    confirmSave();
+                  } else if (e.key === 'Escape') {
+                    setShowSaveModal(false);
+                  }
+                }}
+                onKeyPress={(e) => e.stopPropagation()}
+                onKeyUp={(e) => e.stopPropagation()}
+                placeholder="Enter macro name (3-100 characters)"
+                autoFocus
+                className={nameError ? 'input-error' : ''}
+              />
+              {nameError && <div className="error-message">❌ {nameError}</div>}
+            </div>
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={confirmSave}
+                disabled={!!nameError || !macroName.trim()}
+              >
+                💾 Save
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowSaveModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Input Modal */}
       {showEditModal && editingNode && (
-        <div className="edit-modal">
-          <div className="modal-content">
+        <div className="modal-overlay" onClick={() => setShowEditModal(false)}>
+          <div className="modal-content edit-input-modal" onClick={(e) => e.stopPropagation()}>
             <h3>Edit Input Step</h3>
-            <p>Modal content here...</p>
-            <button onClick={() => setShowEditModal(false)}>Close</button>
+            <p className="modal-description">
+              Configure how this input field will be filled: {editingNode.target?.description || 'Input Field'}
+            </p>
+
+            {/* Input Mode Selection */}
+            <div className="form-group">
+              <label>Input Mode:</label>
+              <div className="radio-group">
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="inputMode"
+                    value="static"
+                    checked={editInputMode === 'static'}
+                    onChange={(e) => setEditInputMode(e.target.value)}
+                  />
+                  <span>Static Value</span>
+                  <small>Use a fixed value every time</small>
+                </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="inputMode"
+                    value="prompt"
+                    checked={editInputMode === 'prompt'}
+                    onChange={(e) => setEditInputMode(e.target.value)}
+                  />
+                  <span>Prompt User</span>
+                  <small>Ask user for input when running</small>
+                </label>
+                <label className="radio-label">
+                  <input
+                    type="radio"
+                    name="inputMode"
+                    value="ai"
+                    checked={editInputMode === 'ai'}
+                    onChange={(e) => setEditInputMode(e.target.value)}
+                  />
+                  <span>AI Generated</span>
+                  <small>Generate value using AI</small>
+                </label>
+              </div>
+            </div>
+
+            {/* Static Mode Configuration */}
+            {editInputMode === 'static' && (
+              <div className="form-group">
+                <label htmlFor="edit-static-value">Value:</label>
+                <input
+                  id="edit-static-value"
+                  type="text"
+                  value={editStaticValue}
+                  onChange={(e) => setEditStaticValue(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  onKeyPress={(e) => e.stopPropagation()}
+                  onKeyUp={(e) => e.stopPropagation()}
+                  placeholder="Enter the value to input"
+                  className="input-field"
+                />
+              </div>
+            )}
+
+            {/* Prompt Mode Configuration */}
+            {editInputMode === 'prompt' && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-prompt-question">Question to ask user:</label>
+                  <input
+                    id="edit-prompt-question"
+                    type="text"
+                    value={editPromptQuestion}
+                    onChange={(e) => setEditPromptQuestion(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    placeholder="e.g., What is your email address?"
+                    className="input-field"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="edit-prompt-default">Default value:</label>
+                  <input
+                    id="edit-prompt-default"
+                    type="text"
+                    value={editPromptDefault}
+                    onChange={(e) => setEditPromptDefault(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    placeholder="Default value (optional)"
+                    className="input-field"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="edit-prompt-placeholder">Placeholder:</label>
+                  <input
+                    id="edit-prompt-placeholder"
+                    type="text"
+                    value={editPromptPlaceholder}
+                    onChange={(e) => setEditPromptPlaceholder(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    placeholder="Placeholder text (optional)"
+                    className="input-field"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* AI Mode Configuration */}
+            {editInputMode === 'ai' && (
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-ai-prompt">AI Prompt:</label>
+                  <textarea
+                    id="edit-ai-prompt"
+                    value={editAiPrompt}
+                    onChange={(e) => setEditAiPrompt(e.target.value)}
+                    onKeyDown={(e) => e.stopPropagation()}
+                    onKeyPress={(e) => e.stopPropagation()}
+                    onKeyUp={(e) => e.stopPropagation()}
+                    placeholder="e.g., Generate a random email address for testing"
+                    className="textarea-field"
+                    rows={3}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="edit-ai-model">Model:</label>
+                  <select
+                    id="edit-ai-model"
+                    value={editAiModel}
+                    onChange={(e) => setEditAiModel(e.target.value)}
+                    className="select-field"
+                  >
+                    <option value="gpt-4o-mini">GPT-4o Mini</option>
+                    <option value="gpt-4o">GPT-4o</option>
+                    <option value="gpt-5-mini">GPT-5 Mini</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="edit-ai-temperature">Temperature: {editAiTemperature}</label>
+                  <input
+                    id="edit-ai-temperature"
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={editAiTemperature}
+                    onChange={(e) => setEditAiTemperature(parseFloat(e.target.value))}
+                    className="range-field"
+                  />
+                  <small>Lower = more deterministic, Higher = more creative</small>
+                </div>
+              </>
+            )}
+
+            <div className="modal-actions">
+              <button
+                className="btn btn-primary"
+                onClick={confirmEditInput}
+              >
+                ✅ Save Changes
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowEditModal(false)}
+              >
+                Cancel
+              </button>
+            </div>
           </div>
         </div>
       )}
