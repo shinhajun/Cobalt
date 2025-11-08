@@ -986,20 +986,16 @@ No explanation, only JSON.`;
 
         Available Browser/Tool Actions (strictly follow this JSON format for the 'action' field):
 
-        Browser Actions (NEW: Index-based clicking!):
+        === BROWSER ACTIONS (DOM-Based - Browser-Use Style) ===
         1.  {"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL_TO_NAVIGATE_TO>"}
-        2.  {"type": "BROWSER_ACTION", "command": "clickElement", "index": <ELEMENT_INDEX>} - **PREFERRED** Click by index from DOM Interactive Elements (most reliable!)
+        2.  {"type": "BROWSER_ACTION", "command": "clickElement", "index": <ELEMENT_INDEX>} - Click element by index from "DOM Interactive Elements"
         3.  {"type": "BROWSER_ACTION", "command": "typeElement", "index": <ELEMENT_INDEX>, "text": "<TEXT>"} - Type into element by index
-        4.  {"type": "BROWSER_ACTION", "command": "click", "selector": "<CSS_SELECTOR>"} - Fallback if no DOM elements available
-        5.  {"type": "BROWSER_ACTION", "command": "clickCoordinates", "x": <X_PIXEL>, "y": <Y_PIXEL>} - Click at specific coordinates
-        6.  {"type": "BROWSER_ACTION", "command": "type", "selector": "<CSS_SELECTOR>", "text": "<TEXT_TO_TYPE>"}
-        7.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"}
-        8.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"}
-        9.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"}
+        4.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} - Get full page text content
+        5.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} - Press keyboard key (e.g., "Enter", "Escape")
 
-        Scroll Actions (NEW):
-        10. {"type": "BROWSER_ACTION", "command": "scrollDown", "pixels": <OPTIONAL_PIXELS>} - Scroll down (default 500px)
-        11. {"type": "BROWSER_ACTION", "command": "scrollUp", "pixels": <OPTIONAL_PIXELS>} - Scroll up (default 500px)
+        Scroll Actions (Page-Based like Browser-Use):
+        10. {"type": "BROWSER_ACTION", "command": "scrollDown", "pages": <PAGES>} - Scroll down by viewport pages (range: 0.5-10.0, default: 1.0)
+        11. {"type": "BROWSER_ACTION", "command": "scrollUp", "pages": <PAGES>} - Scroll up by viewport pages (range: 0.5-10.0, default: 1.0)
         12. {"type": "BROWSER_ACTION", "command": "scrollToTop"} - Scroll to top of page
         13. {"type": "BROWSER_ACTION", "command": "scrollToBottom"} - Scroll to bottom of page
         14. {"type": "BROWSER_ACTION", "command": "scrollToElement", "index": <ELEMENT_INDEX>} - Scroll to bring element into view
@@ -1048,27 +1044,23 @@ No explanation, only JSON.`;
         - Use extract tools (extractNumbers, extractEmails, extractURLs) to parse text efficiently
         - Format final reports using formatAsTable or formatAsJSON for better readability
 
-        Browser Actions - NEW DOM-BASED SYSTEM (Browser-Use Style):
-        - **PREFERRED METHOD: Use clickElement with index numbers from "DOM Interactive Elements" section**
-          * Example: {"type": "BROWSER_ACTION", "command": "clickElement", "index": 5}
-          * This is THE MOST RELIABLE method - it uses exact element references
-          * Each element has a unique index number [0], [1], [2], etc.
-          * The DOM list shows you: element type, text content, attributes, and coordinates
+        === Browser Interaction Strategy (Browser-Use Style) ===
 
-        - **For typing: Use typeElement with index numbers**
-          * Example: {"type": "BROWSER_ACTION", "command": "typeElement", "index": 3, "text": "search query"}
-          * More reliable than CSS selectors
+        **DOM Index-Based Interaction:**
+        - ALWAYS check "DOM Interactive Elements" section in your observation
+        - Use clickElement/typeElement with index numbers [0], [1], [2], etc.
+        - Examples:
+          * {"type": "BROWSER_ACTION", "command": "clickElement", "index": 5}
+          * {"type": "BROWSER_ACTION", "command": "typeElement", "index": 3, "text": "search query"}
+        - Each index corresponds to an interactive element shown in DOM list
+        - DOM list shows: element type, text, attributes, coordinates
+        - The system automatically handles XPath → CSS → coordinate fallback internally
 
-        - **Fallback methods (use only if DOM Interactive Elements is empty):**
-          * click with CSS selector - less reliable, may fail
-          * clickCoordinates - use when you have x,y coordinates
-
-        - **Action Strategy:**
-          1. FIRST: Check if "DOM Interactive Elements" section is available
-          2. If YES: Use clickElement/typeElement with index numbers
-          3. If NO: Use click with CSS selector or clickCoordinates
-
-        - **Scrolling:**
+        - **Scrolling (Page-Based like Browser-Use):**
+          * scrollDown/scrollUp uses PAGES (viewport heights), not pixels
+          * 1.0 pages = scroll by one full screen height (adaptive to any screen size)
+          * Examples: {"command": "scrollDown", "pages": 1.0} or {"command": "scrollDown", "pages": 2.5}
+          * Range: 0.5 to 10.0 pages (clamped automatically)
           * Use scrollDown/scrollUp to explore long pages
           * Use scrollToElement to bring an element into view before clicking
           * Use scrollToBottom to load more content on infinite scroll pages
@@ -1208,77 +1200,6 @@ No explanation, only JSON.`;
                   if(!typeSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: index or text missing for typeElement."; }
                 break;
-              case "click":
-                if (action.selector) {
-                  const urlBefore = browserController.getCurrentUrl();
-                  const clickSuccess = await browserController.click(action.selector);
-
-                  if (clickSuccess) {
-                    actionObservation = `Clicked ${action.selector}.`;
-
-                    // Wait for potential page change and take screenshot to verify
-                    await browserController.waitForPageLoad(3000);
-                    await browserController.streamScreenshot('after-click');
-
-                    const urlAfter = browserController.getCurrentUrl();
-                    if (urlBefore !== urlAfter) {
-                      actionObservation += ` Page changed: ${urlBefore} → ${urlAfter}`;
-                      this.emitLog('system', { message: `Click caused navigation: ${urlBefore} → ${urlAfter}` });
-                    } else {
-                      actionObservation += ` Page URL unchanged (may be same-page action or modal).`;
-                    }
-                  } else {
-                    actionObservation = `Failed to click ${action.selector}.`;
-                    actionError = true;
-                  }
-                } else { actionError = true; actionObservation = "Error: Selector missing for click."; }
-                break;
-              case "clickCoordinates":
-                if (typeof action.x === 'number' && typeof action.y === 'number') {
-                  const urlBefore = browserController.getCurrentUrl();
-                  const clickSuccess = await browserController.clickViewport(action.x, action.y);
-
-                  if (clickSuccess) {
-                    actionObservation = `Clicked at coordinates (${action.x}, ${action.y}).`;
-
-                    // Wait for potential page change and take screenshot to verify
-                    await browserController.waitForPageLoad(3000);
-                    await browserController.streamScreenshot('after-click-coords');
-
-                    const urlAfter = browserController.getCurrentUrl();
-                    if (urlBefore !== urlAfter) {
-                      actionObservation += ` Page changed: ${urlBefore} → ${urlAfter}`;
-                      this.emitLog('system', { message: `Click caused navigation: ${urlBefore} → ${urlAfter}` });
-                    } else {
-                      actionObservation += ` Page URL unchanged (may be same-page action or modal).`;
-                    }
-                  } else {
-                    actionObservation = `Failed to click at coordinates (${action.x}, ${action.y}).`;
-                    actionError = true;
-                  }
-                } else { actionError = true; actionObservation = "Error: x and y coordinates missing for clickCoordinates."; }
-                break;
-              case "type":
-                if (action.selector && action.text !== undefined) {
-                  const typeSuccess = await browserController.type(action.selector, action.text);
-                  actionObservation = typeSuccess ? `Typed '${action.text}' into ${action.selector}.` : `Failed to type into ${action.selector}.`;
-                  if(!typeSuccess) actionError = true;
-                } else { actionError = true; actionObservation = "Error: Selector or text missing for type."; }
-                break;
-              case "getText":
-                if (action.selector) {
-                  const text = await browserController.getText(action.selector);
-                  if (text !== null) {
-                    // 텍스트가 너무 길면 처음 3000자만 표시
-                    const textPreview = text.length > 3000 ? text.substring(0, 3000) + `\n... (truncated, total length: ${text.length})` : text;
-                    actionObservation = `Text from ${action.selector}: ${textPreview}`;
-                    if (action.output_variable) actionObservation += ` (Stored in ${action.output_variable})`;
-                  } else {
-                    actionObservation = `Could not get text from ${action.selector}.`;
-                    if (action.output_variable) actionObservation += ` (Output variable ${action.output_variable} will be null)`;
-                  }
-                } else { actionError = true; actionObservation = "Error: Selector missing for getText."; }
-                break;
               case "getPageContent":
                 const content = await browserController.getPageContent();
                 // LLM이 내용을 볼 수 있도록 충분한 텍스트 포함 (최대 5000자)
@@ -1294,13 +1215,13 @@ No explanation, only JSON.`;
                 } else { actionError = true; actionObservation = "Error: Selector or key missing for pressKey."; }
                 break;
 
-              // Scroll actions
+              // Scroll actions (Page-Based)
               case "scrollDown":
                 try {
-                  const pixels = action.pixels || 500;
-                  const scrollSuccess = await browserController.scrollDown(pixels);
+                  const pages = action.pages !== undefined ? action.pages : 1.0;
+                  const scrollSuccess = await browserController.scrollDown(pages);
                   actionObservation = scrollSuccess
-                    ? `Scrolled down ${pixels}px successfully.`
+                    ? `Scrolled down ${pages} page(s) successfully.`
                     : `Failed to scroll down.`;
                   if (!scrollSuccess) actionError = true;
                 } catch (e: any) {
@@ -1311,10 +1232,10 @@ No explanation, only JSON.`;
 
               case "scrollUp":
                 try {
-                  const pixels = action.pixels || 500;
-                  const scrollSuccess = await browserController.scrollUp(pixels);
+                  const pages = action.pages !== undefined ? action.pages : 1.0;
+                  const scrollSuccess = await browserController.scrollUp(pages);
                   actionObservation = scrollSuccess
-                    ? `Scrolled up ${pixels}px successfully.`
+                    ? `Scrolled up ${pages} page(s) successfully.`
                     : `Failed to scroll up.`;
                   if (!scrollSuccess) actionError = true;
                 } catch (e: any) {

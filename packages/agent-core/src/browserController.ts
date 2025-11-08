@@ -186,41 +186,19 @@ export class BrowserController extends EventEmitter {
     this.emitLog('system', { message: `Navigating to ${url}...` });
     this.pageContentCache = null; // 캐시 무효화
     this.clearInteractiveElementsCache(); // DOM 캐시도 무효화
-    let navigated = false;
 
-    // 1차: domcontentloaded로 바로 시작 (networkidle은 너무 느림)
+    // 단순화된 네비게이션: load 이벤트까지 기다림
     try {
-      await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
-      navigated = true;
-      this.emitLog('system', { message: `Successfully navigated to ${url}.` });
-    } catch (e: any) {
-      this.emitLog('system', { message: `Navigation domcontentloaded failed: ${e.message}. Trying load...` });
-
-      // 2차: load 시도
-      try {
-        await this.page.goto(url, { waitUntil: 'load', timeout: 25000 });
-        navigated = true;
-        this.emitLog('system', { message: `Successfully navigated to ${url} (load).` });
-      } catch (e2: any) {
-        this.emitLog('system', { message: `Navigation load failed: ${e2.message}. Trying commit...` });
-
-        // 3차: commit (가장 빠름, 최소한의 로딩)
-        try {
-          await this.page.goto(url, { waitUntil: 'commit', timeout: 15000 });
-          navigated = true;
-          this.emitLog('system', { message: `Successfully navigated to ${url} (commit).` });
-          // commit은 매우 빠르므로 추가 대기
-          await this.page.waitForTimeout(2000);
-        } catch (e3: any) {
-          this.emitLog('error', { message: `Navigation failed (all strategies): ${e3.message}` });
-          try { await this.streamScreenshot('navigation-failed'); } catch (_) {}
-          throw e3;
-        }
-      }
+      await this.page.goto(url, {
+        waitUntil: 'load',
+        timeout: 30000 // 30초 타임아웃
+      });
+      this.emitLog('system', { message: `Successfully navigated to ${url}` });
+    } catch (error: any) {
+      this.emitLog('error', { message: `Navigation failed: ${error.message}` });
+      try { await this.streamScreenshot('navigation-failed'); } catch (_) {}
+      throw error;
     }
-
-    // 짧은 안정화 대기
-    await this.page.waitForTimeout(500);
 
     // Take screenshot after navigation
     await this.streamScreenshot('navigation');
@@ -234,36 +212,15 @@ export class BrowserController extends EventEmitter {
       }
     } catch (_) {}
 
-    // Cloudflare 인터스티셜 처리 - handleCloudflareGate가 이미 모든 재시도 포함
+    // Cloudflare 인터스티셜 처리
     try {
       const hadCloudflare = await this.handleCloudflareGate();
-      // Cloudflare 통과 후 스크린샷 업데이트
       if (hadCloudflare) {
         await this.streamScreenshot('cloudflare-passed');
       }
     } catch (_) {}
   }
 
-  private getSelectorCandidates(original: string): string[] {
-    const candidates = [original];
-    // Google 검색 입력 관련 보완 셀렉터
-    if (original.includes('input[name="q"]')) {
-      candidates.push('textarea[name="q"]');
-      candidates.push('input[aria-label="Search"]');
-      candidates.push('textarea[aria-label="Search"]');
-      candidates.push('input[aria-label="검색"]');
-      candidates.push('textarea[aria-label="검색"]');
-    }
-    if (/google\./.test(this.page?.url() || '')) {
-      // 일반적인 동의 버튼들
-      if (original.includes('L2AGLb')) {
-        candidates.push('button[aria-label="Accept all"]');
-        candidates.push('button:has-text("I agree")');
-        candidates.push('button:has-text("동의")');
-      }
-    }
-    return Array.from(new Set(candidates));
-  }
 
   private async handleGoogleConsentIfPresent(): Promise<void> {
     if (!this.page) return;
@@ -290,116 +247,6 @@ export class BrowserController extends EventEmitter {
     }
   }
 
-  async click(selector: string): Promise<boolean> {
-    if (!this.page) {
-      throw new Error('Page is not initialized. Call launch() first.');
-    }
-
-    // 재시도 로직 추가 (최대 2회)
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        this.emitLog('system', { message: `Attempting to click: ${selector}${attempt > 1 ? ` (retry ${attempt-1})` : ''}` });
-        const element = await this.findElement(this.getSelectorCandidates(selector));
-        if (element) {
-          this.pageContentCache = null; // 캐시 무효화
-          await element.hover();
-          await this.page.waitForTimeout(120 + Math.random() * 180);
-          // Pre-capture href and tag for anchor fallback
-          let href: string | null = null;
-          let tagName: string | null = null;
-          try {
-            href = await element.getAttribute('href');
-            tagName = (await element.evaluate((el: any) => el.tagName)).toString().toLowerCase();
-          } catch (_) {}
-          const preUrl = this.page.url();
-          await element.click({ delay: 50 + Math.floor(Math.random() * 120) });
-          await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-          await this.page.waitForTimeout(500);
-          this.emitLog('system', { message: `Clicked on ${selector}.` });
-
-          // Take screenshot after click
-          await this.streamScreenshot('click');
-          if (this.debugMode) await this.takeDebugScreenshot('after-click');
-          // If it was an anchor and domain didn't change, navigate directly to href to bypass blockers
-          try {
-            const afterUrl = this.page.url();
-            if (tagName === 'a' && href && /^https?:\/\//i.test(href)) {
-              const preHost = new URL(preUrl).host;
-              const afterHost = new URL(afterUrl).host;
-              const destHost = new URL(href).host;
-              if (preHost === afterHost && destHost !== afterHost) {
-                this.emitLog('system', { message: `Anchor navigation fallback to ${href}` });
-                await this.page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
-                await this.streamScreenshot('anchor-fallback-goto');
-              }
-            }
-          } catch (_) {}
-          try { await this.handleCloudflareGate(); } catch (_) {}
-          return true;
-        }
-
-        // 요소를 찾지 못한 경우 재시도 전 대기
-        if (attempt < 2) {
-          this.emitLog('system', { message: `Element not found, waiting before retry...` });
-          await this.page.waitForTimeout(1000);
-        }
-      } catch (error) {
-        if (attempt === 2) {
-          console.error(`Error clicking element after retries: ${error}`);
-          throw error;
-        }
-        this.emitLog('system', { message: `Click attempt ${attempt} failed: ${(error as Error).message}` });
-        await this.page.waitForTimeout(1000);
-      }
-    }
-
-    this.emitLog('error', { message: `Element not found for click after retries: ${selector}` });
-    if (this.debugMode) await this.takeDebugScreenshot('click-error');
-    return false;
-  }
-
-  async type(selector: string, text: string): Promise<boolean> {
-    if (!this.page) {
-      throw new Error('Page is not initialized. Call launch() first.');
-    }
-
-    // 재시도 로직 추가 (최대 2회)
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        this.emitLog('system', { message: `Attempting to type '${text}' into: ${selector}${attempt > 1 ? ` (retry ${attempt-1})` : ''}` });
-        const element = await this.findElement(this.getSelectorCandidates(selector));
-        if (element) {
-          // 사람처럼 타이핑 (fill 대신 type)
-          await element.click();
-          await this.page.waitForTimeout(150 + Math.random() * 250);
-          await this.page.keyboard.type(text, { delay: 80 + Math.floor(Math.random() * 70) });
-          this.emitLog('system', { message: `Typed '${text}' into ${selector}.` });
-
-          // Take screenshot after typing
-          await this.streamScreenshot('type');
-          if (this.debugMode) await this.takeDebugScreenshot('after-type');
-          return true;
-        }
-
-        // 요소를 찾지 못한 경우 재시도 전 대기
-        if (attempt < 2) {
-          this.emitLog('system', { message: `Element not found, waiting before retry...` });
-          await this.page.waitForTimeout(1000);
-        }
-      } catch (error) {
-        if (attempt === 2) {
-          console.error(`Error typing text after retries: ${error}`);
-          throw error;
-        }
-        this.emitLog('system', { message: `Type attempt ${attempt} failed: ${(error as Error).message}` });
-        await this.page.waitForTimeout(1000);
-      }
-    }
-
-    this.emitLog('error', { message: `Element not found for type after retries: ${selector}` });
-    if (this.debugMode) await this.takeDebugScreenshot('type-error');
-    return false;
-  }
 
   async pressKey(selector: string, key: string): Promise<boolean> {
     if (!this.page) {
@@ -933,27 +780,6 @@ export class BrowserController extends EventEmitter {
     }
   }
 
-  async getText(selector: string): Promise<string | null> {
-    if (!this.page) {
-      throw new Error('Page is not initialized. Call launch() first.');
-    }
-
-    try {
-      this.emitLog('system', { message: `Getting text from selector: ${selector}` });
-      const element = await this.findElement([selector]);
-      if (!element) {
-        return null;
-      }
-
-      const text = await element.textContent();
-      this.emitLog('system', { message: `Text from selector "${selector}": ${text}` });
-      return text;
-    } catch (error) {
-      console.error(`Error getting text: ${error}`);
-      this.emitLog('error', { message: `Error getting text: ${(error as Error).message}` });
-      return null;
-    }
-  }
 
   async takeDebugScreenshot(name: string): Promise<string | null> {
     if (!this.debugMode || !this.page) {
@@ -1271,14 +1097,13 @@ export class BrowserController extends EventEmitter {
     return { imageBase64: buf.toString('base64'), width: size?.width || 0, height: size?.height || 0 };
   }
 
-  async clickViewport(x: number, y: number): Promise<boolean> {
+  // Internal helper for coordinate-based clicking (used by CAPTCHA solver)
+  private async clickViewport(x: number, y: number): Promise<boolean> {
     if (!this.page) return false;
     try {
       await this.page.mouse.move(x, y);
       await this.page.waitForTimeout(80);
       await this.page.mouse.click(x, y, { delay: 50 });
-      await this.streamScreenshot('viewport-click');
-      if (this.debugMode) await this.takeDebugScreenshot('after-viewport-click');
       await this.page.waitForTimeout(200);
       return true;
     } catch (_) {
@@ -2313,24 +2138,54 @@ export class BrowserController extends EventEmitter {
   // ============================================================================
 
   /**
-   * Scroll down the page by a certain amount of pixels
+   * Scroll down the page by pages (browser-use style)
+   * @param pages Number of viewport pages to scroll (0.5-10.0, default 1.0)
    */
-  async scrollDown(pixels: number = 500): Promise<boolean> {
+  async scrollDown(pages: number = 1.0): Promise<boolean> {
     if (!this.page) {
       throw new Error('Page is not initialized.');
     }
 
     try {
-      this.emitLog('system', { message: `[Scroll] Scrolling down ${pixels}px` });
+      // Clamp pages between 0.5 and 10.0
+      pages = Math.max(0.5, Math.min(10.0, pages));
 
-      await this.page.evaluate((px) => {
-        window.scrollBy(0, px);
-      }, pixels);
+      // Get viewport height
+      const viewportHeight = await this.page.evaluate(() => window.innerHeight);
 
-      await this.page.waitForTimeout(300); // Wait for scroll to complete
+      this.emitLog('system', { message: `[Scroll] Scrolling down ${pages} pages (${Math.round(viewportHeight * pages)}px)` });
+
+      // If scrolling more than 1 page, do it in chunks with delays (browser-use style)
+      if (pages >= 1.0) {
+        const fullScrolls = Math.floor(pages);
+        const remainingScroll = pages - fullScrolls;
+
+        // Scroll full pages
+        for (let i = 0; i < fullScrolls; i++) {
+          await this.page.evaluate((vh) => {
+            window.scrollBy(0, vh);
+          }, viewportHeight);
+          await this.page.waitForTimeout(300); // 0.3s delay between scrolls
+        }
+
+        // Scroll remaining fraction
+        if (remainingScroll > 0) {
+          await this.page.evaluate((px) => {
+            window.scrollBy(0, px);
+          }, Math.round(viewportHeight * remainingScroll));
+          await this.page.waitForTimeout(300);
+        }
+      } else {
+        // Single scroll less than 1 page
+        const pixels = Math.round(viewportHeight * pages);
+        await this.page.evaluate((px) => {
+          window.scrollBy(0, px);
+        }, pixels);
+        await this.page.waitForTimeout(300);
+      }
+
       await this.streamScreenshot('after-scroll-down');
-
-      this.emitLog('system', { message: `[Scroll] Successfully scrolled down ${pixels}px` });
+      this.emitLog('system', { message: `[Scroll] Successfully scrolled down ${pages} pages` });
       return true;
     } catch (error) {
       console.error('[BrowserController] Error scrolling down:', error);
@@ -2340,24 +2195,54 @@ export class BrowserController extends EventEmitter {
   }
 
   /**
-   * Scroll up the page by a certain amount of pixels
+   * Scroll up the page by pages (browser-use style)
+   * @param pages Number of viewport pages to scroll (0.5-10.0, default 1.0)
    */
-  async scrollUp(pixels: number = 500): Promise<boolean> {
+  async scrollUp(pages: number = 1.0): Promise<boolean> {
     if (!this.page) {
       throw new Error('Page is not initialized.');
     }
 
     try {
-      this.emitLog('system', { message: `[Scroll] Scrolling up ${pixels}px` });
+      // Clamp pages between 0.5 and 10.0
+      pages = Math.max(0.5, Math.min(10.0, pages));
 
-      await this.page.evaluate((px) => {
-        window.scrollBy(0, -px);
-      }, pixels);
+      // Get viewport height
+      const viewportHeight = await this.page.evaluate(() => window.innerHeight);
 
-      await this.page.waitForTimeout(300);
+      this.emitLog('system', { message: `[Scroll] Scrolling up ${pages} pages (${Math.round(viewportHeight * pages)}px)` });
+
+      // If scrolling more than 1 page, do it in chunks with delays
+      if (pages >= 1.0) {
+        const fullScrolls = Math.floor(pages);
+        const remainingScroll = pages - fullScrolls;
+
+        // Scroll full pages
+        for (let i = 0; i < fullScrolls; i++) {
+          await this.page.evaluate((vh) => {
+            window.scrollBy(0, -vh);
+          }, viewportHeight);
+          await this.page.waitForTimeout(300);
+        }
+
+        // Scroll remaining fraction
+        if (remainingScroll > 0) {
+          await this.page.evaluate((px) => {
+            window.scrollBy(0, -px);
+          }, Math.round(viewportHeight * remainingScroll));
+          await this.page.waitForTimeout(300);
+        }
+      } else {
+        // Single scroll less than 1 page
+        const pixels = Math.round(viewportHeight * pages);
+        await this.page.evaluate((px) => {
+          window.scrollBy(0, -px);
+        }, pixels);
+        await this.page.waitForTimeout(300);
+      }
+
       await this.streamScreenshot('after-scroll-up');
-
-      this.emitLog('system', { message: `[Scroll] Successfully scrolled up ${pixels}px` });
+      this.emitLog('system', { message: `[Scroll] Successfully scrolled up ${pages} pages` });
       return true;
     } catch (error) {
       console.error('[BrowserController] Error scrolling up:', error);
