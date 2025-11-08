@@ -120,13 +120,16 @@ export class DomService {
       // Get CDP session
       const cdp = await this.getCDPSession();
 
+      // FIX 16: Remove Accessibility Tree to improve performance (3.5s → 0.5s)
+      // getFullAXTree is very slow for large pages (2,524 elements = 3.5s)
+      // Agent doesn't need full accessibility data for basic interactions
       // Fetch all required data in parallel, including iframe scroll positions
-      const [snapshot, domTree, axTree, viewport, iframeScrollPositions] = await Promise.all([
+      const [snapshot, domTree, viewport, iframeScrollPositions] = await Promise.all([
         cdp.send('DOMSnapshot.captureSnapshot', {
           computedStyles: REQUIRED_COMPUTED_STYLES,
         }),
         cdp.send('DOM.getDocument', { depth: -1, pierce: true }),
-        cdp.send('Accessibility.getFullAXTree', {}),
+        // cdp.send('Accessibility.getFullAXTree', {}),  // REMOVED - too slow
         cdp.send('Page.getLayoutMetrics', {}),
         this.getIframeScrollPositions(),
       ]);
@@ -137,7 +140,8 @@ export class DomService {
 
       // Build enhanced DOM tree with frame context
       const snapshotLookup = buildSnapshotLookup(snapshot, devicePixelRatio);
-      const axNodeMap = this.buildAXNodeMap(axTree);
+      // Use empty axNodeMap (no accessibility tree)
+      const axNodeMap = new Map<string, EnhancedAXNode>();
 
       const initialFrameContext: FrameContext = {
         htmlFrames: [],

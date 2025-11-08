@@ -66,9 +66,10 @@ export class BrowserController {
   private cachedDOMState: SerializedDOMState | null = null;
   private cachedSelectorMap: Record<number, any> = {};
   private cacheTimestamp: number = 0;
-  // FIX 7: Reduced from 5s to 3s for dynamic pages (Amazon, SPAs, etc.)
-  // Shorter TTL prevents stale element indices on pages with frequent DOM updates
-  private readonly CACHE_TTL = 3000; // ms - Optimized for dynamic e-commerce sites
+  // FIX 7 & FIX 16: Balanced cache TTL for performance vs freshness
+  // 5s provides good caching (reduces expensive DOM collection from 3.5s → 0s on cache hit)
+  // while still being fresh enough for dynamic pages
+  private readonly CACHE_TTL = 5000; // ms - Optimized balance
   private domChangedSinceCache: boolean = false; // Track if DOM potentially changed
   private lastDOMHash: string = ''; // Track DOM changes via hash comparison
 
@@ -389,10 +390,11 @@ export class BrowserController {
         llmRepresentation = domResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
         timing.dom = Date.now() - domStart;
 
-        // FIX 8: Smart wait detection - if DOM is empty, page may still be loading
+        // FIX 8 & FIX 10: Smart wait detection - if DOM is empty OR title is missing, page may still be loading
+        // Changed from AND to OR to catch cases where elements exist but title is empty (common in SPAs)
         const elementCount = Object.keys(selectorMap).length;
-        if (elementCount === 0 && !title) {
-          debug('[BrowserController] Empty page detected (0 elements, no title) - waiting for page to load...');
+        if (elementCount === 0 || !title) {
+          debug(`[BrowserController] Incomplete page detected (${elementCount} elements, title: "${title}") - waiting for page to load...`);
           await this.page.waitForTimeout(1000);
 
           // Retry DOM collection once
@@ -401,8 +403,21 @@ export class BrowserController {
           selectorMap = domState.selectorMap;
           llmRepresentation = retryResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
 
+          // Re-check title after retry
+          let retryTitle = '';
+          try {
+            retryTitle = await this.page.title();
+          } catch (error: any) {
+            debug('[BrowserController] Failed to get title after retry:', error.message);
+          }
+
           const retryElementCount = Object.keys(selectorMap).length;
-          debug(`[BrowserController] After retry: ${retryElementCount} elements found`);
+          debug(`[BrowserController] After retry: ${retryElementCount} elements, title: "${retryTitle}"`);
+
+          // Update title if we got one
+          if (retryTitle) {
+            title = retryTitle;
+          }
         }
 
         // Update cache, hash, and reset change flag
@@ -451,13 +466,34 @@ export class BrowserController {
    * Format DOM state for LLM consumption
    */
   private formatDOMForLLM(selectorMap: Record<number, any>): string {
-    const indices = Object.keys(selectorMap).map(k => parseInt(k)).sort((a, b) => a - b);
+    let indices = Object.keys(selectorMap).map(k => parseInt(k));
 
     if (indices.length === 0) {
       return 'No interactive elements found on the page.';
     }
 
-    let output = `Interactive elements on page (${indices.length} total):\n\n`;
+    // FIX 15: Limit elements to prevent token explosion (2,524 → 150 elements)
+    // Priority-based filtering: inputs > buttons > selects > links > others
+    const MAX_ELEMENTS = 150;
+    const totalElements = indices.length;
+
+    if (totalElements > MAX_ELEMENTS) {
+      // Sort by priority score (highest first)
+      indices.sort((a, b) => {
+        const scoreA = this.getElementPriority(selectorMap[a]);
+        const scoreB = this.getElementPriority(selectorMap[b]);
+        return scoreB - scoreA; // Descending order
+      });
+
+      // Keep only top 150 elements
+      indices = indices.slice(0, MAX_ELEMENTS);
+      debug(`[BrowserController] DOM filtered: ${totalElements} → ${MAX_ELEMENTS} elements (by priority)`);
+    }
+
+    // Sort by index for display
+    indices.sort((a, b) => a - b);
+
+    let output = `Interactive elements on page (showing ${indices.length} of ${totalElements} total):\n\n`;
 
     indices.forEach((index: number) => {
       const elem = selectorMap[index];
@@ -475,9 +511,43 @@ export class BrowserController {
       output += '\n';
     });
 
+    if (totalElements > MAX_ELEMENTS) {
+      output += `\n... and ${totalElements - MAX_ELEMENTS} more elements (filtered by priority)\n`;
+    }
+
     output += '\nTo interact with elements, use their index number (e.g., click element [5]).\n';
 
     return output;
+  }
+
+  /**
+   * FIX 15: Calculate element priority for filtering
+   * Higher score = more important for AI agent
+   */
+  private getElementPriority(elem: any): number {
+    const tag = elem.tagName?.toLowerCase() || '';
+    const text = elem.text?.trim() || '';
+    const hasText = text.length > 0;
+
+    // Base priority by tag type
+    let priority = 50; // Default
+
+    if (tag === 'input' || tag === 'textarea') priority = 100;
+    else if (tag === 'button') priority = 95;
+    else if (tag === 'select') priority = 90;
+    else if (tag === 'a' && hasText) priority = 75;
+    else if (tag === 'a') priority = 60;
+
+    // Boost for meaningful text
+    if (hasText && text.length > 3) priority += 10;
+    if (text.length > 20) priority += 5;
+
+    // Boost for interactive attributes
+    if (elem.attributes?.['aria-label']) priority += 8;
+    if (elem.attributes?.placeholder) priority += 8;
+    if (elem.attributes?.role === 'button') priority += 10;
+
+    return priority;
   }
 
   /**
@@ -515,7 +585,8 @@ export class BrowserController {
    */
   async clickElement(index: number): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService || !this.browserSession) {
+      // FIX 9: Removed browserSession check - it can be null during async cleanup even when browser is active
+      if (!this.page || !this.domService) {
         throw new Error('Browser not launched');
       }
 
@@ -543,6 +614,10 @@ export class BrowserController {
       const urlBeforeClick = this.page.url();
 
       // Use browser-use style Element class with advanced click
+      // browserSession should exist if page exists (created together in launch())
+      if (!this.browserSession) {
+        throw new Error('Browser session not initialized');
+      }
       const element = new Element(
         this.browserSession,
         elementData.backendNodeId,
@@ -626,7 +701,8 @@ export class BrowserController {
    */
   async inputText(index: number, text: string, clear: boolean = true): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService || !this.browserSession) {
+      // FIX 9: Removed browserSession check
+      if (!this.page || !this.domService) {
         throw new Error('Browser not launched');
       }
 
@@ -651,6 +727,9 @@ export class BrowserController {
       }
 
       // Use browser-use style Element class with advanced fill
+      if (!this.browserSession) {
+        throw new Error('Browser session not initialized');
+      }
       const element = new Element(
         this.browserSession,
         elementData.backendNodeId,
@@ -785,8 +864,9 @@ export class BrowserController {
           debug('[BrowserController] Network idle timeout - proceeding anyway');
         });
 
-        // Additional buffer to ensure DOM has rendered
-        await page.waitForTimeout(300);
+        // FIX 12: Increased buffer from 300ms to 600ms for SPA dynamic content
+        // Amazon and other SPAs need more time for React/Vue rendering after navigation
+        await page.waitForTimeout(600);
 
         // Verify page is actually ready by checking if we can query the DOM
         const elementCount = await page.evaluate(() => document.querySelectorAll('*').length).catch(() => 0);
@@ -1240,7 +1320,8 @@ export class BrowserController {
       if (!this.page) {
         return { success: false, error: 'No active page - browser session corrupted' };
       }
-      if (!this.domService || !this.browserSession) {
+      // FIX 9: Removed browserSession check
+      if (!this.domService) {
         throw new Error('Browser not launched');
       }
 
@@ -1266,6 +1347,9 @@ export class BrowserController {
       }
 
       // Resolve node and run JS to select option
+      if (!this.browserSession) {
+        throw new Error('Browser session not initialized');
+      }
       const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
       const cdpSession = sessionInfo.cdpSession as any;
 
@@ -1363,7 +1447,8 @@ export class BrowserController {
    */
   async getDropdownOptions(index: number): Promise<{ success: boolean; error?: string; options?: Array<{ value: string; text: string; selected: boolean; disabled: boolean }> }> {
     try {
-      if (!this.page || !this.domService || !this.browserSession) {
+      // FIX 9: Removed browserSession check
+      if (!this.page || !this.domService) {
         throw new Error('Browser not launched');
       }
 
@@ -1381,6 +1466,9 @@ export class BrowserController {
         return { success: false, error: `Element at index ${index} not found` };
       }
 
+      if (!this.browserSession) {
+        throw new Error('Browser session not initialized');
+      }
       const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
       const cdpSession = sessionInfo.cdpSession as any;
       const resolveResult = await cdpSession.send('DOM.resolveNode', { backendNodeId: elementData.backendNodeId });
@@ -1418,7 +1506,8 @@ export class BrowserController {
    */
   async uploadFile(index: number, filePath: string): Promise<{ success: boolean; error?: string }> {
     try {
-      if (!this.page || !this.domService || !this.browserSession) {
+      // FIX 9: Removed browserSession check
+      if (!this.page || !this.domService) {
         throw new Error('Browser not launched');
       }
 
@@ -1441,6 +1530,9 @@ export class BrowserController {
         return { success: false, error: `File not found: ${absPath}` };
       }
 
+      if (!this.browserSession) {
+        throw new Error('Browser session not initialized');
+      }
       const sessionInfo = await this.browserSession.getOrCreateCDPSession(undefined, false);
       const cdpSession = sessionInfo.cdpSession as any;
 

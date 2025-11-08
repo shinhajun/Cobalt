@@ -87,14 +87,19 @@ export class LLMService {
         openAIConfig.temperature = 0.0;
       }
 
-      // FIX 5: Enable JSON mode for compatible OpenAI models to enforce JSON responses
-      // JSON mode is supported in gpt-4-turbo, gpt-4o, gpt-3.5-turbo-1106 and later
-      const supportsJsonMode = /^(gpt-4o|gpt-4-turbo|gpt-3\.5-turbo-1106|gpt-3\.5-turbo-0125)/.test(modelName);
-      if (supportsJsonMode) {
-        openAIConfig.modelKwargs = {
-          response_format: { type: "json_object" }
+      // FIX 5 & FIX 11 & FIX 14: Enable JSON mode for ALL OpenAI models (except reasoning models)
+      // Use configuration.baseOptions to pass response_format to OpenAI API
+      // Previous approach using modelKwargs didn't work - responses still had markdown
+      const isReasoningModel = /^(o1|o3)/.test(modelName);
+      if (!isReasoningModel) {
+        openAIConfig.configuration = {
+          baseOptions: {
+            responseFormat: { type: "json_object" }
+          }
         };
-        info("[LLMService] JSON mode enabled for", modelName);
+        info("[LLMService] JSON mode ENABLED via configuration for", modelName);
+      } else {
+        info("[LLMService] JSON mode NOT enabled for reasoning model", modelName);
       }
 
       this.model = new ChatOpenAI(openAIConfig);
@@ -390,13 +395,15 @@ Remember:
           this.recordRecentAction(act);
         }
 
-        // Keep message history manageable
-        if (messages.length > 20) {
-          // Keep system prompt and first message, remove oldest interactions
-          const systemMsgs = messages.slice(0, 2);
-          const recentMsgs = messages.slice(-16);
+        // FIX 13: Aggressive message history compression to prevent token explosion
+        // Previous: 20 messages max, keep 16 recent → caused 208k tokens in 5 iterations
+        // New: 8 messages max, keep 4 recent → prevents token explosion
+        if (messages.length > 8) {
+          const systemMsgs = messages.slice(0, 2); // System prompt + task
+          const recentMsgs = messages.slice(-4);    // Last 2 iterations (state + response per iteration)
           messages.length = 0;
           messages.push(...systemMsgs, ...recentMsgs);
+          debug('[LLM] Message history compressed: keeping system + 4 recent messages');
         }
 
       } catch (error: any) {

@@ -206,7 +206,7 @@
       margin-left: 8px;
       font-size: 13px;
       font-weight: 600;
-      color: #5f6368;
+      color: #dc2626; /* 빨간색으로 변경 */
       letter-spacing: 0.3px;
       transition: all 0.3s ease;
       position: relative;
@@ -222,17 +222,17 @@
       left: -1.5px;
       right: -1.5px;
       bottom: -1.5px;
-      background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+      background: linear-gradient(135deg, #fca5a5 0%, #dc2626 100%); /* 빨간색 그라데이션으로 변경 */
       border-radius: 16px;
       z-index: -1;
     }
 
     .record-btn:hover {
-      box-shadow: 0 2px 12px rgba(107, 114, 128, 0.25);
+      box-shadow: 0 2px 12px rgba(220, 38, 38, 0.25); /* 빨간색 그림자로 변경 */
     }
 
     .record-btn:active {
-      box-shadow: 0 1px 4px rgba(107, 114, 128, 0.2);
+      box-shadow: 0 1px 4px rgba(220, 38, 38, 0.2); /* 빨간색 그림자로 변경 */
     }
 
     .record-btn.recording {
@@ -246,6 +246,7 @@
     .record-icon {
       font-size: 16px;
       display: inline-block;
+      color: #dc2626; /* 빨간 점으로 표시 */
     }
 
     .record-btn.recording .record-icon {
@@ -578,7 +579,7 @@
     </div>
 
     <button class="record-btn" id="recordBtn" title="Record Macro">
-      <span class="record-icon">⏺</span>
+      <span class="record-icon">●</span>
       <span class="record-status">Record</span>
     </button>
 
