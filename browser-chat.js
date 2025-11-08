@@ -607,6 +607,10 @@ function loadChatRooms() {
     createDefaultChatRoom();
   }
 
+  // Normalize default chat titles to sequential numbers and persist
+  normalizeChatRoomTitles();
+  saveChatRooms();
+
   // Render tabs and load active room
   renderChatTabs();
   switchChatRoom(activeChatRoomId);
@@ -621,6 +625,7 @@ function createDefaultChatRoom() {
   }];
   activeChatRoomId = 0;
   nextChatRoomId = 1;
+  saveChatRooms();
 }
 
 function saveChatRooms() {
@@ -635,12 +640,13 @@ function createNewChatRoom() {
   const roomId = nextChatRoomId++;
   const newRoom = {
     id: roomId,
-    title: `Chat ${roomId + 1}`,
+    title: `Chat ${chatRooms.length + 1}`,
     messages: [],
     createdAt: Date.now()
   };
 
   chatRooms.push(newRoom);
+  normalizeChatRoomTitles();
   saveChatRooms();
   renderChatTabs();
   switchChatRoom(roomId);
@@ -667,7 +673,7 @@ function deleteChatRoom(roomId) {
     activeChatRoomId = chatRooms[0].id;
     switchChatRoom(activeChatRoomId);
   }
-
+  normalizeChatRoomTitles();
   saveChatRooms();
   renderChatTabs();
   renderHistory(); // Update history modal if open
@@ -799,6 +805,7 @@ function setupTabDragEvents(tabEl, roomId) {
       if (draggedIndex !== -1 && targetIndex !== -1) {
         const [movedRoom] = chatRooms.splice(draggedIndex, 1);
         chatRooms.splice(targetIndex, 0, movedRoom);
+        normalizeChatRoomTitles();
         saveChatRooms();
         renderChatTabs();
       }
@@ -830,6 +837,20 @@ function renameChatRoom(roomId) {
     saveChatRooms();
     renderChatTabs();
     renderHistory(); // Update history modal if open
+  }
+}
+
+// Ensure default-numbered chats are renumbered sequentially (Chat 1, Chat 2, ...)
+function normalizeChatRoomTitles() {
+  let counter = 1;
+  for (const room of chatRooms) {
+    if (/^Chat\s+\d+$/i.test(room.title)) {
+      room.title = `Chat ${counter}`;
+      counter++;
+    } else {
+      // Custom-named chat; still increment counter to reserve a number slot
+      counter++;
+    }
   }
 }
 

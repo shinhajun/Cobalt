@@ -70,11 +70,18 @@ export class LLMService {
       if (!OPENAI_API_KEY) {
         throw new Error("OpenAI API key not configured");
       }
-      this.model = new ChatOpenAI({
+      // Some OpenAI models (e.g., reasoning families like o3 / certain "gpt-5" aliases)
+      // only support the provider default temperature and reject 0. In that case,
+      // omit temperature to let the backend default (typically 1) be used.
+      const requiresDefaultTemp = /^(o3|gpt-5)/.test(modelName);
+      const openAIConfig: any = {
         openAIApiKey: OPENAI_API_KEY,
         modelName: modelName,
-        temperature: 0.0,
-      });
+      };
+      if (!requiresDefaultTemp) {
+        openAIConfig.temperature = 0.0;
+      }
+      this.model = new ChatOpenAI(openAIConfig);
     }
   }
 
@@ -557,5 +564,4 @@ Remember:
     };
   }
 }
-
 

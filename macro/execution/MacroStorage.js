@@ -8,19 +8,114 @@ class MacroStorage {
   constructor() {
     // Use app user data directory for storage
     this.storageDir = path.join(app.getPath('userData'), 'macros');
-    this.ensureStorageDir();
+    this.ready = false;
+    this.initPromise = this.ensureStorageDir();
   }
 
   /**
    * Ensure storage directory exists
    */
   async ensureStorageDir() {
+    if (this.ready) return;
+
     try {
       await fs.mkdir(this.storageDir, { recursive: true });
+      this.ready = true;
       console.log('[MacroStorage] Storage directory ready:', this.storageDir);
     } catch (error) {
       console.error('[MacroStorage] Failed to create storage directory:', error);
+      throw error;
     }
+  }
+
+  /**
+   * Validate macro data before saving
+   * @param {Object} macro - Macro object
+   * @throws {Error} If validation fails
+   */
+  validateMacro(macro) {
+    // Check required fields
+    if (!macro || typeof macro !== 'object') {
+      throw new Error('Macro must be an object');
+    }
+
+    if (!macro.id || typeof macro.id !== 'string') {
+      throw new Error('Macro must have a valid ID');
+    }
+
+    if (!macro.name || typeof macro.name !== 'string') {
+      throw new Error('Macro must have a valid name');
+    }
+
+    const trimmedName = macro.name.trim();
+    if (trimmedName.length === 0) {
+      throw new Error('Macro name cannot be empty or contain only spaces');
+    }
+
+    if (trimmedName.length < 3) {
+      throw new Error('Macro name must be at least 3 characters long');
+    }
+
+    if (trimmedName.length > 100) {
+      throw new Error('Macro name must be less than 100 characters');
+    }
+
+    // Check for invalid filename characters
+    const invalidChars = /[<>:"/\\|?*\x00-\x1f]/g;
+    if (invalidChars.test(trimmedName)) {
+      throw new Error('Macro name contains invalid characters (< > : " / \\ | ? *)');
+    }
+
+    if (!Array.isArray(macro.steps)) {
+      throw new Error('Macro must have a steps array');
+    }
+
+    // Validate each step
+    macro.steps.forEach((step, index) => {
+      if (!step || typeof step !== 'object') {
+        throw new Error(`Step ${index} is invalid`);
+      }
+
+      if (!step.type || typeof step.type !== 'string') {
+        throw new Error(`Step ${index} must have a valid type`);
+      }
+
+      // Validate input steps with 'prompt' mode
+      if (step.type === 'input' && step.inputMode === 'prompt') {
+        if (!step.promptConfig || typeof step.promptConfig !== 'object') {
+          throw new Error(`Step ${index}: Input step with 'prompt' mode must have promptConfig`);
+        }
+
+        if (!step.promptConfig.question || typeof step.promptConfig.question !== 'string') {
+          throw new Error(`Step ${index}: Prompt mode requires a question`);
+        }
+      }
+
+      // Validate AI mode
+      if (step.type === 'input' && step.inputMode === 'ai') {
+        if (!step.aiConfig || typeof step.aiConfig !== 'object') {
+          throw new Error(`Step ${index}: Input step with 'ai' mode must have aiConfig`);
+        }
+
+        if (!step.aiConfig.prompt || typeof step.aiConfig.prompt !== 'string') {
+          throw new Error(`Step ${index}: AI mode requires a prompt`);
+        }
+      }
+    });
+
+    // Validate metadata
+    if (!macro.metadata || typeof macro.metadata !== 'object') {
+      console.warn('[MacroStorage] Macro missing metadata, using defaults');
+      macro.metadata = {
+        totalSteps: macro.steps.length,
+        duration: 0,
+        startUrl: '',
+        endUrl: '',
+        browserVersion: 'Cobalt 1.0'
+      };
+    }
+
+    return true;
   }
 
   /**
@@ -32,8 +127,16 @@ class MacroStorage {
     console.log('[MacroStorage] Saving macro:', macro.id);
 
     try {
+      // Wait for initialization to complete
+      await this.initPromise;
       // Ensure directory exists
       await this.ensureStorageDir();
+
+      // Validate macro before saving
+      this.validateMacro(macro);
+
+      // Trim macro name
+      macro.name = macro.name.trim();
 
       // Generate filename from macro ID
       const filename = `${macro.id}.json`;

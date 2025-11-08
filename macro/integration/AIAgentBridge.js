@@ -3,10 +3,11 @@
 const MacroToPrompt = require('./MacroToPrompt');
 
 class AIAgentBridge {
-  constructor(browserView, mainWindow) {
+  constructor(browserView, mainWindow, model = null) {
     this.browserView = browserView;
     this.mainWindow = mainWindow;
     this.llmService = null;
+    this.model = model;
   }
 
   /**
@@ -18,7 +19,10 @@ class AIAgentBridge {
     }
 
     const { LLMService } = require('../../packages/agent-core/dist/llmService');
-    this.llmService = new LLMService('gpt-4o');
+    // Use provided model or fallback to claude-sonnet-4-5
+    const modelToUse = this.model || 'claude-sonnet-4-5';
+    console.log('[AIAgentBridge] Using model:', modelToUse);
+    this.llmService = new LLMService(modelToUse);
     return this.llmService;
   }
 

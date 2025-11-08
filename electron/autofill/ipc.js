@@ -3,6 +3,7 @@ const { loadStore, saveStore, upsertProfile, setSitePref, getSitePref, querySugg
 const { classifyField } = require('./heuristics');
 
 let storeCache = null;
+let autofillHandlersRegistered = false;
 function ensureStore() {
   if (!storeCache) storeCache = loadStore();
   return storeCache;
@@ -11,6 +12,7 @@ function ensureStore() {
 function flush() { if (storeCache) saveStore(storeCache); }
 
 function registerAutofillIPC(getActiveURL) {
+  if (autofillHandlersRegistered) return;
   // Query suggestions for a focused field
   ipcMain.handle('autofill-query', async (_event, { fieldHints }) => {
     try {
@@ -73,6 +75,8 @@ function registerAutofillIPC(getActiveURL) {
       return { success: false, error: String(e && e.message || e) };
     }
   });
+
+  autofillHandlersRegistered = true;
 }
 
 module.exports = { registerAutofillIPC };

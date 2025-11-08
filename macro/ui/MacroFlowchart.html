@@ -30,6 +30,27 @@
     </div>
   </div>
 
+  <!-- Rename Macro Modal -->
+  <div class="modal" id="renameMacroModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3>✏️ Rename Macro</h3>
+        <button class="modal-close" id="renameModalClose">×</button>
+      </div>
+
+      <div class="form-group">
+        <label>Macro Name:</label>
+        <input type="text" id="macroNameInput" class="text-input" placeholder="Enter macro name..." maxlength="100">
+        <div class="hint" id="nameHint"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelRename" class="btn-secondary">Cancel</button>
+        <button id="applyRename" class="btn-primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit Input Modal -->
   <div class="modal" id="editInputModal">
     <div class="modal-content">

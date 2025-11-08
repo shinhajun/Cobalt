@@ -349,7 +349,11 @@ class MacroFlowchartUI {
     console.log('[MacroFlowchart] Running macro:', this.macro);
 
     try {
-      const result = await ipcRenderer.invoke('execute-macro', this.macro);
+      const model = localStorage.getItem('selectedModel') || 'gpt-5-mini';
+      const result = await ipcRenderer.invoke('execute-macro', {
+        macroData: this.macro,
+        model
+      });
 
       if (result.success) {
         alert('Macro executed successfully!');
@@ -366,13 +370,22 @@ class MacroFlowchartUI {
     console.log('[MacroFlowchart] Saving macro:', this.macro);
 
     try {
-      // Prompt for name if it's "Untitled Macro" or "New Macro"
+      // Show rename modal if it's "Untitled Macro" or "New Macro"
       if (this.macro.name === 'Untitled Macro' || this.macro.name === 'New Macro') {
-        const name = prompt('Enter a name for this macro:', this.macro.name);
-        if (name) {
-          this.macro.name = name;
-          document.getElementById('macroName').textContent = name;
+        const newName = await this.openRenameModal(this.macro.name);
+        if (!newName) {
+          console.log('[MacroFlowchart] Save cancelled - no name provided');
+          return;
         }
+        this.macro.name = newName;
+        document.getElementById('macroName').textContent = newName;
+      }
+
+      // Validate macro name
+      const validationError = this.validateMacroName(this.macro.name);
+      if (validationError) {
+        alert('Invalid macro name: ' + validationError);
+        return;
       }
 
       this.macro.updatedAt = Date.now();
@@ -388,6 +401,135 @@ class MacroFlowchartUI {
       console.error('[MacroFlowchart] Failed to save macro:', error);
       alert('Failed to save macro: ' + error.message);
     }
+  }
+
+  validateMacroName(name) {
+    if (!name || typeof name !== 'string') {
+      return 'Name is required';
+    }
+
+    const trimmedName = name.trim();
+
+    if (trimmedName.length === 0) {
+      return 'Name cannot be empty or contain only spaces';
+    }
+
+    if (trimmedName.length < 3) {
+      return 'Name must be at least 3 characters long';
+    }
+
+    if (trimmedName.length > 100) {
+      return 'Name must be less than 100 characters';
+    }
+
+    // Check for invalid filename characters
+    const invalidChars = /[<>:"/\\|?*\x00-\x1f]/g;
+    if (invalidChars.test(trimmedName)) {
+      return 'Name contains invalid characters (< > : " / \\ | ? *)';
+    }
+
+    return null; // Valid
+  }
+
+  openRenameModal(currentName) {
+    return new Promise((resolve, reject) => {
+      const modal = document.getElementById('renameMacroModal');
+      const input = document.getElementById('macroNameInput');
+      const hint = document.getElementById('nameHint');
+      const applyBtn = document.getElementById('applyRename');
+      const cancelBtn = document.getElementById('cancelRename');
+      const closeBtn = document.getElementById('renameModalClose');
+
+      // Set current name
+      input.value = currentName || '';
+      hint.textContent = '';
+      hint.style.color = '#999';
+
+      // Show modal
+      modal.classList.add('show');
+      input.focus();
+      input.select();
+
+      // Real-time validation
+      const validateInput = () => {
+        const name = input.value.trim();
+        const error = this.validateMacroName(input.value);
+
+        if (error) {
+          hint.textContent = '❌ ' + error;
+          hint.style.color = '#f44336';
+          applyBtn.disabled = true;
+          return false;
+        } else if (name.length > 0) {
+          hint.textContent = '✓ Valid name';
+          hint.style.color = '#4CAF50';
+          applyBtn.disabled = false;
+          return true;
+        } else {
+          hint.textContent = '';
+          applyBtn.disabled = true;
+          return false;
+        }
+      };
+
+      input.addEventListener('input', validateInput);
+      validateInput();
+
+      // Handle apply
+      const handleApply = () => {
+        const name = input.value.trim();
+        const error = this.validateMacroName(name);
+
+        if (error) {
+          hint.textContent = '❌ ' + error;
+          hint.style.color = '#f44336';
+          return;
+        }
+
+        cleanup();
+        modal.classList.remove('show');
+        resolve(name);
+      };
+
+      // Handle cancel
+      const handleCancel = () => {
+        cleanup();
+        modal.classList.remove('show');
+        resolve(null);
+      };
+
+      // Cleanup listeners
+      const cleanup = () => {
+        input.removeEventListener('input', validateInput);
+        input.removeEventListener('keypress', handleKeyPress);
+        applyBtn.removeEventListener('click', handleApply);
+        cancelBtn.removeEventListener('click', handleCancel);
+        closeBtn.removeEventListener('click', handleCancel);
+        modal.removeEventListener('click', handleModalClick);
+      };
+
+      // Handle Enter key
+      const handleKeyPress = (e) => {
+        if (e.key === 'Enter' && !applyBtn.disabled) {
+          handleApply();
+        } else if (e.key === 'Escape') {
+          handleCancel();
+        }
+      };
+
+      // Handle click outside modal
+      const handleModalClick = (e) => {
+        if (e.target === modal) {
+          handleCancel();
+        }
+      };
+
+      input.addEventListener('keypress', handleKeyPress);
+      applyBtn.addEventListener('click', handleApply);
+      cancelBtn.addEventListener('click', handleCancel);
+      closeBtn.addEventListener('click', handleCancel);
+      modal.addEventListener('click', handleModalClick);
+    });
   }
 
   async deleteMacro() {

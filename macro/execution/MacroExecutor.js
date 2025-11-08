@@ -91,6 +91,7 @@ class MacroExecutor extends EventEmitter {
           });
 
           // Small delay between steps
+          // Note: Navigation steps have additional 500ms delay built into executeNavigation()
           await this.delay(100);
         } catch (error) {
           console.error(`[MacroExecutor] Step ${step.stepNumber} failed:`, error);
@@ -109,7 +110,7 @@ class MacroExecutor extends EventEmitter {
           });
 
           // Continue or stop based on error severity
-          if (this.isCriticalError(error)) {
+          if (this.isCriticalError(error, step)) {
             result.success = false;
             break;
           }
@@ -194,10 +195,141 @@ class MacroExecutor extends EventEmitter {
       throw new Error('BrowserView not available');
     }
 
+    // Clean up any previous navigation listeners
+    if (this.currentNavigationCleanup) {
+      console.log('[MacroExecutor] Cleaning up previous navigation');
+      this.currentNavigationCleanup();
+      this.currentNavigationCleanup = null;
+    }
+
+    // Stop any ongoing navigation first
+    if (this.browserView.webContents.isLoading()) {
+      console.log('[MacroExecutor] Stopping previous navigation');
+      this.browserView.webContents.stop();
+      await this.delay(200);
+    }
+
+    // Create load promise BEFORE starting navigation to avoid race condition
+    const loadPromise = new Promise((resolve, reject) => {
+      let loadHandler, failHandler, timeoutId;
+
+      // Cleanup function to remove all listeners
+      const cleanup = () => {
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        if (loadHandler) {
+          this.browserView.webContents.removeListener('did-finish-load', loadHandler);
+        }
+        if (failHandler) {
+          this.browserView.webContents.removeListener('did-fail-load', failHandler);
+        }
+        this.currentNavigationCleanup = null;
+      };
+
+      // Store cleanup function for cancellation
+      this.currentNavigationCleanup = cleanup;
+
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new Error('Navigation timeout'));
+      }, 30000);
+
+      loadHandler = () => {
+        cleanup();
+        resolve();
+      };
+
+      failHandler = (event, errorCode, errorDescription) => {
+        cleanup();
+
+        // Error -3 (ERR_ABORTED) is expected when we call stop() on navigation
+        if (errorCode === -3) {
+          console.log('[MacroExecutor] Navigation aborted (expected)');
+          resolve();
+        }
+        // Critical errors should stop execution
+        else if (errorCode === -2 || errorCode === -6) {
+          reject(new Error(`Navigation failed: ${errorDescription} (${errorCode})`));
+        } else {
+          resolve(); // Non-critical errors continue
+        }
+      };
+
+      // Attach listeners FIRST
+      this.browserView.webContents.once('did-finish-load', loadHandler);
+      this.browserView.webContents.once('did-fail-load', failHandler);
+    });
+
+    // Then start navigation
     await this.browserView.webContents.loadURL(step.url);
 
-    // Wait for page to load
-    await this.waitForPageLoad();
+    // Wait for navigation to complete
+    await loadPromise;
+
+    // Additional delay to ensure page is fully ready
+    await this.delay(500);
+  }
+
+  /**
+   * Wait for element to be available with timeout
+   * @param {string} selector - CSS selector
+   * @param {string} xpath - XPath selector (fallback)
+   * @param {number} timeout - Timeout in ms
+   * @returns {Promise<Object>} Result with found element info
+   */
+  async waitForElement(selector, xpath = null, timeout = 5000) {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      const result = await this.browserView.webContents.executeJavaScript(`
+        (function() {
+          const selector = ${JSON.stringify(selector)};
+          const xpath = ${JSON.stringify(xpath)};
+
+          // Try CSS selector first
+          let element = document.querySelector(selector);
+
+          // If not found and XPath is provided, try XPath
+          if (!element && xpath) {
+            const xpathResult = document.evaluate(
+              xpath,
+              document,
+              null,
+              XPathResult.FIRST_ORDERED_NODE_TYPE,
+              null
+            );
+            element = xpathResult.singleNodeValue;
+          }
+
+          if (element) {
+            // Check if element is visible and interactable
+            const rect = element.getBoundingClientRect();
+            const isVisible = rect.width > 0 && rect.height > 0 &&
+                            window.getComputedStyle(element).visibility !== 'hidden' &&
+                            window.getComputedStyle(element).display !== 'none';
+
+            return {
+              found: true,
+              visible: isVisible,
+              selector: selector,
+              usedXPath: !document.querySelector(selector) && xpath
+            };
+          }
+
+          return { found: false };
+        })();
+      `);
+
+      if (result.found && result.visible) {
+        return result;
+      }
+
+      // Wait 100ms before retry
+      await this.delay(100);
+    }
+
+    return { found: false, error: 'Element not found or not visible within timeout' };
   }
 
   /**
@@ -217,10 +349,39 @@ class MacroExecutor extends EventEmitter {
       throw new Error('No selector for click target');
     }
 
+    const xpath = step.target?.xpath || null;
+
+    // Wait for element to be available
+    const waitResult = await this.waitForElement(selector, xpath, 5000);
+
+    if (!waitResult.found) {
+      throw new Error(`Element not found: ${selector}${xpath ? ` (also tried XPath: ${xpath})` : ''}`);
+    }
+
+    if (waitResult.usedXPath) {
+      console.log('[MacroExecutor] Using XPath fallback:', xpath);
+    }
+
     // Execute click in page context
     const result = await this.browserView.webContents.executeJavaScript(`
       (function() {
-        const element = document.querySelector('${selector}');
+        const selector = ${JSON.stringify(selector)};
+        const xpath = ${JSON.stringify(xpath)};
+
+        let element = document.querySelector(selector);
+
+        // Fallback to XPath if CSS selector fails
+        if (!element && xpath) {
+          const xpathResult = document.evaluate(
+            xpath,
+            document,
+            null,
+            XPathResult.FIRST_ORDERED_NODE_TYPE,
+            null
+          );
+          element = xpathResult.singleNodeValue;
+        }
+
         if (element) {
           element.click();
           return { success: true };
@@ -256,6 +417,19 @@ class MacroExecutor extends EventEmitter {
       throw new Error('No selector for input target');
     }
 
+    const xpath = step.target?.xpath || null;
+
+    // Wait for element to be available
+    const waitResult = await this.waitForElement(selector, xpath, 5000);
+
+    if (!waitResult.found) {
+      throw new Error(`Element not found: ${selector}${xpath ? ` (also tried XPath: ${xpath})` : ''}`);
+    }
+
+    if (waitResult.usedXPath) {
+      console.log('[MacroExecutor] Using XPath fallback for input:', xpath);
+    }
+
     // Determine value based on input mode
     let value = '';
 
@@ -278,13 +452,30 @@ class MacroExecutor extends EventEmitter {
     // Execute input in page context
     const inputResult = await this.browserView.webContents.executeJavaScript(`
       (function() {
-        const element = document.querySelector('${selector.replace(/'/g, "\\'")}');
+        const selector = ${JSON.stringify(selector)};
+        const xpath = ${JSON.stringify(xpath)};
+        const value = ${JSON.stringify(value)};
+
+        let element = document.querySelector(selector);
+
+        // Fallback to XPath if CSS selector fails
+        if (!element && xpath) {
+          const xpathResult = document.evaluate(
+            xpath,
+            document,
+            null,
+            XPathResult.FIRST_ORDERED_NODE_TYPE,
+            null
+          );
+          element = xpathResult.singleNodeValue;
+        }
+
         if (element) {
           // Focus element
           element.focus();
 
           // Set value
-          element.value = ${JSON.stringify(value)};
+          element.value = value;
 
           // Trigger events
           element.dispatchEvent(new Event('input', { bubbles: true }));
@@ -340,13 +531,62 @@ class MacroExecutor extends EventEmitter {
    * @returns {Promise<void>}
    */
   async executeWait(step) {
-    console.log('[MacroExecutor] Waiting:', step.timeout, 'ms');
+    console.log('[MacroExecutor] Waiting:', step.timeout, 'ms, condition:', step.condition);
 
-    if (step.condition === 'page-load') {
+    if (!step.condition || step.condition === 'time') {
+      // Simple timeout wait
+      await this.delay(step.timeout || 1000);
+    } else if (step.condition === 'page-load') {
+      // Wait for page load
       await this.waitForPageLoad(step.timeout);
+    } else if (step.condition === 'element-visible') {
+      // Wait for element to become visible
+      await this.waitForElement(step.selector, null, step.timeout || 10000);
+    } else if (step.condition === 'element-hidden') {
+      // Wait for element to be hidden
+      await this.waitForElementHidden(step.selector, step.timeout || 10000);
     } else {
-      await this.delay(step.timeout);
+      // Unknown condition, fallback to simple timeout
+      console.warn('[MacroExecutor] Unknown wait condition:', step.condition);
+      await this.delay(step.timeout || 1000);
     }
+  }
+
+  /**
+   * Wait for element to be hidden
+   * @param {string} selector - CSS selector
+   * @param {number} timeout - Timeout in ms
+   * @returns {Promise<void>}
+   */
+  async waitForElementHidden(selector, timeout) {
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < timeout) {
+      if (this.stopped) {
+        throw new Error('Execution stopped');
+      }
+
+      try {
+        const result = await this.browserView.webContents.executeJavaScript(`
+          (function() {
+            const selector = ${JSON.stringify(selector)};
+            const element = document.querySelector(selector);
+            return !element || element.offsetParent === null;
+          })();
+        `);
+
+        if (result) {
+          console.log('[MacroExecutor] Element is hidden:', selector);
+          return;
+        }
+      } catch (err) {
+        // Continue waiting
+      }
+
+      await this.delay(200); // Check every 200ms
+    }
+
+    throw new Error(`Timeout waiting for element to hide: ${selector}`);
   }
 
   /**
@@ -377,25 +617,38 @@ class MacroExecutor extends EventEmitter {
     const question = step.promptConfig?.question || 'Enter value:';
     const defaultValue = step.promptConfig?.defaultValue || '';
 
-    // Use Electron dialog
-    const { dialog } = require('electron');
+    // Send prompt request to main window and wait for response
+    return new Promise((resolve, reject) => {
+      const promptId = `prompt_${Date.now()}`;
 
-    const result = await dialog.showMessageBox(this.mainWindow, {
-      type: 'question',
-      title: 'Macro Input',
-      message: question,
-      buttons: ['OK', 'Cancel'],
-      defaultId: 0,
-      cancelId: 1
+      // Listen for response
+      const { ipcMain } = require('electron');
+      const responseHandler = (event, data) => {
+        if (data.promptId === promptId) {
+          ipcMain.removeListener('macro-prompt-response', responseHandler);
+          if (data.cancelled) {
+            reject(new Error('User cancelled input'));
+          } else {
+            resolve(data.value || defaultValue);
+          }
+        }
+      };
+
+      ipcMain.on('macro-prompt-response', responseHandler);
+
+      // Send prompt to renderer
+      this.mainWindow.webContents.send('macro-prompt-request', {
+        promptId,
+        question,
+        defaultValue
+      });
+
+      // Timeout after 60 seconds
+      setTimeout(() => {
+        ipcMain.removeListener('macro-prompt-response', responseHandler);
+        reject(new Error('Prompt timeout'));
+      }, 60000);
     });
-
-    if (result.response === 1) {
-      throw new Error('User cancelled input');
-    }
-
-    // For now, return default value
-    // TODO: Implement proper input dialog
-    return defaultValue;
   }
 
   /**
@@ -405,27 +658,53 @@ class MacroExecutor extends EventEmitter {
    */
   async waitForPageLoad(timeout = 30000) {
     if (!this.browserView || !this.browserView.webContents) {
-      return;
+      throw new Error('BrowserView not available');
     }
 
     return new Promise((resolve, reject) => {
+      let loadHandler, failHandler;
+
       const timeoutId = setTimeout(() => {
-        console.warn('[MacroExecutor] Page load timeout');
-        resolve(); // Don't reject, just continue
+        // Clean up listeners
+        if (loadHandler) {
+          this.browserView.webContents.removeListener('did-finish-load', loadHandler);
+        }
+        if (failHandler) {
+          this.browserView.webContents.removeListener('did-fail-load', failHandler);
+        }
+        reject(new Error('Page load timeout after 30s'));
       }, timeout);
 
-      const loadHandler = () => {
+      loadHandler = () => {
         clearTimeout(timeoutId);
+        if (failHandler) {
+          this.browserView.webContents.removeListener('did-fail-load', failHandler);
+        }
         resolve();
       };
 
-      // Listen for load event
-      this.browserView.webContents.once('did-finish-load', loadHandler);
-      this.browserView.webContents.once('did-fail-load', (event, errorCode, errorDescription) => {
+      failHandler = (event, errorCode, errorDescription, validatedURL) => {
         clearTimeout(timeoutId);
-        console.warn('[MacroExecutor] Page load failed:', errorDescription);
-        resolve(); // Don't reject, just continue
-      });
+        if (loadHandler) {
+          this.browserView.webContents.removeListener('did-finish-load', loadHandler);
+        }
+
+        console.warn('[MacroExecutor] Page load failed:', errorDescription, 'Code:', errorCode);
+
+        // Critical errors should stop execution
+        if (errorCode === -2 || errorCode === -3 || errorCode === -6) {
+          // ERR_FAILED (-2), ERR_ABORTED (-3), ERR_FILE_NOT_FOUND (-6)
+          reject(new Error(`Navigation failed: ${errorDescription} (${errorCode})`));
+        } else {
+          // Non-critical errors (like -102 connection aborted by user) can continue
+          console.warn('[MacroExecutor] Non-critical error, continuing...');
+          resolve();
+        }
+      };
+
+      // Listen for load events
+      this.browserView.webContents.once('did-finish-load', loadHandler);
+      this.browserView.webContents.once('did-fail-load', failHandler);
     });
   }
 
@@ -439,18 +718,42 @@ class MacroExecutor extends EventEmitter {
   }
 
   /**
-   * Check if error is critical
+   * Check if error is critical (should stop execution)
    * @param {Error} error - Error object
+   * @param {Object} step - Current step being executed
    * @returns {boolean} True if critical
    */
-  isCriticalError(error) {
-    const criticalErrors = [
+  isCriticalError(error, step) {
+    const errorMsg = error.message;
+
+    // Always critical errors
+    const alwaysCritical = [
       'BrowserView not available',
-      'Navigation failed',
-      'Page load timeout'
+      'Execution stopped'
     ];
 
-    return criticalErrors.some(msg => error.message.includes(msg));
+    if (alwaysCritical.some(msg => errorMsg.includes(msg))) {
+      return true;
+    }
+
+    // Navigation and page load errors are critical
+    if (step && step.type === 'navigation') {
+      return errorMsg.includes('Navigation failed') ||
+             errorMsg.includes('Page load timeout');
+    }
+
+    // Element not found is critical for click and input steps
+    if (step && (step.type === 'click' || step.type === 'input')) {
+      return errorMsg.includes('Element not found');
+    }
+
+    // Timeout errors during wait conditions are critical
+    if (step && step.type === 'wait' && step.condition) {
+      return errorMsg.includes('Timeout waiting');
+    }
+
+    // Other errors are non-critical (log and continue)
+    return false;
   }
 
   /**
@@ -459,6 +762,13 @@ class MacroExecutor extends EventEmitter {
   stop() {
     console.log('[MacroExecutor] Stopping execution');
     this.stopped = true;
+
+    // Clean up any pending navigation listeners
+    if (this.currentNavigationCleanup) {
+      console.log('[MacroExecutor] Cleaning up navigation listeners on stop');
+      this.currentNavigationCleanup();
+      this.currentNavigationCleanup = null;
+    }
   }
 
   /**

@@ -41,6 +41,14 @@ class FlowOptimizer {
       optimizedSteps = this.removeStepsByNumbers(optimizedSteps, aiAnalysis.stepsToRemove);
     }
 
+    // Display AI logic warnings if any
+    if (aiAnalysis && aiAnalysis.logicWarnings && aiAnalysis.logicWarnings.length > 0) {
+      console.warn('[FlowOptimizer] AI identified workflow logic issues:');
+      aiAnalysis.logicWarnings.forEach(warning => {
+        console.warn('[FlowOptimizer]   -', warning);
+      });
+    }
+
     // Step 2: Remove duplicate clicks
     console.log('[FlowOptimizer] Step 2: Removing duplicate clicks...');
     optimizedSteps = this.removeDuplicateClicks(optimizedSteps);
@@ -53,10 +61,17 @@ class FlowOptimizer {
     console.log('[FlowOptimizer] Step 4: Merging consecutive inputs...');
     optimizedSteps = this.mergeConsecutiveInputs(optimizedSteps);
 
-    // Step 5: Calculate what was removed (before renumbering!)
+    // Step 5: Validate workflow logic
+    console.log('[FlowOptimizer] Step 5: Validating workflow logic...');
+    const validationResult = this.validateWorkflowLogic(optimizedSteps);
+    if (validationResult.hasIssues) {
+      console.warn('[FlowOptimizer] Workflow validation warnings:', validationResult.issues);
+    }
+
+    // Step 6: Calculate what was removed (before renumbering!)
     const removedSteps = this.getRemovedSteps(originalSteps, optimizedSteps);
 
-    // Step 6: Renumber steps
+    // Step 7: Renumber steps
     optimizedSteps = this.renumberSteps(optimizedSteps);
 
     console.log('[FlowOptimizer] Optimization complete');
@@ -69,6 +84,8 @@ class FlowOptimizer {
       removedSteps,
       aiSuggestions: aiAnalysis ? aiAnalysis.suggestions : [],
       aiRemovals: aiAnalysis ? aiAnalysis.stepsToRemove : [],
+      aiLogicWarnings: aiAnalysis ? (aiAnalysis.logicWarnings || []) : [],
+      validationWarnings: validationResult.hasIssues ? validationResult.issues : [],
       savings: {
         stepsRemoved: removedSteps.length,
         percentageReduced: originalSteps.length > 0
@@ -76,6 +93,120 @@ class FlowOptimizer {
           : '0'
       }
     };
+  }
+
+  /**
+   * Validate workflow logic to detect illogical step sequences
+   * @param {Array} steps - Workflow steps
+   * @returns {Object} Validation result
+   */
+  validateWorkflowLogic(steps) {
+    const issues = [];
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      const nextStep = i < steps.length - 1 ? steps[i + 1] : null;
+      const prevStep = i > 0 ? steps[i - 1] : null;
+
+      // Check for navigation inconsistencies
+      if (step.type === 'click' && nextStep && nextStep.type === 'navigation') {
+        // Check if the clicked element description matches the navigation URL
+        const clickDescription = step.target?.description?.toLowerCase() || '';
+        const navUrl = nextStep.url?.toLowerCase() || '';
+
+        // Extract domain/service from descriptions
+        const clickedService = this.extractServiceName(clickDescription);
+        const navService = this.extractServiceName(navUrl);
+
+        if (clickedService && navService && clickedService !== navService) {
+          issues.push({
+            stepNumber: step.stepNumber,
+            type: 'navigation_mismatch',
+            message: `Step ${step.stepNumber} clicks "${clickDescription}" but next step navigates to ${nextStep.url}`,
+            severity: 'warning'
+          });
+        }
+      }
+
+      // Check for orphaned navigation (navigation without prior interaction)
+      if (step.type === 'navigation' && prevStep) {
+        if (prevStep.type === 'click' || prevStep.type === 'keypress') {
+          // This is fine - navigation after interaction
+        } else {
+          // Standalone navigation - check if it makes sense
+          if (prevStep.type === 'navigation') {
+            issues.push({
+              stepNumber: step.stepNumber,
+              type: 'consecutive_navigation',
+              message: `Step ${step.stepNumber} navigates immediately after another navigation (step ${prevStep.stepNumber})`,
+              severity: 'info'
+            });
+          }
+        }
+      }
+
+      // Check for clicks without visible effect
+      if (step.type === 'click' && nextStep) {
+        const hasVisibleEffect = nextStep.type === 'navigation' ||
+                                 nextStep.type === 'wait' ||
+                                 (nextStep.type === 'click' &&
+                                  nextStep.target?.selector !== step.target?.selector);
+
+        if (!hasVisibleEffect && i < steps.length - 2) {
+          // Check next 2 steps for any effect
+          const nextNextStep = steps[i + 2];
+          const hasDelayedEffect = nextNextStep.type === 'navigation' ||
+                                   nextNextStep.type === 'wait';
+
+          if (!hasDelayedEffect) {
+            issues.push({
+              stepNumber: step.stepNumber,
+              type: 'isolated_click',
+              message: `Step ${step.stepNumber} click on "${step.target?.description || step.target?.selector}" has no apparent effect`,
+              severity: 'info'
+            });
+          }
+        }
+      }
+    }
+
+    return {
+      hasIssues: issues.length > 0,
+      issues: issues
+    };
+  }
+
+  /**
+   * Extract service name from text (e.g., "YouTube" from "youtube.com" or "YouTube button")
+   * @param {string} text - Text to extract from
+   * @returns {string|null} Service name
+   */
+  extractServiceName(text) {
+    if (!text) return null;
+
+    text = text.toLowerCase();
+
+    // Common services
+    const services = {
+      'youtube': 'youtube',
+      'sheets': 'sheets',
+      'docs': 'docs',
+      'gmail': 'gmail',
+      'drive': 'drive',
+      'calendar': 'calendar',
+      'google': 'google',
+      'facebook': 'facebook',
+      'twitter': 'twitter',
+      'linkedin': 'linkedin'
+    };
+
+    for (const [key, value] of Object.entries(services)) {
+      if (text.includes(key)) {
+        return value;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -126,9 +257,9 @@ class FlowOptimizer {
           continue;
         }
 
-        // 3. It's a page-load wait (auto-added, usually unnecessary)
-        if (step.condition === 'page-load') {
-          console.log('[FlowOptimizer] Removed auto page-load wait:', step.timeout, 'ms');
+        // 3. It's a page-load wait immediately after navigation (MacroExecutor auto-waits)
+        if (step.condition === 'page-load' && i > 0 && steps[i - 1].type === 'navigation') {
+          console.log('[FlowOptimizer] Removed redundant page-load wait after navigation:', step.timeout, 'ms');
           continue;
         }
 
@@ -256,15 +387,14 @@ class FlowOptimizer {
    * Calculate which steps were removed
    */
   getRemovedSteps(original, optimized) {
-    // Create a set of optimized step IDs using stepNumber + timestamp as unique key
-    const optimizedKeys = new Set(
-      optimized.map(s => `${s.stepNumber}-${s.timestamp}`)
+    // Use timestamp as unique key (stepNumber changes during optimization)
+    const optimizedTimestamps = new Set(
+      optimized.map(s => s.timestamp)
     );
 
     // Find steps that are in original but not in optimized
     return original.filter(s => {
-      const key = `${s.stepNumber}-${s.timestamp}`;
-      return !optimizedKeys.has(key);
+      return !optimizedTimestamps.has(s.timestamp);
     });
   }
 

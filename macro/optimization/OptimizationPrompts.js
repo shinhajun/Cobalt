@@ -144,10 +144,18 @@ class OptimizationPrompts {
     prompt += `3. Wait steps that are unnecessary (the system auto-waits between actions)\n`;
     prompt += `4. Clicks or inputs that could be consolidated\n\n`;
 
+    prompt += `CRITICAL - Workflow Logic Validation:\n`;
+    prompt += `- Check if click actions match their subsequent navigation URLs\n`;
+    prompt += `- For example, if step N clicks "Sheets" button, but step N+1 navigates to YouTube, this is ILLOGICAL\n`;
+    prompt += `- If a click on service X is followed by navigation to service Y (where X ≠ Y), flag this as suspicious\n`;
+    prompt += `- Consider whether removing a step would break the workflow's logical sequence\n`;
+    prompt += `- A step should only be removed if it's truly redundant, NOT if it's part of a coherent action sequence\n\n`;
+
     prompt += `IMPORTANT: Return your response as a JSON object with this exact structure:\n`;
     prompt += `{\n`;
     prompt += `  "stepsToRemove": [array of step numbers to remove, e.g., [3, 5, 7]],\n`;
-    prompt += `  "suggestions": [array of text explanations for why each step should be removed]\n`;
+    prompt += `  "suggestions": [array of text explanations for why each step should be removed],\n`;
+    prompt += `  "logicWarnings": [array of workflow logic issues found, e.g., ["Step 2 clicks Sheets but step 3 goes to YouTube"]]\n`;
     prompt += `}\n\n`;
 
     prompt += `Example response:\n`;
@@ -156,10 +164,13 @@ class OptimizationPrompts {
     prompt += `  "suggestions": [\n`;
     prompt += `    "Step 3 is a duplicate click on the same element",\n`;
     prompt += `    "Step 6 is an unnecessary wait - the system already waits for page loads"\n`;
+    prompt += `  ],\n`;
+    prompt += `  "logicWarnings": [\n`;
+    prompt += `    "Step 1 clicks 'Sheets' but step 2 navigates to YouTube - workflow logic appears inconsistent"\n`;
     prompt += `  ]\n`;
     prompt += `}\n\n`;
 
-    prompt += `If no steps should be removed, return: {"stepsToRemove": [], "suggestions": []}`;
+    prompt += `If no steps should be removed and no warnings, return: {"stepsToRemove": [], "suggestions": [], "logicWarnings": []}`;
 
     return prompt;
   }
@@ -189,7 +200,8 @@ class OptimizationPrompts {
 
       return {
         stepsToRemove: Array.isArray(parsed.stepsToRemove) ? parsed.stepsToRemove : [],
-        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : []
+        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions : [],
+        logicWarnings: Array.isArray(parsed.logicWarnings) ? parsed.logicWarnings : []
       };
 
     } catch (error) {

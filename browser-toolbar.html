@@ -253,6 +253,11 @@
       -webkit-app-region: drag; /* 타이틀바처럼 드래그 가능 */
     }
 
+    /* macOS: Add left padding for traffic light buttons */
+    .tab-bar.macos {
+      padding-left: 78px; /* Space for macOS window controls (red, yellow, green) */
+    }
+
     /* Cobalt 브랜드 로고 */
     .cobalt-brand {
       display: flex;
@@ -530,6 +535,7 @@
 
   <script>
     const { ipcRenderer } = require('electron');
+    const { platform } = require('os');
 
     const backBtn = document.getElementById('backBtn');
     const forwardBtn = document.getElementById('forwardBtn');
@@ -540,6 +546,11 @@
     const chatIframe = document.getElementById('chatIframe');
     const toolbar = document.getElementById('toolbar');
     const tabBar = document.getElementById('tabBar');
+
+    // Detect macOS and add class for styling (run after tabBar is defined)
+    if (platform() === 'darwin' && tabBar) {
+      tabBar.classList.add('macos');
+    }
     const tabsContainer = document.getElementById('tabsContainer');
     const newTabBtn = document.getElementById('newTabBtn');
     const statusBar = document.getElementById('statusBar');
@@ -559,6 +570,75 @@
     let tabs = [{ id: 0, title: 'New Tab', url: homePageUrl, favicon: 'cobalt_logo.png' }];
     let nextTabId = 1;
 
+    // === Tab Persistence (save/restore across app restarts) ===
+    function saveTabsState() {
+      try {
+        const state = { tabs, currentTabId, nextTabId };
+        localStorage.setItem('tabs_state', JSON.stringify(state));
+      } catch (_) { /* ignore */ }
+    }
+
+    function restoreTabsStateIfAny() {
+      try {
+        const raw = localStorage.getItem('tabs_state');
+        if (!raw) return false;
+        const state = JSON.parse(raw);
+        if (!state || !Array.isArray(state.tabs) || state.tabs.length === 0) return false;
+
+        // Reset UI and internal arrays
+        tabs = state.tabs.map(t => ({ id: t.id, title: t.title || 'New Tab', url: t.url || homePageUrl, favicon: t.favicon || 'cobalt_logo.png' }));
+        currentTabId = typeof state.currentTabId === 'number' ? state.currentTabId : tabs[0].id;
+        nextTabId = typeof state.nextTabId === 'number' ? state.nextTabId : Math.max(...tabs.map(t => t.id)) + 1;
+
+        // Clear existing tab elements except the "+" button
+        document.querySelectorAll('.tab').forEach(el => el.remove());
+
+        // Rebuild tab UI
+        for (const t of tabs) {
+          const tabElement = document.createElement('div');
+          tabElement.className = 'tab';
+          tabElement.setAttribute('data-tab-id', t.id);
+          tabElement.setAttribute('draggable', 'true');
+          tabElement.innerHTML = `
+            <img class="tab-favicon" id="tab-favicon-${t.id}" src="${t.favicon || getFaviconUrl(t.url)}" alt="">
+            <span class="tab-title" id="tab-title-${t.id}">${t.title || 'New Tab'}</span>
+            <span class="tab-close">×</span>
+          `;
+          tabElement.addEventListener('click', (e) => {
+            if (e.target.classList.contains('tab-close')) {
+              closeTab(t.id);
+            } else {
+              switchTab(t.id);
+            }
+          });
+          setupTabDragEvents(tabElement, t.id);
+          tabsContainer.insertBefore(tabElement, newTabBtn);
+        }
+
+        // If the initial default tab (0) is not in saved state, ask main to close it
+        if (!tabs.some(t => t.id === 0)) {
+          try { ipcRenderer.invoke('close-tab', { tabId: 0 }); } catch (_) {}
+        }
+
+        // Switch to the saved current tab and force URL restore
+        const current = tabs.find(t => t.id === currentTabId) || tabs[0];
+        if (current) {
+          ipcRenderer.invoke('switch-tab', { tabId: current.id, url: current.url, restore: true }).catch(() => {});
+        }
+
+        // Do not auto-add an extra startup tab on restore.
+
+        // Mark active tab visually
+        document.querySelectorAll('.tab').forEach(tab => {
+          const tabIdAttr = parseInt(tab.getAttribute('data-tab-id'));
+          if (tabIdAttr === currentTabId) tab.classList.add('active'); else tab.classList.remove('active');
+        });
+
+        saveTabsState();
+        return true;
+      } catch (_) { return false; }
+    }
+
     // 기본 favicon (빈 페이지용)
     const defaultFavicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='8' y='12' text-anchor='middle' font-size='12'%3E📄%3C/text%3E%3C/svg%3E";
 
@@ -575,8 +655,15 @@
       }
     }
 
-    // 초기 상태 설정 (채팅 닫힌 상태)
+    // 초기 상태 설정 (채팅 닫힌 상태) + ensure main process layout is full width
     toolbar.classList.add('full-width');
+    tabBar.classList.add('full-width');
+    chatIframe.classList.add('hidden');
+    chatVisible = false;
+    try { ipcRenderer.invoke('toggle-chat', { visible: false }); } catch (_) {}
+
+    // Attempt to restore tabs from last session
+    restoreTabsStateIfAny();
 
     // Record 버튼 토글
     recordBtn.addEventListener('click', async () => {
@@ -704,6 +791,7 @@
         console.log('[Toolbar] Tab element added to DOM. DOM tabs count:', document.querySelectorAll('.tab').length);
 
         switchTab(tabId);
+        saveTabsState();
       } finally {
         // Reset flag after a short delay to allow the operation to complete
         setTimeout(() => {
@@ -760,6 +848,8 @@
           }
         }
       });
+      // Persist order after drop
+      saveTabsState();
     }
 
     // 탭 전환
@@ -803,6 +893,8 @@
             console.error('[Toolbar] Failed to switch tab:', err);
           });
       }
+      // Persist active tab change
+      saveTabsState();
     }
 
     // 탭 닫기
@@ -839,6 +931,8 @@
           switchTab(nextTab.id);
         }
       }
+      // Persist after close
+      saveTabsState();
     }
 
     // Initialize first tab with event listeners
@@ -1075,6 +1169,7 @@
 
       // Switch to the new tab and load the URL
       switchTab(tabId, url);
+      saveTabsState();
     });
 
     // 초기 탭에 드래그 이벤트 설정
@@ -1146,6 +1241,24 @@
         statusBar.style.display = 'none';
         statusBar.textContent = '';
       }
+    });
+
+    // Keep saved tabs in sync when the active tab's URL/title changes
+    ipcRenderer.on('url-changed', (_e, url, title) => {
+      try {
+        const idx = tabs.findIndex(t => t.id === currentTabId);
+        if (idx >= 0) {
+          tabs[idx].url = url || tabs[idx].url;
+          tabs[idx].title = title || tabs[idx].title;
+          tabs[idx].favicon = getFaviconUrl(url || '');
+          // Update UI too
+          const tEl = document.getElementById(`tab-title-${currentTabId}`);
+          if (tEl && title) tEl.textContent = title;
+          const fEl = document.getElementById(`tab-favicon-${currentTabId}`);
+          if (fEl) fEl.src = tabs[idx].favicon;
+          saveTabsState();
+        }
+      } catch (_) { /* ignore */ }
     });
 
     // ========================================

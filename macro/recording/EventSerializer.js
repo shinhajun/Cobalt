@@ -107,11 +107,15 @@ class EventSerializer {
       return parts.join('');
     }
 
-    // Class names
+    // Class names - use multiple classes for better specificity
     if (targetData.className && typeof targetData.className === 'string') {
-      const classes = targetData.className.trim().split(/\s+/);
-      if (classes.length > 0 && classes[0]) {
-        parts.push(`.${classes[0]}`);
+      const classes = targetData.className.trim().split(/\s+/).filter(c => c && !c.match(/^[0-9]/));
+      if (classes.length > 0) {
+        // Use up to 3 classes for better specificity
+        const classesToUse = classes.slice(0, 3);
+        classesToUse.forEach(className => {
+          parts.push(`.${className}`);
+        });
       }
     }
 

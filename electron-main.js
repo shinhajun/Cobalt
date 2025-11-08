@@ -39,7 +39,8 @@ let currentMacroExecutor = null; // Current running macro executor
 // Macro recording instances
 let recordingManager = new RecordingManager();
 let eventCollector = null;
-let currentEditingMacro = null; // Current macro being edited in flowchart
+// Map of window ID to editing macro (allows multiple flowchart windows)
+const currentEditingMacros = new Map();
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -907,6 +908,233 @@ function updateBrowserViewBounds() {
     width: browserWidth,
     height: height - topOffset
   });
+}
+
+// Macro Execution Overlay Functions
+async function showMacroExecutionOverlay(macroName, progress, description, screenshot) {
+  if (!browserView || !browserView.webContents) {
+    console.log('[Macro Overlay] BrowserView not available');
+    return;
+  }
+
+  // Check if document is ready for injection
+  try {
+    const hasDocument = await browserView.webContents.executeJavaScript(
+      'typeof document !== "undefined" && document.readyState !== "loading"'
+    ).catch(() => false);
+
+    if (!hasDocument) {
+      console.log('[Macro Overlay] Document not ready, retrying in 100ms...');
+      setTimeout(() => {
+        showMacroExecutionOverlay(macroName, progress, description, screenshot);
+      }, 100);
+      return;
+    }
+  } catch (err) {
+    console.error('[Macro Overlay] Failed to check document readiness:', err.message);
+    return;
+  }
+
+  try {
+    await browserView.webContents.executeJavaScript(`
+      (function(macroName, progress, description, screenshot) {
+        let overlay = document.getElementById('__macro_overlay');
+        if (!overlay) {
+          // Create overlay first time
+          overlay = document.createElement('div');
+          overlay.id = '__macro_overlay';
+          overlay.innerHTML = \`
+            <style>
+              #__macro_overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100vw;
+                height: 100vh;
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
+                background-size: 400% 400%;
+                animation: gradient 20s ease infinite;
+                z-index: 999999;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                padding: 40px;
+              }
+              @keyframes gradient {
+                0% { background-position: 0% 50%; }
+                50% { background-position: 100% 50%; }
+                100% { background-position: 0% 50%; }
+              }
+              #__macro_content {
+                background: white;
+                border-radius: 12px;
+                box-shadow: 0 30px 90px rgba(0,0,0,0.4);
+                overflow: hidden;
+                max-width: 92%;
+                max-height: 92%;
+                display: flex;
+                flex-direction: column;
+              }
+              #__macro_header {
+                background: rgba(246, 246, 246, 0.98);
+                padding: 12px 16px;
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+              }
+              #__macro_dots {
+                display: flex;
+                gap: 8px;
+              }
+              .dot {
+                width: 12px;
+                height: 12px;
+                border-radius: 50%;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+              }
+              .dot-red {
+                background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
+              }
+              .dot-yellow {
+                background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
+              }
+              .dot-green {
+                background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
+              }
+              #__macro_title {
+                flex: 1;
+                font-size: 14px;
+                font-weight: 600;
+                color: #333;
+              }
+              #__macro_img {
+                display: block;
+                width: 100%;
+                max-height: 70vh;
+                object-fit: contain;
+                background: white;
+              }
+              #__macro_footer {
+                background: rgba(246, 246, 246, 0.98);
+                padding: 16px;
+                border-top: 1px solid rgba(0, 0, 0, 0.1);
+              }
+              #__macro_progress_container {
+                margin-bottom: 8px;
+              }
+              #__macro_progress_bar {
+                width: 100%;
+                height: 6px;
+                background: rgba(102, 126, 234, 0.2);
+                border-radius: 3px;
+                overflow: hidden;
+              }
+              #__macro_progress_fill {
+                height: 100%;
+                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                transition: width 0.3s ease;
+                width: 0%;
+              }
+              #__macro_status {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-top: 8px;
+              }
+              #__macro_description {
+                font-size: 13px;
+                color: #666;
+              }
+              #__macro_percentage {
+                font-size: 13px;
+                font-weight: 600;
+                color: #667eea;
+              }
+            </style>
+            <div id="__macro_content">
+              <div id="__macro_header">
+                <div id="__macro_dots">
+                  <div class="dot dot-red"></div>
+                  <div class="dot dot-yellow"></div>
+                  <div class="dot dot-green"></div>
+                </div>
+                <div id="__macro_title">Macro Running</div>
+              </div>
+              <img id="__macro_img" src="" />
+              <div id="__macro_footer">
+                <div id="__macro_progress_container">
+                  <div id="__macro_progress_bar">
+                    <div id="__macro_progress_fill"></div>
+                  </div>
+                </div>
+                <div id="__macro_status">
+                  <div id="__macro_description"></div>
+                  <div id="__macro_percentage">0%</div>
+                </div>
+              </div>
+            </div>
+          \`;
+          document.body.appendChild(overlay);
+        }
+
+        // Update title
+        const titleEl = document.getElementById('__macro_title');
+        if (titleEl) {
+          titleEl.textContent = macroName || 'Macro Running';
+        }
+
+        // Update screenshot
+        const img = document.getElementById('__macro_img');
+        if (img && screenshot) {
+          img.src = screenshot;
+        }
+
+        // Update progress
+        const progressFill = document.getElementById('__macro_progress_fill');
+        if (progressFill) {
+          progressFill.style.width = progress + '%';
+        }
+
+        // Update description
+        const descEl = document.getElementById('__macro_description');
+        if (descEl) {
+          descEl.textContent = description || '';
+        }
+
+        // Update percentage
+        const percentEl = document.getElementById('__macro_percentage');
+        if (percentEl) {
+          percentEl.textContent = Math.round(progress) + '%';
+        }
+      })(${JSON.stringify(macroName)}, ${progress}, ${JSON.stringify(description)}, ${JSON.stringify(screenshot)});
+    `);
+    console.log('[Macro Overlay] Overlay injected successfully');
+  } catch (err) {
+    console.error('[Macro Overlay] Failed to inject overlay:', err.message);
+  }
+}
+
+function removeMacroExecutionOverlay() {
+  if (!browserView || !browserView.webContents) {
+    console.log('[Macro Overlay] BrowserView not available');
+    return;
+  }
+
+  try {
+    browserView.webContents.executeJavaScript(`
+      (function() {
+        const overlay = document.getElementById('__macro_overlay');
+        if (overlay) {
+          overlay.remove();
+        }
+      })();
+    `).catch((err) => {
+      console.error('[Macro Overlay] Failed to remove overlay:', err.message);
+    });
+  } catch (err) {
+    console.error('[Macro Overlay] Overlay removal error:', err);
+  }
 }
 
 // IPC: Handle translation request from BrowserView
@@ -1929,7 +2157,7 @@ ipcMain.handle('toggle-chat', async (_event, { visible }) => {
 });
 
 // IPC: Switch tab
-ipcMain.handle('switch-tab', async (_event, { tabId, url }) => {
+ipcMain.handle('switch-tab', async (_event, { tabId, url, restore }) => {
   console.log('[Electron] Switching to tab:', tabId, 'URL:', url);
 
   try {
@@ -1955,8 +2183,20 @@ ipcMain.handle('switch-tab', async (_event, { tabId, url }) => {
       console.log('[Electron] Switching to existing BrowserView for tab:', tabId);
       switchToTab(tabId);
 
-      // Don't reload the URL - keep the current page state
-      console.log('[Electron] Keeping existing page state, not reloading');
+      // During session restore, we may want to load the saved URL
+      if (restore && url) {
+        try {
+          const current = tabView.webContents.getURL();
+          if (current !== url) {
+            console.log('[Electron] Restoring tab URL:', url);
+            await tabView.webContents.loadURL(url);
+          }
+        } catch (e) {
+          console.warn('[Electron] Failed to restore URL for tab', tabId, e.message || e);
+        }
+      } else {
+        console.log('[Electron] Keeping existing page state, not reloading');
+      }
     }
 
     return { success: true };
@@ -2179,8 +2419,10 @@ ipcMain.handle('macro-stop-recording', async (event) => {
       const macro = generator.generate(result.macro, analyzedSteps);
       console.log('[Electron] Flowchart generated');
 
-      // Store for viewing
-      currentEditingMacro = macro;
+      // Store for viewing (using main window ID)
+      if (mainWindow) {
+        currentEditingMacros.set(mainWindow.id, macro);
+      }
 
       return {
         success: true,
@@ -2209,8 +2451,6 @@ ipcMain.handle('macro-show-flowchart', async (event, macro) => {
   console.log('[Electron] Opening flowchart viewer for macro:', macro.name);
 
   try {
-    currentEditingMacro = macro;
-
     // Create new window for flowchart
     const { BrowserWindow } = require('electron');
 
@@ -2226,6 +2466,14 @@ ipcMain.handle('macro-show-flowchart', async (event, macro) => {
       }
     });
 
+    // Store macro for this window
+    currentEditingMacros.set(flowchartWindow.id, macro);
+
+    // Clean up when window closes
+    flowchartWindow.on('closed', () => {
+      currentEditingMacros.delete(flowchartWindow.id);
+    });
+
     // Use new React-based flowchart viewer
     flowchartWindow.loadFile(path.join(__dirname, 'macro', 'ui', 'MacroFlowchart-new.html'));
 
@@ -2238,7 +2486,12 @@ ipcMain.handle('macro-show-flowchart', async (event, macro) => {
 
 // IPC: Get current macro being edited
 ipcMain.handle('get-current-macro', async (event) => {
-  return currentEditingMacro;
+  const sender = event.sender;
+  const window = BrowserWindow.fromWebContents(sender);
+  if (window) {
+    return currentEditingMacros.get(window.id);
+  }
+  return null;
 });
 
 // IPC: Save macro
@@ -2246,15 +2499,36 @@ ipcMain.handle('save-macro', async (event, macroData) => {
   console.log('[Electron] Saving macro:', macroData.name);
 
   try {
+    // Validate macro data exists
+    if (!macroData) {
+      throw new Error('No macro data provided');
+    }
+
     const MacroStorage = require('./macro/execution/MacroStorage');
     const storage = new MacroStorage();
 
     await storage.save(macroData);
 
+    console.log('[Electron] Macro saved successfully:', macroData.id);
     return { success: true, id: macroData.id };
   } catch (error) {
-    console.error('[Electron] Failed to save macro:', error);
-    return { success: false, error: error.message };
+    console.error('[Electron] Failed to save macro:', error.message);
+    console.error('[Electron] Error details:', error);
+
+    // Provide more specific error messages
+    let userFriendlyMessage = error.message;
+
+    if (error.message.includes('name')) {
+      userFriendlyMessage = `Name validation failed: ${error.message}`;
+    } else if (error.message.includes('Step')) {
+      userFriendlyMessage = `Invalid step configuration: ${error.message}`;
+    } else if (error.message.includes('EACCES') || error.message.includes('EPERM')) {
+      userFriendlyMessage = 'Permission denied. Unable to save macro file. Please check file permissions.';
+    } else if (error.message.includes('ENOSPC')) {
+      userFriendlyMessage = 'Not enough disk space to save macro.';
+    }
+
+    return { success: false, error: userFriendlyMessage };
   }
 });
 
@@ -2290,6 +2564,31 @@ ipcMain.handle('list-macros', async (event) => {
     console.error('[Electron] Failed to list macros:', error);
     return { success: false, error: error.message };
   }
+});
+
+// IPC: Delete macro
+ipcMain.handle('delete-macro', async (event, macroId) => {
+  console.log('[Electron] Deleting macro:', macroId);
+
+  try {
+    const MacroStorage = require('./macro/execution/MacroStorage');
+    const storage = new MacroStorage();
+
+    await storage.delete(macroId);
+
+    // Notify renderer that macro was deleted
+    mainWindow.webContents.send('macro-deleted', { macroId });
+
+    return { success: true };
+  } catch (error) {
+    console.error('[Electron] Failed to delete macro:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Check if chat sidebar is visible
+ipcMain.handle('is-chat-sidebar-visible', async (event) => {
+  return chatVisible;
 });
 
 // IPC: Execute macro
@@ -2333,6 +2632,8 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
     // Forward all executor events to renderer process
     executor.on('macro-started', (data) => {
       mainWindow.webContents.send('macro-started', data);
+      // Show macro execution overlay
+      showMacroExecutionOverlay(macroData.name, 0, '', null);
     });
 
     executor.on('step-start', (data) => {
@@ -2341,6 +2642,10 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
 
     executor.on('step-complete', (data) => {
       mainWindow.webContents.send('macro-step-complete', data);
+      // Update overlay with progress
+      const progress = parseFloat(data.progress) || 0;
+      const description = data.description || `Step ${data.stepNumber}`;
+      showMacroExecutionOverlay(macroData.name, progress, description, null);
     });
 
     executor.on('step-error', (data) => {
@@ -2349,15 +2654,23 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
 
     executor.on('screenshot', (data) => {
       mainWindow.webContents.send('macro-screenshot', data);
+      // Update overlay with screenshot
+      const progress = 0; // Progress will be updated by step-complete
+      const description = `Step ${data.stepNumber}`;
+      showMacroExecutionOverlay(macroData.name, progress, description, data.screenshot);
     });
 
     executor.on('macro-complete', (data) => {
       mainWindow.webContents.send('macro-complete', data);
+      // Remove overlay
+      removeMacroExecutionOverlay();
       currentMacroExecutor = null; // Clear executor after completion
     });
 
     executor.on('macro-stopped', (data) => {
       mainWindow.webContents.send('macro-stopped', data);
+      // Remove overlay
+      removeMacroExecutionOverlay();
       currentMacroExecutor = null; // Clear executor after stop
     });
 
@@ -2366,7 +2679,10 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
       currentMacroExecutor = null; // Clear executor after error
     });
 
-    const result = await executor.execute(macroData);
+    const result = await executor.execute(macroData).catch(err => {
+      console.error('[Electron] Executor promise rejection:', err);
+      throw err; // Re-throw to be caught by outer try-catch
+    });
 
     return { success: true, result: result };
   } catch (error) {
@@ -2432,12 +2748,12 @@ ipcMain.handle('optimize-macro', async (event, { macroData, model }) => {
 });
 
 // IPC: Execute macro with AI agent
-ipcMain.handle('ai-execute-macro', async (event, macroData) => {
-  console.log('[Electron] AI executing macro:', macroData.name);
+ipcMain.handle('ai-execute-macro', async (event, { macroData, model }) => {
+  console.log('[Electron] AI executing macro:', macroData.name, 'with model:', model);
 
   try {
     const AIAgentBridge = require('./macro/integration/AIAgentBridge');
-    const bridge = new AIAgentBridge(browserView, mainWindow);
+    const bridge = new AIAgentBridge(browserView, mainWindow, model);
 
     const result = await bridge.executeWithAI(macroData);
 

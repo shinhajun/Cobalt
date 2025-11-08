@@ -93,7 +93,7 @@ const INJECTION_SCRIPT = `
     inputDebounceTimer = setTimeout(() => {
       if (lastInputEvent) {
         console.log('[EventCollector] Sending debounced input event');
-        window.__electronAPI.sendMacroEvent(lastInputEvent);
+        window.__browserViewAPI.sendMacroEvent(lastInputEvent);
         lastInputEvent = null;
       }
     }, 500);
@@ -111,7 +111,7 @@ const INJECTION_SCRIPT = `
 
     // Flush any pending input event first
     if (lastInputEvent) {
-      window.__electronAPI.sendMacroEvent(lastInputEvent);
+      window.__browserViewAPI.sendMacroEvent(lastInputEvent);
       lastInputEvent = null;
       if (inputDebounceTimer) {
         clearTimeout(inputDebounceTimer);
@@ -236,14 +236,17 @@ class EventCollector {
       const serialized = EventSerializer.serialize(event);
       this.recordingManager.addEvent(serialized);
 
-      // Re-inject script on navigation
-      setTimeout(() => {
+      // Re-inject script after page finishes loading (more reliable than setTimeout)
+      const finishLoadHandler = () => {
         if (this.isCollecting) {
           browserView.webContents.executeJavaScript(INJECTION_SCRIPT).catch(err => {
             console.error('[EventCollector] Failed to re-inject after navigation:', err);
           });
         }
-      }, 1000);
+      };
+
+      // Listen once for page load completion
+      browserView.webContents.once('did-finish-load', finishLoadHandler);
     };
 
     // Only listen to 'did-navigate' (full page loads), not 'did-navigate-in-page' (SPA hash changes)
@@ -269,7 +272,6 @@ class EventCollector {
     // Remove navigation listeners
     if (this.currentView && this.navigationListener) {
       this.currentView.webContents.removeListener('did-navigate', this.navigationListener);
-      this.currentView.webContents.removeListener('did-navigate-in-page', this.navigationListener);
     }
 
     // Remove injection from page

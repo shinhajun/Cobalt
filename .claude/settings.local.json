@@ -28,7 +28,8 @@
       "Bash(node test-optimization.js:*)",
       "Bash(node test-optimization-advanced.js:*)",
       "Bash(node:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(nul)"
     ],
     "deny": [],
     "ask": []

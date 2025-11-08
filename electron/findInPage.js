@@ -1,6 +1,10 @@
 const { ipcMain } = require('electron');
 
+// Prevent duplicate handler registration when macOS recreates windows
+let findInPageHandlersRegistered = false;
+
 function setupFindInPageIPC(mainWindow, getActiveWebContents) {
+  if (findInPageHandlersRegistered) return;
   ipcMain.handle('find-in-page', async (_event, { query, forward = true, findNext = false, matchCase = false }) => {
     const wc = getActiveWebContents();
     if (!wc) return { success: false };
@@ -20,6 +24,7 @@ function setupFindInPageIPC(mainWindow, getActiveWebContents) {
   });
 
   // Consumer module should attach 'found-in-page' events per BrowserView
+  findInPageHandlersRegistered = true;
 }
 
 function attachFoundInPageForwarder(wc, mainWindow) {
@@ -32,4 +37,3 @@ function attachFoundInPageForwarder(wc, mainWindow) {
 }
 
 module.exports = { setupFindInPageIPC, attachFoundInPageForwarder };
-

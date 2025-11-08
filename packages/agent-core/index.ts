@@ -1,7 +1,8 @@
 // Export browser-use style services (actual implementations)
 export { BrowserController } from './src/browserController.js';
 export { LLMService } from './src/llmService.js';
-export type { AgentLogCallback, AgentOutput, ActionResult, LLMServiceConfig } from './src/llmService.js';
+export type { AgentLogCallback, AgentOutput, LLMServiceConfig } from './src/llmService.js';
+export type { ActionResult } from './src/tools/registry.js';
 export type { BrowserStateSummary, TabInfo } from './src/browserController.js';
 
 // Export actor classes (browser-use style)
