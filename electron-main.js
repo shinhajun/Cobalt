@@ -64,9 +64,10 @@ function createWindow() {
   // BrowserView 생성 (왼쪽 70% - 실제 브라우저)
   browserView = new BrowserView({
     webPreferences: {
+      preload: path.join(__dirname, 'browser-view-preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: true,
+      sandbox: true, // contextBridge 사용으로 sandbox 활성화 가능
     }
   });
 
@@ -107,47 +108,36 @@ function createWindow() {
         if (window.__textSelectionInjected) return;
         window.__textSelectionInjected = true;
 
+        console.log('[Text Selection] Script injection started');
+
         let popup = null;
         let isEditingInput = false; // Flag to prevent popup recreation
 
-        // Listen for messages from injected script
-        window.addEventListener('message', async (event) => {
-          if (event.data.type === 'translate-text-request') {
-            showNotification('Translating...', false);
-            // Use fetch to call the translation via window context
-            try {
-              const response = await fetch('electron://translate', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: event.data.text })
-              }).catch(() => null);
+        // Setup result listeners when API becomes available
+        function setupListeners() {
+          if (!window.__browserViewAPI) {
+            console.warn('[Text Selection] API not ready, retrying in 50ms...');
+            setTimeout(setupListeners, 50);
+            return;
+          }
 
-              // Since we can't use fetch with electron://, we'll use a different approach
-              // Store the request in window and check it periodically
-              window.__pendingTranslate = event.data.text;
-            } catch (e) {
-              // Fallback: store in window
-              window.__pendingTranslate = event.data.text;
+          console.log('[Text Selection] Setting up listeners');
+
+          // Listen for translation results
+          window.__browserViewAPI.onTranslationResult((result) => {
+          console.log('[Text Selection] Translation result received:', result);
+          if (result && result.translation) {
+            // Use modern Clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(result.translation).catch(err => {
+                console.error('[Text Selection] Failed to copy to clipboard:', err);
+              });
             }
-          } else if (event.data.type === 'ai-edit-text-request') {
-            window.__pendingEdit = { text: event.data.text, prompt: event.data.prompt };
-            // Store reference to the popup for later update
-            window.__pendingEditPopup = popup;
-          } else if (event.data.type === 'translation-result') {
-            // Copy to clipboard
-            const tempInput = document.createElement('textarea');
-            tempInput.value = event.data.result;
-            tempInput.style.position = 'absolute';
-            tempInput.style.left = '-9999px';
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
 
             // Update button with result
             if (window.__pendingTranslateButton) {
               const btn = window.__pendingTranslateButton;
-              btn.textContent = event.data.result;
+              btn.textContent = result.translation;
               btn.disabled = false;
               btn.style.cursor = 'pointer';
               btn.style.opacity = '1';
@@ -160,20 +150,20 @@ function createWindow() {
               btn.style.color = '#166534';
 
               delete window.__pendingTranslateButton;
-              delete window.__pendingTranslateText;
-            } else {
-              showNotification(event.data.result, true);
             }
-          } else if (event.data.type === 'edit-result') {
-            // Copy to clipboard
-            const tempInput = document.createElement('textarea');
-            tempInput.value = event.data.result;
-            tempInput.style.position = 'absolute';
-            tempInput.style.left = '-9999px';
-            document.body.appendChild(tempInput);
-            tempInput.select();
-            document.execCommand('copy');
-            document.body.removeChild(tempInput);
+          }
+        });
+
+        // Listen for AI edit results
+        window.__browserViewAPI.onEditResult((result) => {
+          console.log('[Text Selection] Edit result received:', result);
+          if (result && result.editedText) {
+            // Use modern Clipboard API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+              navigator.clipboard.writeText(result.editedText).catch(err => {
+                console.error('[Text Selection] Failed to copy to clipboard:', err);
+              });
+            }
 
             // Replace the original text with edited text
             if (window.__pendingEditRange && window.__pendingEditElement) {
@@ -184,16 +174,16 @@ function createWindow() {
                 // Check if it's an input/textarea element
                 if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
                   // For input/textarea, replace the selected portion of the value
-                  const startPos = element.selectionStart;
-                  const endPos = element.selectionEnd;
+                  const startPos = window.__pendingEditSelStart !== null ? window.__pendingEditSelStart : element.selectionStart;
+                  const endPos = window.__pendingEditSelEnd !== null ? window.__pendingEditSelEnd : element.selectionEnd;
                   const originalValue = element.value;
 
                   element.value = originalValue.substring(0, startPos) +
-                                  event.data.result +
+                                  result.editedText +
                                   originalValue.substring(endPos);
 
                   // Set cursor position after the inserted text
-                  const newCursorPos = startPos + event.data.result.length;
+                  const newCursorPos = startPos + result.editedText.length;
                   element.selectionStart = newCursorPos;
                   element.selectionEnd = newCursorPos;
                   element.focus();
@@ -202,7 +192,7 @@ function createWindow() {
                 } else if (element.isContentEditable) {
                   // For contentEditable elements, use range
                   range.deleteContents();
-                  range.insertNode(document.createTextNode(event.data.result));
+                  range.insertNode(document.createTextNode(result.editedText));
                   console.log('[AI Edit] ContentEditable text replaced successfully');
                 } else {
                   console.warn('[AI Edit] Unknown editable element type');
@@ -212,6 +202,8 @@ function createWindow() {
               }
               delete window.__pendingEditRange;
               delete window.__pendingEditElement;
+              delete window.__pendingEditSelStart;
+              delete window.__pendingEditSelEnd;
             }
 
             // Update popup with result
@@ -241,6 +233,10 @@ function createWindow() {
             }
           }
         });
+        }
+
+        // Start setting up listeners
+        setupListeners();
 
         function showNotification(message, isSuccess) {
           // Remove existing notifications
@@ -286,17 +282,22 @@ function createWindow() {
           }, 5000);
         }
 
-        function createPopup(selectedText, x, y, isEditable, selectionRange, editableElement) {
+        function createPopup(selectedText, x, y, isEditable, selectionRange, editableElement, startPos, endPos) {
+          console.log('[Text Selection] createPopup called with text:', selectedText.substring(0, 30) + '...', 'isEditable:', isEditable);
+
           // Remove existing popup
           if (popup) popup.remove();
 
-          // Store the selected text, range, and element (they may be cleared when clicking button)
+          // Store the selected text, range, element, and positions (they may be cleared when clicking button)
           const text = selectedText;
           const range = selectionRange;
           const element = editableElement;
+          const selStart = startPos;
+          const selEnd = endPos;
 
           // Create popup container
           popup = document.createElement('div');
+          console.log('[Text Selection] Popup element created');
 
           // Calculate popup position (above or below selection)
           const popupHeight = 40; // Approximate height
@@ -337,6 +338,7 @@ function createWindow() {
           }
 
           if (isEditable) {
+            console.log('[Text Selection] Creating AI Edit button');
             // AI edit button
             const editBtn = document.createElement('button');
             editBtn.textContent = 'AI Edit';
@@ -408,16 +410,24 @@ function createWindow() {
                     console.log('[AI Edit] Submitting:', promptText);
                     isEditingInput = false; // Reset flag
 
-                    // Store range and element for later text replacement
+                    // Check if API is available
+                    if (!window.__browserViewAPI) {
+                      console.error('[Text Selection] BrowserView API not available for AI edit');
+                      showNotification('AI Edit failed: API not ready', false);
+                      popup.remove();
+                      return;
+                    }
+
+                    // Store range, element, and positions for later text replacement
                     window.__pendingEditRange = range;
                     window.__pendingEditElement = element;
+                    window.__pendingEditSelStart = selStart;
+                    window.__pendingEditSelEnd = selEnd;
+                    window.__pendingEditPopup = popup;
 
-                    popup.remove();
-                    window.postMessage({
-                      type: 'ai-edit-text-request',
-                      text: text,
-                      prompt: promptText
-                    }, '*');
+                    // Send AI edit request via IPC
+                    console.log('[Text Selection] Sending AI edit request via IPC');
+                    window.__browserViewAPI.requestAIEdit(text, promptText);
                   }
                 } else if (e.key === 'Escape') {
                   e.preventDefault();
@@ -440,7 +450,9 @@ function createWindow() {
               });
             };
             popup.appendChild(editBtn);
+            console.log('[Text Selection] AI Edit button added to popup');
           } else {
+            console.log('[Text Selection] Creating AI Translate button');
             // Translate button
             const translateBtn = document.createElement('button');
             translateBtn.textContent = 'AI Translate';
@@ -451,9 +463,25 @@ function createWindow() {
             translateBtn.onmouseout = () => {
               translateBtn.style.background = '#f9fafb';
             };
+
+            // Prevent mousedown from propagating
+            translateBtn.addEventListener('mousedown', (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              e.stopImmediatePropagation();
+            }, true);
+
             translateBtn.onclick = (e) => {
               e.preventDefault();
               e.stopPropagation();
+              e.stopImmediatePropagation();
+
+              // Check if API is available
+              if (!window.__browserViewAPI) {
+                console.error('[Text Selection] BrowserView API not available for translation');
+                showNotification('Translation failed: API not ready', false);
+                return;
+              }
 
               // Change button text to show loading
               translateBtn.textContent = 'Translating...';
@@ -461,18 +489,18 @@ function createWindow() {
               translateBtn.style.cursor = 'wait';
               translateBtn.style.opacity = '0.7';
 
-              // Send translation request
+              // Send translation request via IPC
               window.__pendingTranslateButton = translateBtn;
-              window.__pendingTranslateText = text;
-              window.postMessage({
-                type: 'translate-text-request',
-                text: text
-              }, '*');
+              console.log('[Text Selection] Sending translation request via IPC');
+              window.__browserViewAPI.requestTranslation(text);
             };
             popup.appendChild(translateBtn);
+            console.log('[Text Selection] AI Translate button added to popup');
           }
 
+          console.log('[Text Selection] Appending popup to document.body');
           document.body.appendChild(popup);
+          console.log('[Text Selection] Popup successfully added to DOM');
 
           // Store popup reference for later cleanup
           window.__currentPopup = popup;
@@ -482,7 +510,8 @@ function createWindow() {
           if (!isEditable) {
             setTimeout(() => {
               const clickHandler = function(e) {
-                if (popup && popup.parentNode && !popup.contains(e.target)) {
+                // Don't remove if clicking the popup itself or if translation is in progress
+                if (popup && popup.parentNode && !popup.contains(e.target) && !window.__pendingTranslateButton) {
                   popup.remove();
                   document.removeEventListener('click', clickHandler);
                 }
@@ -494,14 +523,18 @@ function createWindow() {
 
         document.addEventListener('mouseup', (e) => {
           setTimeout(() => {
+            console.log('[Text Selection] Mouseup event detected');
+
             // Don't create new popup if editing input is active
             if (isEditingInput) {
-              console.log('[Selection] Ignoring mouseup - editing input is active');
+              console.log('[Text Selection] Ignoring mouseup - editing input is active');
               return;
             }
 
             const selection = window.getSelection();
             const text = selection.toString().trim();
+
+            console.log('[Text Selection] Selected text:', text ? text.substring(0, 50) + '...' : '(empty)');
 
             if (!text) {
               if (popup) popup.remove();
@@ -524,7 +557,16 @@ function createWindow() {
             const clonedRange = range.cloneRange();
             const editableElement = isEditable ? activeElement : null;
 
-            createPopup(text, rect.left + rect.width / 2, rect.top, isEditable, clonedRange, editableElement);
+            // For input/textarea, also store selection positions
+            let selectionStart = null;
+            let selectionEnd = null;
+            if (editableElement && (editableElement.tagName === 'INPUT' || editableElement.tagName === 'TEXTAREA')) {
+              selectionStart = editableElement.selectionStart;
+              selectionEnd = editableElement.selectionEnd;
+            }
+
+            console.log('[Text Selection] Creating popup, isEditable:', isEditable);
+            createPopup(text, rect.left + rect.width / 2, rect.top, isEditable, clonedRange, editableElement, selectionStart, selectionEnd);
           }, 10);
         });
       })();
@@ -567,97 +609,84 @@ function updateBrowserViewBounds() {
   });
 }
 
+// IPC: Handle translation request from BrowserView
+ipcMain.on('browserview-translate-request', async (_event, text) => {
+  console.log('[Electron] Translation request from BrowserView:', text.substring(0, 50) + '...');
+
+  try {
+    // Get selected model and API keys from chat UI's localStorage
+    const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+    const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+    const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+    const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+    // Decode base64 API keys and set to environment
+    if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+    const modelName = selectedModel || 'gpt-5-mini';
+    console.log('[Electron] Using model for translation:', modelName);
+
+    // Create LLMService with selected model
+    const tempLLMService = new LLMService(modelName);
+
+    const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
+    const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
+
+    // Send result back to BrowserView
+    if (browserView && browserView.webContents) {
+      browserView.webContents.send('browserview-translation-result', { translation });
+      console.log('[Electron] Translation completed and sent to BrowserView');
+    }
+  } catch (error) {
+    console.error('[Electron] Translation failed:', error);
+    if (browserView && browserView.webContents) {
+      browserView.webContents.send('browserview-translation-result', { error: error.message });
+    }
+  }
+});
+
+// IPC: Handle AI edit request from BrowserView
+ipcMain.on('browserview-edit-request', async (_event, { text, prompt }) => {
+  console.log('[Electron] AI edit request from BrowserView');
+
+  try {
+    // Get selected model and API keys from chat UI's localStorage
+    const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+    const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+    const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+    const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+    // Decode base64 API keys and set to environment
+    if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+    const modelName = selectedModel || 'gpt-5-mini';
+    console.log('[Electron] Using model for AI edit:', modelName);
+
+    // Create LLMService with selected model
+    const tempLLMService = new LLMService(modelName);
+
+    const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
+    const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
+
+    // Send result back to BrowserView
+    if (browserView && browserView.webContents) {
+      browserView.webContents.send('browserview-edit-result', { editedText });
+      console.log('[Electron] AI edit completed and sent to BrowserView');
+    }
+  } catch (error) {
+    console.error('[Electron] AI edit failed:', error);
+    if (browserView && browserView.webContents) {
+      browserView.webContents.send('browserview-edit-result', { error: error.message });
+    }
+  }
+});
+
 app.whenReady().then(() => {
   createWindow();
-
-  // Poll BrowserView for pending translation/edit requests
-  setInterval(async () => {
-    if (!browserView) return;
-
-    try {
-      // Check for pending translate request
-      const pendingTranslate = await browserView.webContents.executeJavaScript('window.__pendingTranslate');
-      if (pendingTranslate) {
-        // Clear the pending request
-        await browserView.webContents.executeJavaScript('delete window.__pendingTranslate');
-
-        // Process translation
-        console.log('[Electron] Processing translation request:', pendingTranslate.substring(0, 50) + '...');
-
-        // Get selected model and API keys from chat UI's localStorage
-        const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
-        const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
-        const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
-        const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
-
-        // Decode base64 API keys and set to environment
-        if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
-        if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
-        if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
-
-        const modelName = selectedModel || 'gpt-5-mini';
-        console.log('[Electron] Using model for translation:', modelName);
-
-        // Always create new LLMService with selected model
-        const tempLLMService = new LLMService(modelName);
-
-        const prompt = `Translate the following text to English. Only provide the translation, no explanations:\\n\\n${pendingTranslate}`;
-        const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
-
-        // Send result back to BrowserView
-        await browserView.webContents.executeJavaScript(`
-          window.postMessage({
-            type: 'translation-result',
-            result: ${JSON.stringify(translation)}
-          }, '*');
-        `);
-
-        console.log('[Electron] Translation completed');
-      }
-
-      // Check for pending edit request
-      const pendingEdit = await browserView.webContents.executeJavaScript('window.__pendingEdit');
-      if (pendingEdit) {
-        // Clear the pending request
-        await browserView.webContents.executeJavaScript('delete window.__pendingEdit');
-
-        // Process AI edit
-        console.log('[Electron] Processing AI edit request');
-
-        // Get selected model and API keys from chat UI's localStorage
-        const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
-        const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
-        const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
-        const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
-
-        // Decode base64 API keys and set to environment
-        if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
-        if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
-        if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
-
-        const modelName = selectedModel || 'gpt-5-mini';
-        console.log('[Electron] Using model for AI edit:', modelName);
-
-        // Always create new LLMService with selected model
-        const tempLLMService = new LLMService(modelName);
-
-        const fullPrompt = `${pendingEdit.prompt}\\n\\nOriginal text:\\n${pendingEdit.text}\\n\\nOnly provide the edited text, no explanations:`;
-        const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
-
-        // Send result back to BrowserView
-        await browserView.webContents.executeJavaScript(`
-          window.postMessage({
-            type: 'edit-result',
-            result: ${JSON.stringify(editedText)}
-          }, '*');
-        `);
-
-        console.log('[Electron] AI edit completed');
-      }
-    } catch (error) {
-      // Silently ignore errors (page might be navigating)
-    }
-  }, 500); // Check every 500ms
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
