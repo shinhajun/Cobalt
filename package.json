@@ -1,7 +1,7 @@
 {
-  "name": "ai-agent",
+  "name": "cobalt",
   "version": "1.0.0",
-  "description": "AI Agent - Electron + Playwright + GPT-5-mini",
+  "description": "Cobalt - AI-Powered Browser",
   "main": "electron-main.js",
   "scripts": {
     "build": "cd packages/agent-core && npm run build",

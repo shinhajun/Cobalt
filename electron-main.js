@@ -36,7 +36,7 @@ let llmService = null;
 let isTaskRunning = false;
 let stopRequested = false;
 let screenshotInterval = null; // Auto-screenshot timer
-let chatVisible = true; // Chat visibility state
+let chatVisible = false; // Chat visibility state - 기본값 false로 변경
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -44,6 +44,8 @@ function createWindow() {
     height: 1000,
     minWidth: 1200,
     minHeight: 800,
+    title: 'Cobalt',
+    icon: path.join(__dirname, 'cobalt_logo.png'),
     autoHideMenuBar: true, // 메뉴바 자동 숨김
     titleBarStyle: 'hidden', // 타이틀바 텍스트 숨김
     titleBarOverlay: {
@@ -73,11 +75,11 @@ function createWindow() {
 
   mainWindow.addBrowserView(browserView);
 
-  // Initial layout (70% for browser, 30% for chat)
+  // Initial layout (100% for browser, chat hidden)
   updateBrowserViewBounds();
 
-  // Load Google as default page
-  browserView.webContents.loadURL('https://www.google.com');
+  // Load Cobalt homepage as default page
+  browserView.webContents.loadFile(path.join(__dirname, 'cobalt-home.html'));
 
   // Toolbar UI 로드 (상단 주소창 + Chat UI)
   mainWindow.loadFile(path.join(__dirname, 'browser-toolbar.html'));
@@ -112,6 +114,7 @@ function createWindow() {
 
         let popup = null;
         let isEditingInput = false; // Flag to prevent popup recreation
+        let isProcessingRequest = false; // Flag to prevent popup recreation during API calls
 
         // Listen for results via window.postMessage (from preload script)
         window.addEventListener('message', (event) => {
@@ -126,6 +129,7 @@ function createWindow() {
           if (event.data.type === '__translation-result') {
             const result = event.data.payload;
             console.log('[Text Selection] Translation result received:', result);
+            isProcessingRequest = false; // Reset flag
 
             if (result && result.translation) {
               // Use modern Clipboard API
@@ -136,7 +140,7 @@ function createWindow() {
               }
 
               // Update button with result
-              if (window.__pendingTranslateButton) {
+              if (window.__pendingTranslateButton && window.__pendingTranslateButton.parentNode) {
                 const btn = window.__pendingTranslateButton;
                 btn.textContent = result.translation;
                 btn.disabled = false;
@@ -152,11 +156,11 @@ function createWindow() {
 
                 delete window.__pendingTranslateButton;
               } else {
-                console.warn('[Text Selection] No pending translate button found');
+                console.warn('[Text Selection] No pending translate button found or button removed from DOM');
               }
             } else if (result && result.error) {
               console.error('[Text Selection] Translation error:', result.error);
-              if (window.__pendingTranslateButton) {
+              if (window.__pendingTranslateButton && window.__pendingTranslateButton.parentNode) {
                 const btn = window.__pendingTranslateButton;
                 btn.textContent = 'Translation failed';
                 btn.disabled = false;
@@ -168,7 +172,9 @@ function createWindow() {
           } else if (event.data.type === '__edit-result') {
             const result = event.data.payload;
             console.log('[Text Selection] Edit result received:', result);
-          if (result && result.editedText) {
+            isProcessingRequest = false; // Reset flag
+
+            if (result && result.editedText) {
             // Use modern Clipboard API
             if (navigator.clipboard && navigator.clipboard.writeText) {
               navigator.clipboard.writeText(result.editedText).catch(err => {
@@ -438,12 +444,14 @@ function createWindow() {
                   if (promptText) {
                     console.log('[AI Edit] Submitting:', promptText);
                     isEditingInput = false; // Reset flag
+                    isProcessingRequest = true; // Set processing flag
 
                     // Check if API is available
                     if (!window.__browserViewAPI) {
                       console.error('[Text Selection] BrowserView API not available for AI edit');
                       showNotification('AI Edit failed: API not ready', false);
                       popup.remove();
+                      isProcessingRequest = false;
                       return;
                     }
 
@@ -520,6 +528,9 @@ function createWindow() {
               }
               console.log('[Text Selection] API is available');
 
+              // Set processing flag to prevent popup recreation
+              isProcessingRequest = true;
+
               // Change button to show loading state
               console.log('[Text Selection] Changing button to loading state');
               translateBtn.textContent = 'Translating...';
@@ -567,9 +578,14 @@ function createWindow() {
           setTimeout(() => {
             console.log('[Text Selection] Mouseup event detected');
 
-            // Don't create new popup if editing input is active
+            // Don't create new popup if editing input is active or processing API request
             if (isEditingInput) {
               console.log('[Text Selection] Ignoring mouseup - editing input is active');
+              return;
+            }
+
+            if (isProcessingRequest) {
+              console.log('[Text Selection] Ignoring mouseup - API request in progress');
               return;
             }
 
@@ -617,11 +633,6 @@ function createWindow() {
 
   // Window resize 시 BrowserView bounds 업데이트
   mainWindow.on('resize', updateBrowserViewBounds);
-
-  // 개발 모드에서 DevTools 열기
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools();
-  }
 
   mainWindow.on('closed', () => {
     if (browserView) {
