@@ -47,7 +47,50 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
     const utf8Query = query.toString();
     console.log('[BrowserView Preload] Sending query via IPC:', utf8Query);
     ipcRenderer.send('execute-home-search', utf8Query);
-  }
+  },
+
+  // 새 탭 열기 요청
+  openInNewTab: (url) => {
+    if (!url) return;
+    ipcRenderer.send('bv-open-in-new-tab', url);
+  },
+
+  // Autofill APIs
+  autofillQuery: (payload) => ipcRenderer.invoke('autofill-query', payload),
+  autofillReportSubmit: (payload) => ipcRenderer.invoke('autofill-report-submit', payload),
+  autofillSaveProfile: (payload) => ipcRenderer.invoke('autofill-save-profile', payload),
+  autofillNeverForSite: (payload) => ipcRenderer.invoke('autofill-never-for-site', payload),
+  autofillMarkUsed: (profileId) => ipcRenderer.invoke('autofill-mark-used', { profileId }),
 });
 
 console.log('[BrowserView Preload] API exposed via contextBridge as window.__browserViewAPI');
+
+// Handle middle-click on links and Ctrl/Cmd+Click for new tab behavior
+window.addEventListener('auxclick', (e) => {
+  try {
+    if (e.button !== 1) return; // middle only
+    const el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (el && el.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.__browserViewAPI && typeof window.__browserViewAPI.openInNewTab === 'function') {
+        window.__browserViewAPI.openInNewTab(el.href);
+      }
+    }
+  } catch {}
+}, true);
+
+window.addEventListener('click', (e) => {
+  try {
+    const isAccel = navigator.platform.includes('Mac') ? e.metaKey : e.ctrlKey;
+    if (!isAccel) return;
+    const el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (el && el.href) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (window.__browserViewAPI && typeof window.__browserViewAPI.openInNewTab === 'function') {
+        window.__browserViewAPI.openInNewTab(el.href);
+      }
+    }
+  } catch {}
+}, true);

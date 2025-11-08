@@ -333,6 +333,68 @@
     .new-tab-btn:active {
       transform: scale(0.95);
     }
+
+    /* Find-in-page bar */
+    .find-bar {
+      position: fixed;
+      top: 32px; /* under tab bar */
+      right: 8px;
+      height: 32px;
+      display: none;
+      align-items: center;
+      gap: 8px;
+      background: #fff;
+      border: 1px solid #dadce0;
+      border-radius: 16px;
+      padding: 0 8px;
+      z-index: 10002;
+      box-shadow: 0 1px 6px rgba(32,33,36,.18);
+    }
+    .find-input {
+      width: 220px;
+      border: none;
+      outline: none;
+      font-size: 13px;
+      background: transparent;
+      color: #202124;
+    }
+    .find-counter {
+      font-size: 12px;
+      color: #5f6368;
+      min-width: 48px;
+      text-align: right;
+    }
+    .find-btn {
+      border: none;
+      background: #f1f3f4;
+      color: #3c4043;
+      border-radius: 12px;
+      padding: 4px 8px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .find-btn:hover { background: #e8eaed; }
+
+    /* Status bar (link preview) */
+    .status-bar {
+      position: fixed;
+      left: 8px;
+      bottom: 8px;
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.96);
+      color: #202124;
+      border: 1px solid #dadce0;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+      font-size: 12px;
+      max-width: 50%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      z-index: 9999;
+      display: none;
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -380,8 +442,18 @@
     </button>
   </div>
 
+  <!-- Find in page bar -->
+  <div class="find-bar" id="findBar">
+    <input type="text" id="findInput" class="find-input" placeholder="Find in page" />
+    <span class="find-counter" id="findCounter"></span>
+    <button class="find-btn" id="findPrevBtn">Prev</button>
+    <button class="find-btn" id="findNextBtn">Next</button>
+    <button class="find-btn" id="findCloseBtn">✕</button>
+  </div>
+
   <!-- Chat UI iframe -->
   <iframe src="browser-chat-ui.html" class="chat-iframe hidden" id="chatIframe"></iframe>
+  <div class="status-bar" id="statusBar"></div>
 
   <script>
     const { ipcRenderer } = require('electron');
@@ -396,6 +468,13 @@
     const tabBar = document.getElementById('tabBar');
     const tabsContainer = document.getElementById('tabsContainer');
     const newTabBtn = document.getElementById('newTabBtn');
+    const statusBar = document.getElementById('statusBar');
+    const findBar = document.getElementById('findBar');
+    const findInput = document.getElementById('findInput');
+    const findCounter = document.getElementById('findCounter');
+    const findPrevBtn = document.getElementById('findPrevBtn');
+    const findNextBtn = document.getElementById('findNextBtn');
+    const findCloseBtn = document.getElementById('findCloseBtn');
 
     let chatVisible = false;
     let currentTabId = 0;
@@ -888,6 +967,66 @@
     // 초기 URL 로드
     ipcRenderer.invoke('browser-get-url').then((url) => {
       if (url) urlInput.value = url;
+    });
+
+    // Focus address bar
+    ipcRenderer.on('focus-address-bar', () => {
+      urlInput.focus();
+      urlInput.select();
+    });
+
+    // Open find bar
+    ipcRenderer.on('open-find', () => {
+      findBar.style.display = 'flex';
+      setTimeout(() => findInput.focus(), 0);
+    });
+
+    function updateFindCounter(result) {
+      if (!result) { findCounter.textContent = ''; return; }
+      const { activeMatchOrdinal, matches } = result;
+      if (typeof matches === 'number' && matches >= 0) {
+        findCounter.textContent = `${activeMatchOrdinal || 0}/${matches}`;
+      } else {
+        findCounter.textContent = '';
+      }
+    }
+
+    ipcRenderer.on('find-results', (_e, result) => {
+      updateFindCounter(result);
+    });
+
+    function doFind(forward, findNext) {
+      const query = findInput.value || '';
+      ipcRenderer.invoke('find-in-page', { query, forward, findNext }).catch(() => {});
+    }
+
+    findInput.addEventListener('input', () => doFind(true, false));
+    findInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        doFind(!e.shiftKey, true);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        findBar.style.display = 'none';
+        ipcRenderer.invoke('stop-find-in-page');
+      }
+    });
+    findPrevBtn.addEventListener('click', () => doFind(false, true));
+    findNextBtn.addEventListener('click', () => doFind(true, true));
+    findCloseBtn.addEventListener('click', () => {
+      findBar.style.display = 'none';
+      ipcRenderer.invoke('stop-find-in-page');
+    });
+
+    // Status bar link preview
+    ipcRenderer.on('status-url', (_e, url) => {
+      if (url) {
+        statusBar.textContent = url;
+        statusBar.style.display = 'block';
+      } else {
+        statusBar.style.display = 'none';
+        statusBar.textContent = '';
+      }
     });
   </script>
 </body>

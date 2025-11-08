@@ -1,4 +1,4 @@
-const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron');
 const path = require('path');
 const dotenv = require('dotenv');
 
@@ -13,6 +13,16 @@ console.log('[Electron] API keys will be loaded from Settings tab (preferred) or
 const { BrowserController } = require('./packages/agent-core/dist/browserController');
 const { LLMService } = require('./packages/agent-core/dist/llmService');
 const { BrowserProfile } = require('./packages/agent-core/dist/browser/BrowserProfile');
+
+// Modular browser UX features
+const { registerWindowShortcuts, attachShortcutsToWebContents } = require('./electron/keyboardShortcuts');
+const { registerContextMenuForWebContents } = require('./electron/contextMenu');
+const { registerDownloadHandlers } = require('./electron/downloads');
+const { setupFindInPageIPC, attachFoundInPageForwarder } = require('./electron/findInPage');
+const { applyInitialZoom } = require('./electron/zoomManager');
+const { registerPermissionHandler } = require('./electron/permissions');
+const { registerAutofillIPC } = require('./electron/autofill/ipc');
+const fs = require('fs');
 
 let mainWindow;
 let browserView = null; // Current active BrowserView
@@ -66,6 +76,25 @@ function createWindow() {
   // Toolbar UI 로드 (상단 주소창 + Chat UI)
   mainWindow.loadFile(path.join(__dirname, 'browser-toolbar.html'));
 
+  // Register downloads handler (one-time)
+  registerDownloadHandlers(session.defaultSession, mainWindow);
+
+  // Register permissions handler (one-time)
+  registerPermissionHandler(session.defaultSession, mainWindow);
+
+  // Setup find-in-page IPC
+  setupFindInPageIPC(mainWindow, () => browserView && browserView.webContents);
+
+  // Setup autofill IPC (one-time)
+  registerAutofillIPC(() => (browserView && browserView.webContents && browserView.webContents.getURL()) || '');
+
+  // Keyboard shortcuts for window
+  registerWindowShortcuts(
+    mainWindow,
+    () => (browserView && browserView.webContents),
+    () => browserView,
+  );
+
   // Handle new window requests for initial view (same as createBrowserViewForTab)
   browserView.webContents.setWindowOpenHandler(({ url }) => {
     console.log('[Electron] New window requested from initial view:', url);
@@ -108,8 +137,8 @@ function createWindow() {
   browserView.webContents.on('did-finish-load', () => {
     browserView.webContents.executeJavaScript(`
       (function() {
-        if (window.__textSelectionInjected) return;
-        window.__textSelectionInjected = true;
+        // Disable legacy inline injection; use modular injector instead
+        if (true) return;
 
         console.log('[Text Selection] Script injection started');
 
@@ -632,6 +661,54 @@ function createWindow() {
     `);
   });
 
+  // Also inject modular text selection script (ensures new tabs share same behavior)
+  try {
+    const textSelPath = path.join(__dirname, 'electron', 'textSelection', 'inject.js');
+    const textSelCode = fs.readFileSync(textSelPath, 'utf8');
+    browserView.webContents.on('did-finish-load', () => {
+      browserView.webContents.executeJavaScript(textSelCode).catch(() => {});
+    });
+  } catch (e) {
+    console.warn('[Electron] Text selection inject not loaded for initial view:', e.message || e);
+  }
+
+  // Apply modular context menu, shortcuts, find result forwarder, zoom state
+  try {
+    applyInitialZoom(browserView.webContents);
+    attachShortcutsToWebContents(browserView.webContents, mainWindow);
+    attachFoundInPageForwarder(browserView.webContents, mainWindow);
+    registerContextMenuForWebContents(
+      browserView.webContents,
+      mainWindow,
+      (url) => {
+        const newTabId = Date.now();
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('create-new-tab', { tabId: newTabId, url });
+        }
+      }
+    );
+  } catch (e) {
+    console.warn('[Electron] Failed to apply initial UX hooks:', e.message || e);
+  }
+
+  // Forward link hover target URL to toolbar for status bar
+  browserView.webContents.on('update-target-url', (_e, url) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('status-url', url || '');
+    }
+  });
+
+  // Inject Autofill script
+  try {
+    const injectPath = path.join(__dirname, 'electron', 'autofill', 'inject.js');
+    const code = fs.readFileSync(injectPath, 'utf8');
+    browserView.webContents.on('did-finish-load', () => {
+      browserView.webContents.executeJavaScript(code).catch(() => {});
+    });
+  } catch (e) {
+    console.warn('[Electron] Autofill inject not loaded:', e.message || e);
+  }
+
   // Window resize 시 BrowserView bounds 업데이트
   mainWindow.on('resize', updateBrowserViewBounds);
 
@@ -646,17 +723,23 @@ function createWindow() {
 }
 
 // Create a new BrowserView for a tab
-function createBrowserViewForTab(tabId) {
+function createBrowserViewForTab(tabId, options = {}) {
   console.log('[Electron] Creating BrowserView for tab:', tabId);
 
   // Create new BrowserView
+  const webPreferences = {
+    preload: path.join(__dirname, 'browser-view-preload.js'),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    spellcheck: true,
+  };
+  if (options.incognito) {
+    webPreferences.partition = `incog-${tabId}`; // in-memory session (no persist: prefix)
+  }
+
   const newBrowserView = new BrowserView({
-    webPreferences: {
-      preload: path.join(__dirname, 'browser-view-preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-    }
+    webPreferences
   });
 
   // Setup event listeners for this BrowserView
@@ -704,18 +787,64 @@ function createBrowserViewForTab(tabId) {
     return { action: 'deny' };
   });
 
-  // Inject text selection popup script
-  newBrowserView.webContents.on('did-finish-load', () => {
-    // Copy the same injection script from original browserView
-    // (keeping the existing text selection popup functionality)
-    newBrowserView.webContents.executeJavaScript(`
-      (function() {
-        if (window.__textSelectionInjected) return;
-        window.__textSelectionInjected = true;
-        // ... (same injection code as before)
-      })();
-    `).catch(err => console.error('[BrowserView] Script injection failed:', err));
+  // (Replaced) Text selection injection is handled by modular injector below
+
+  // Inject modular text selection script for this view
+  try {
+    const textSelPath = path.join(__dirname, 'electron', 'textSelection', 'inject.js');
+    const textSelCode = fs.readFileSync(textSelPath, 'utf8');
+    newBrowserView.webContents.on('did-finish-load', () => {
+      newBrowserView.webContents.executeJavaScript(textSelCode).catch(() => {});
+    });
+  } catch (e) {
+    console.warn('[Electron] Text selection inject not loaded for tab:', e.message || e);
+  }
+
+  // Forward link hover target URL to toolbar for status bar
+  newBrowserView.webContents.on('update-target-url', (_e, url) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('status-url', url || '');
+    }
   });
+
+  // Inject Autofill script on this view
+  try {
+    const injectPath = path.join(__dirname, 'electron', 'autofill', 'inject.js');
+    const code = fs.readFileSync(injectPath, 'utf8');
+    newBrowserView.webContents.on('did-finish-load', () => {
+      newBrowserView.webContents.executeJavaScript(code).catch(() => {});
+    });
+  } catch (e) {
+    console.warn('[Electron] Autofill inject not loaded for tab:', e.message || e);
+  }
+
+  // Attach per-view UX features
+  try {
+    applyInitialZoom(newBrowserView.webContents);
+    attachShortcutsToWebContents(newBrowserView.webContents, mainWindow);
+    attachFoundInPageForwarder(newBrowserView.webContents, mainWindow);
+    registerContextMenuForWebContents(
+      newBrowserView.webContents,
+      mainWindow,
+      (url) => {
+        const newTabId = Date.now();
+        if (mainWindow && mainWindow.webContents) {
+          mainWindow.webContents.send('create-new-tab', { tabId: newTabId, url });
+        }
+      }
+    );
+
+    // Spellcheck languages
+    try {
+      const sess = newBrowserView.webContents.session;
+      if (sess && typeof sess.setSpellCheckerEnabled === 'function') sess.setSpellCheckerEnabled(true);
+      if (sess && typeof sess.setSpellCheckerLanguages === 'function') sess.setSpellCheckerLanguages(['en-US', 'ko']);
+      // Ensure downloads are handled for non-default sessions too
+      registerDownloadHandlers(sess, mainWindow);
+    } catch {}
+  } catch (e) {
+    console.warn('[Electron] Failed to attach per-view UX hooks:', e.message || e);
+  }
 
   // Store in map
   browserViews.set(tabId, newBrowserView);
@@ -776,7 +905,7 @@ function updateBrowserViewBounds() {
 }
 
 // IPC: Handle translation request from BrowserView
-ipcMain.on('browserview-translate-request', async (_event, text) => {
+ipcMain.on('browserview-translate-request', async (event, text) => {
   console.log('[Electron] Translation request from BrowserView:', text.substring(0, 50) + '...');
 
   try {
@@ -800,24 +929,22 @@ ipcMain.on('browserview-translate-request', async (_event, text) => {
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
     const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
 
-    // Send result back to BrowserView
-    if (browserView && browserView.webContents) {
+    // Send result back to requesting BrowserView
+    if (event && event.sender) {
       console.log('[Electron] Sending translation result:', translation);
-      browserView.webContents.send('browserview-translation-result', { translation });
+      event.sender.send('browserview-translation-result', { translation });
       console.log('[Electron] Translation completed and sent to BrowserView');
-    } else {
-      console.error('[Electron] BrowserView not available to send translation result');
     }
   } catch (error) {
     console.error('[Electron] Translation failed:', error);
-    if (browserView && browserView.webContents) {
-      browserView.webContents.send('browserview-translation-result', { error: error.message });
+    if (event && event.sender) {
+      event.sender.send('browserview-translation-result', { error: error.message });
     }
   }
 });
 
 // IPC: Handle AI edit request from BrowserView
-ipcMain.on('browserview-edit-request', async (_event, { text, prompt }) => {
+ipcMain.on('browserview-edit-request', async (event, { text, prompt }) => {
   console.log('[Electron] AI edit request from BrowserView');
 
   try {
@@ -841,15 +968,15 @@ ipcMain.on('browserview-edit-request', async (_event, { text, prompt }) => {
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
     const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
 
-    // Send result back to BrowserView
-    if (browserView && browserView.webContents) {
-      browserView.webContents.send('browserview-edit-result', { editedText });
+    // Send result back to requesting BrowserView
+    if (event && event.sender) {
+      event.sender.send('browserview-edit-result', { editedText });
       console.log('[Electron] AI edit completed and sent to BrowserView');
     }
   } catch (error) {
     console.error('[Electron] AI edit failed:', error);
-    if (browserView && browserView.webContents) {
-      browserView.webContents.send('browserview-edit-result', { error: error.message });
+    if (event && event.sender) {
+      event.sender.send('browserview-edit-result', { error: error.message });
     }
   }
 });
@@ -1931,5 +2058,30 @@ ipcMain.handle('quick-action', async (event, { action, data }) => {
   } catch (error) {
     console.error('[Electron] Quick action error:', error);
     return { success: false, error: error.message };
+  }
+});
+
+// IPC: open link in new tab from BrowserView preload
+ipcMain.on('bv-open-in-new-tab', (_event, url) => {
+  const newTabId = Date.now();
+  if (mainWindow && mainWindow.webContents) {
+    mainWindow.webContents.send('create-new-tab', { tabId: newTabId, url });
+  }
+});
+
+// IPC: open incognito tab (optional future UI)
+ipcMain.handle('open-incognito-tab', async (_event, url) => {
+  const tabId = Date.now();
+  try {
+    const view = createBrowserViewForTab(tabId, { incognito: true });
+    // show the tab
+    switchToTab(tabId);
+    if (url) await view.webContents.loadURL(url);
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('create-new-tab', { tabId, url: url || 'about:blank' });
+    }
+    return { success: true, tabId };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
