@@ -627,11 +627,12 @@ function createWindow() {
   mainWindow.on('resize', updateBrowserViewBounds);
 
   mainWindow.on('closed', () => {
-    if (browserView) {
-      mainWindow.removeBrowserView(browserView);
-      browserView = null;
-    }
+    // BrowserView는 윈도우가 닫힐 때 자동으로 파괴되므로 수동 제거 불필요
+    browserView = null;
     mainWindow = null;
+
+    // 모든 탭 BrowserView 정리
+    browserViews.clear();
   });
 }
 

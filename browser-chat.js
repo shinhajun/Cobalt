@@ -372,12 +372,14 @@ async function saveApiKeys() {
     }
 
     // Visual feedback
-    btnSaveKeys.textContent = '✅ Saved!';
-    btnSaveKeys.style.background = 'linear-gradient(135deg, #34a853 0%, #2d8f47 100%)';
+    btnSaveKeys.textContent = 'Saved!';
+    btnSaveKeys.style.background = '#000';
+    btnSaveKeys.style.color = '#fff';
 
     setTimeout(() => {
-      btnSaveKeys.textContent = '💾 Save API Keys';
-      btnSaveKeys.style.background = 'linear-gradient(135deg, #34a853 0%, #2d8f47 100%)';
+      btnSaveKeys.textContent = 'Save API Keys';
+      btnSaveKeys.style.background = '#000';
+      btnSaveKeys.style.color = '#fff';
     }, 2000);
 
     console.log('[Settings] API keys saved successfully');
