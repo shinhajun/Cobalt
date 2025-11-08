@@ -2,11 +2,30 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 console.log('[BrowserView Preload] Starting preload script');
 
+// Setup IPC listeners and forward to window
+ipcRenderer.on('browserview-translation-result', (_event, result) => {
+  console.log('[BrowserView Preload] Translation result received via IPC:', result);
+  // Forward to injected script via custom event
+  window.postMessage({
+    type: '__translation-result',
+    payload: result
+  }, '*');
+});
+
+ipcRenderer.on('browserview-edit-result', (_event, result) => {
+  console.log('[BrowserView Preload] Edit result received via IPC:', result);
+  // Forward to injected script via custom event
+  window.postMessage({
+    type: '__edit-result',
+    payload: result
+  }, '*');
+});
+
 // contextIsolation이 true일 때 사용하는 방식
 contextBridge.exposeInMainWorld('__browserViewAPI', {
   // 번역 요청
   requestTranslation: (text) => {
-    console.log('[BrowserView Preload] requestTranslation called');
+    console.log('[BrowserView Preload] requestTranslation called with text:', text.substring(0, 30) + '...');
     ipcRenderer.send('browserview-translate-request', text);
   },
 
@@ -14,24 +33,6 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
   requestAIEdit: (text, prompt) => {
     console.log('[BrowserView Preload] requestAIEdit called');
     ipcRenderer.send('browserview-edit-request', { text, prompt });
-  },
-
-  // 번역 결과 수신
-  onTranslationResult: (callback) => {
-    console.log('[BrowserView Preload] onTranslationResult listener registered');
-    ipcRenderer.on('browserview-translation-result', (_event, result) => {
-      console.log('[BrowserView Preload] Translation result received:', result);
-      callback(result);
-    });
-  },
-
-  // AI 수정 결과 수신
-  onEditResult: (callback) => {
-    console.log('[BrowserView Preload] onEditResult listener registered');
-    ipcRenderer.on('browserview-edit-result', (_event, result) => {
-      console.log('[BrowserView Preload] Edit result received:', result);
-      callback(result);
-    });
   }
 });
 

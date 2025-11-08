@@ -113,50 +113,61 @@ function createWindow() {
         let popup = null;
         let isEditingInput = false; // Flag to prevent popup recreation
 
-        // Setup result listeners when API becomes available
-        function setupListeners() {
-          if (!window.__browserViewAPI) {
-            console.warn('[Text Selection] API not ready, retrying in 50ms...');
-            setTimeout(setupListeners, 50);
+        // Listen for results via window.postMessage (from preload script)
+        window.addEventListener('message', (event) => {
+          console.log('[Text Selection] Message received:', event.data);
+
+          // Only accept messages from same origin
+          if (event.source !== window) {
+            console.log('[Text Selection] Ignoring message from different source');
             return;
           }
 
-          console.log('[Text Selection] Setting up listeners');
+          if (event.data.type === '__translation-result') {
+            const result = event.data.payload;
+            console.log('[Text Selection] Translation result received:', result);
 
-          // Listen for translation results
-          window.__browserViewAPI.onTranslationResult((result) => {
-          console.log('[Text Selection] Translation result received:', result);
-          if (result && result.translation) {
-            // Use modern Clipboard API
-            if (navigator.clipboard && navigator.clipboard.writeText) {
-              navigator.clipboard.writeText(result.translation).catch(err => {
-                console.error('[Text Selection] Failed to copy to clipboard:', err);
-              });
+            if (result && result.translation) {
+              // Use modern Clipboard API
+              if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(result.translation).catch(err => {
+                  console.error('[Text Selection] Failed to copy to clipboard:', err);
+                });
+              }
+
+              // Update button with result
+              if (window.__pendingTranslateButton) {
+                const btn = window.__pendingTranslateButton;
+                btn.textContent = result.translation;
+                btn.disabled = false;
+                btn.style.cursor = 'pointer';
+                btn.style.opacity = '1';
+                btn.style.width = 'auto';
+                btn.style.maxWidth = '400px';
+                btn.style.whiteSpace = 'nowrap';
+                btn.style.overflow = 'hidden';
+                btn.style.textOverflow = 'ellipsis';
+                btn.style.background = '#dcfce7';
+                btn.style.color = '#166534';
+
+                delete window.__pendingTranslateButton;
+              } else {
+                console.warn('[Text Selection] No pending translate button found');
+              }
+            } else if (result && result.error) {
+              console.error('[Text Selection] Translation error:', result.error);
+              if (window.__pendingTranslateButton) {
+                const btn = window.__pendingTranslateButton;
+                btn.textContent = 'Translation failed';
+                btn.disabled = false;
+                btn.style.background = '#fee2e2';
+                btn.style.color = '#991b1b';
+                delete window.__pendingTranslateButton;
+              }
             }
-
-            // Update button with result
-            if (window.__pendingTranslateButton) {
-              const btn = window.__pendingTranslateButton;
-              btn.textContent = result.translation;
-              btn.disabled = false;
-              btn.style.cursor = 'pointer';
-              btn.style.opacity = '1';
-              btn.style.width = 'auto';
-              btn.style.maxWidth = '400px';
-              btn.style.whiteSpace = 'nowrap';
-              btn.style.overflow = 'hidden';
-              btn.style.textOverflow = 'ellipsis';
-              btn.style.background = '#dcfce7';
-              btn.style.color = '#166534';
-
-              delete window.__pendingTranslateButton;
-            }
-          }
-        });
-
-        // Listen for AI edit results
-        window.__browserViewAPI.onEditResult((result) => {
-          console.log('[Text Selection] Edit result received:', result);
+          } else if (event.data.type === '__edit-result') {
+            const result = event.data.payload;
+            console.log('[Text Selection] Edit result received:', result);
           if (result && result.editedText) {
             // Use modern Clipboard API
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -231,12 +242,30 @@ function createWindow() {
             } else {
               showNotification('✓ Text replaced', true);
             }
-          }
-        });
-        }
+          } else if (result && result.error) {
+            console.error('[Text Selection] Edit error:', result.error);
 
-        // Start setting up listeners
-        setupListeners();
+            // Update popup with error
+            if (window.__pendingEditPopup && window.__pendingEditPopup.parentNode) {
+              const popup = window.__pendingEditPopup;
+              popup.innerHTML = '';
+
+              const errorDiv = document.createElement('div');
+              errorDiv.textContent = '✗ Edit failed';
+              errorDiv.style.cssText = 'background: #fee2e2; color: #991b1b; padding: 6px 12px; border-radius: 4px; font-size: 13px; white-space: nowrap;';
+              popup.appendChild(errorDiv);
+
+              setTimeout(() => {
+                if (popup.parentNode) popup.remove();
+              }, 2000);
+
+              delete window.__pendingEditPopup;
+            } else {
+              showNotification('✗ Edit failed', false);
+            }
+          }
+        }
+        });
 
         function showNotification(message, isSuccess) {
           // Remove existing notifications
@@ -418,6 +447,12 @@ function createWindow() {
                       return;
                     }
 
+                    // Replace input with loading status
+                    const loadingDiv = document.createElement('div');
+                    loadingDiv.textContent = 'Editing...';
+                    loadingDiv.style.cssText = 'background: #fef3c7; color: #92400e; padding: 6px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; white-space: nowrap;';
+                    inputField.replaceWith(loadingDiv);
+
                     // Store range, element, and positions for later text replacement
                     window.__pendingEditRange = range;
                     window.__pendingEditElement = element;
@@ -472,6 +507,7 @@ function createWindow() {
             }, true);
 
             translateBtn.onclick = (e) => {
+              console.log('[Text Selection] Translate button clicked');
               e.preventDefault();
               e.stopPropagation();
               e.stopImmediatePropagation();
@@ -482,17 +518,23 @@ function createWindow() {
                 showNotification('Translation failed: API not ready', false);
                 return;
               }
+              console.log('[Text Selection] API is available');
 
-              // Change button text to show loading
+              // Change button to show loading state
+              console.log('[Text Selection] Changing button to loading state');
               translateBtn.textContent = 'Translating...';
               translateBtn.disabled = true;
               translateBtn.style.cursor = 'wait';
-              translateBtn.style.opacity = '0.7';
+              translateBtn.style.background = '#fef3c7';
+              translateBtn.style.color = '#92400e';
+              translateBtn.style.opacity = '1';
+              console.log('[Text Selection] Button text now:', translateBtn.textContent);
 
               // Send translation request via IPC
               window.__pendingTranslateButton = translateBtn;
-              console.log('[Text Selection] Sending translation request via IPC');
+              console.log('[Text Selection] Stored button reference, sending request for text:', text.substring(0, 30) + '...');
               window.__browserViewAPI.requestTranslation(text);
+              console.log('[Text Selection] Translation request sent');
             };
             popup.appendChild(translateBtn);
             console.log('[Text Selection] AI Translate button added to popup');
@@ -636,8 +678,11 @@ ipcMain.on('browserview-translate-request', async (_event, text) => {
 
     // Send result back to BrowserView
     if (browserView && browserView.webContents) {
+      console.log('[Electron] Sending translation result:', translation);
       browserView.webContents.send('browserview-translation-result', { translation });
       console.log('[Electron] Translation completed and sent to BrowserView');
+    } else {
+      console.error('[Electron] BrowserView not available to send translation result');
     }
   } catch (error) {
     console.error('[Electron] Translation failed:', error);
