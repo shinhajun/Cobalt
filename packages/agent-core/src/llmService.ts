@@ -91,22 +91,22 @@ AVAILABLE ACTIONS:
 ${actionDescriptions}
 
 CRITICAL PARAMETER RULES:
-- For click_element: use "index" parameter (NOT "element_index")
-- For input_text: use "index" parameter (NOT "element_index")
+- For click: use "index" parameter (NOT "element_index")
+- For input: use "index" parameter (NOT "element_index")
 - Element indices come from the browser state's interactive elements list
 - Indices are numbers (e.g., 42, not "42")
 
 VERIFICATION RULES:
 - Do NOT assume an action succeeded because it was issued. Verify via the latest browser state (and screenshot if available).
 - Only call done when clear, external success criteria are visible (e.g., a filter chip appears, URL/query reflects applied filter, or visible items match the constraint).
-- If an expected element or change is missing, try targeted recovery: wait, scroll_to_text, container scroll via index, or navigate back.
+- If an expected element or change is missing, try targeted recovery: wait, find_text, container scroll via index, or navigate back.
 - Prefer small waits when content updates asynchronously; then re-check the state.
 
 TARGETED ACTION GUIDANCE:
-- Use scroll_to_text to jump to specific sections (e.g., "Price", "Filters", "Add to Cart").
+- Use find_text to jump to specific sections (e.g., "Price", "Filters", "Add to Cart").
 - Use scroll with an element index to scroll inside a scrollable container (left filter column, dropdown panels) rather than the whole page.
-- For search bars, set submit=true on input_text or press Enter via send_keys after typing.
-- Avoid alternating up/down scrolls without progress. If that happens, switch to targeted scroll_to_text or container scrolling.
+- For search bars, set submit=true on input or press Enter via send_keys after typing.
+- Avoid alternating up/down scrolls without progress. If that happens, switch to targeted find_text or container scrolling.
 
 INSTRUCTIONS:
 - Think step by step about what you need to do
@@ -114,6 +114,12 @@ INSTRUCTIONS:
 - Choose the most appropriate action(s) to progress toward the goal
 - Always respond with valid JSON containing a "thinking" field and either an "action" object or an "actions" array of objects
 - Each action object must include a "type" field
+
+FORMAT RULES:
+- Output must be raw JSON only. Do not include code fences, markdown, or extra prose.
+- Do not add fields other than "thinking", "action" or "actions".
+- For multiple steps in one turn, use an "actions" array (ordered). For a single step, use an "action" object.
+
 
 CORRECT RESPONSE FORMAT EXAMPLES:
 
@@ -126,19 +132,19 @@ Search example:
 Click element example (use "index", NOT "element_index"):
 {
   "thinking": "I need to click the submit button at index 42",
-  "action": {"type": "click_element", "index": 42}
+  "action": {"type": "click", "index": 42}
 }
 
 Input text example (use "index", NOT "element_index"):
 {
   "thinking": "I need to type into the search box at index 15",
-  "action": {"type": "input_text", "index": 15, "text": "hello world", "clear": true, "submit": true}
+  "action": {"type": "input", "index": 15, "text": "hello world", "clear": true, "submit": true}
 }
 
-Scroll to text example:
+Find text example:
 {
   "thinking": "I should go to the Price filters section",
-  "action": {"type": "scroll_to_text", "text": "Price"}
+  "action": {"type": "find_text", "text": "Price"}
 }
 
 Container scroll example:
@@ -151,7 +157,7 @@ Select dropdown example:
 {
   "thinking": "Choose United States from the country dropdown",
   "actions": [
-    {"type": "get_dropdown_options", "index": 120},
+    {"type": "dropdown_options", "index": 120},
     {"type": "select_dropdown", "index": 120, "option": "United States"}
   ]
 }
@@ -164,7 +170,7 @@ Upload file example:
 
 Remember:
 - Element indices start from 0
-- ALWAYS use "index" parameter for click_element and input_text
+- ALWAYS use "index" parameter for click and input
 - Always check if the page has loaded correctly before taking action
 - Use "done" action when you've accomplished the user's goal
 - Be precise and careful with your actions`;
@@ -257,7 +263,7 @@ Remember:
           emitLog('system', { message: 'Detected alternating scroll directions. Nudging model to use targeted navigation.' });
           messages.push(new HumanMessage(
             'You are alternating scroll directions without progress. Avoid toggling up/down blindly. '
-            + 'Use scroll_to_text to navigate to specific sections (e.g., "Price", "Filters", "Add to cart") or scroll within a container using the index parameter. '
+            + 'Use find_text to navigate to specific sections (e.g., "Price", "Filters", "Add to cart") or scroll within a container using the index parameter. '
             + 'Return an action that targets the relevant section directly.'
           ));
           continue;
@@ -517,3 +523,5 @@ Remember:
     };
   }
 }
+
+

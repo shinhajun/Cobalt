@@ -28,30 +28,11 @@ export class ClickElementAction implements BaseActionParams {
   index!: number;
 }
 
-// Click element by CSS/XPath/text selector (stable selector usage)
-export class ClickSelectorAction implements BaseActionParams {
-  selector!: string; // CSS or XPath selector; if starts with // treated as XPath
-  nth?: number; // optional: nth match (0-based). Defaults to first
-}
-
-export class ClickTextAction implements BaseActionParams {
-  text!: string;
-  exact?: boolean = false;
-}
-
 export class InputTextAction implements BaseActionParams {
   index!: number;
   text!: string;
   clear?: boolean = true;
   submit?: boolean = false; // optional: press Enter after typing
-}
-
-// Input text by CSS/XPath selector
-export class InputSelectorAction implements BaseActionParams {
-  selector!: string;
-  text!: string;
-  clear?: boolean = true;
-  submit?: boolean = false;
 }
 
 // ============================================================================
@@ -71,17 +52,6 @@ export class SendKeysAction implements BaseActionParams {
 export class ScrollToTextAction implements BaseActionParams {
   text!: string; // visible text to find
   partial?: boolean = true; // partial match by default
-}
-
-export class WaitForSelectorAction implements BaseActionParams {
-  selector!: string;
-  timeoutMs?: number = 5000;
-  state?: 'visible' | 'attached' | 'detached' | 'hidden' = 'visible';
-}
-
-export class AssertUrlContainsAction implements BaseActionParams {
-  includes!: string | string[]; // substring or list of substrings that must appear in current URL
-  timeoutMs?: number = 3000; // optional wait for navigation/state changes
 }
 
 // ============================================================================
@@ -117,12 +87,6 @@ export class SelectDropdownAction implements BaseActionParams {
   option!: string; // visible text or value
 }
 
-// Select <select> option by selector
-export class SelectDropdownBySelectorAction implements BaseActionParams {
-  selector!: string; // CSS/XPath selector targeting a <select>
-  option!: string; // visible text or value
-}
-
 export class GetDropdownOptionsAction implements BaseActionParams {
   index!: number;
 }
@@ -153,12 +117,6 @@ export class DoneAction implements BaseActionParams {
   success?: boolean = true;
 }
 
-export class DoneStructuredAction implements BaseActionParams {
-  data!: any; // arbitrary JSON-like object
-  success?: boolean = true;
-  text?: string; // optional human summary
-}
-
 // ============================================================================
 // Union type for all actions
 // ============================================================================
@@ -167,28 +125,21 @@ export type BrowserActionParams =
   | SearchAction
   | NavigateAction
   | ClickElementAction
-  | ClickSelectorAction
-  | ClickTextAction
   | InputTextAction
-  | InputSelectorAction
   | ScrollAction
   | SendKeysAction
   | ScrollToTextAction
-  | WaitForSelectorAction
-  | AssertUrlContainsAction
   | ScreenshotAction
   | EvaluateAction
   | ExtractAction
   | GoBackAction
   | WaitAction
   | SelectDropdownAction
-  | SelectDropdownBySelectorAction
   | GetDropdownOptionsAction
   | UploadFileAction
   | SwitchTabAction
   | CloseTabAction
   | DoneAction
-  | DoneStructuredAction
   | ReadFileAction
   | WriteFileAction
   | ReplaceFileAction;
