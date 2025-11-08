@@ -113,4 +113,30 @@ export class Registry {
 
     return descriptions.join('\n');
   }
+
+  /**
+   * Get detailed action descriptions with parameters for LLM prompt
+   */
+  getDetailedActionDescriptions(): string {
+    const descriptions: string[] = [];
+
+    for (const action of this.getAll()) {
+      const paramModel = action.paramModel;
+      let paramInfo = '';
+
+      // Extract parameter names from the model constructor
+      if (paramModel && paramModel.name) {
+        const instance = new paramModel();
+        const params = Object.keys(instance).filter(key => !key.startsWith('_'));
+
+        if (params.length > 0) {
+          paramInfo = ` (${params.join(', ')})`;
+        }
+      }
+
+      descriptions.push(`- ${action.name}${paramInfo}: ${action.description}`);
+    }
+
+    return descriptions.join('\n');
+  }
 }

@@ -3,20 +3,10 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { HumanMessage, AIMessage, SystemMessage } from "@langchain/core/messages";
 import { BrowserController } from "./browserController.js";
-import { info } from "./utils/logger.js";
-import { Registry, registerDefaultActions } from "./tools/index.js";
+import { info, debug } from "./utils/logger.js";
+import { Registry, registerDefaultActions, ActionResult as ToolActionResult } from "./tools/index.js";
 
 export type AgentLogCallback = (log: { type: 'thought' | 'observation' | 'system' | 'error', data: any }) => void;
-
-/**
- * Legacy ActionResult (for backward compatibility)
- * @deprecated Use ActionResult from tools/registry.ts instead
- */
-export interface ActionResult {
-  success: boolean;
-  observation: string;
-  error?: string;
-}
 
 export interface AgentOutput {
   success: boolean;
@@ -90,16 +80,19 @@ export class LLMService {
    * Get system prompt for the agent (uses Registry for action descriptions)
    */
   private getSystemPrompt(): string {
-    // Get action descriptions from Registry
-    const actions = this.registry.getAll();
-    const actionDescriptions = actions.map((action, index) => {
-      return `${index + 1}. ${action.name}: ${action.description}`;
-    }).join('\n');
+    // Get detailed action descriptions from Registry with parameter info
+    const actionDescriptions = this.registry.getDetailedActionDescriptions();
 
     return `You are a browser automation agent. Your task is to accomplish user goals by interacting with web pages.
 
 AVAILABLE ACTIONS:
 ${actionDescriptions}
+
+CRITICAL PARAMETER RULES:
+- For click_element: use "index" parameter (NOT "element_index")
+- For input_text: use "index" parameter (NOT "element_index")
+- Element indices come from the browser state's interactive elements list
+- Indices are numbers (e.g., 42, not "42")
 
 INSTRUCTIONS:
 - Think step by step about what you need to do
@@ -109,14 +102,29 @@ INSTRUCTIONS:
 - The "thinking" field should contain your reasoning
 - The "action" field should contain one of the actions above with a "type" field
 
-RESPONSE FORMAT:
+CORRECT RESPONSE FORMAT EXAMPLES:
+
+Search example:
 {
   "thinking": "I need to search for Python tutorials",
   "action": {"type": "search", "query": "Python tutorials", "engine": "google"}
 }
 
+Click element example (use "index", NOT "element_index"):
+{
+  "thinking": "I need to click the submit button at index 42",
+  "action": {"type": "click_element", "index": 42}
+}
+
+Input text example (use "index", NOT "element_index"):
+{
+  "thinking": "I need to type into the search box at index 15",
+  "action": {"type": "input_text", "index": 15, "text": "hello world", "clear": true}
+}
+
 Remember:
-- Element indices start from 1
+- Element indices start from 0
+- ALWAYS use "index" parameter for click_element and input_text
 - Always check if the page has loaded correctly before taking action
 - Use "done" action when you've accomplished the user's goal
 - Be precise and careful with your actions`;
@@ -159,8 +167,9 @@ Remember:
 
       try {
         // Phase 1: Get current browser state
+        // OPTIMIZED: Skip screenshot in LLM loop (Electron already streams screenshots separately)
         emitLog('system', { message: 'Getting browser state...' });
-        const browserState = await browserController.getBrowserState(true, true);
+        const browserState = await browserController.getBrowserState(false, true);
 
         emitLog('observation', {
           url: browserState.url,
@@ -201,11 +210,13 @@ Remember:
 
         // Phase 5: Execute action
         const actionResult = await this.executeAction(action, browserController);
+        const actionSucceeded = !actionResult.error;
+        const observation = actionResult.extractedContent || actionResult.longTermMemory || actionResult.error || 'Action completed';
 
         emitLog('observation', {
           action: action.type,
-          success: actionResult.success,
-          observation: actionResult.observation,
+          success: actionSucceeded,
+          observation,
         });
 
         // Check if task is complete
@@ -218,8 +229,8 @@ Remember:
         }
 
         // Add action result to messages
-        if (actionResult.success) {
-          messages.push(new HumanMessage(`Action result: ${actionResult.observation}`));
+        if (actionSucceeded) {
+          messages.push(new HumanMessage(`Action result: ${observation}`));
         } else {
           messages.push(new HumanMessage(`Action failed: ${actionResult.error || 'Unknown error'}`));
         }
@@ -317,24 +328,22 @@ Remember:
   /**
    * Execute a browser action using Tools Registry
    */
-  private async executeAction(action: TypedAction, browserController: BrowserController): Promise<ActionResult> {
+  private async executeAction(action: TypedAction, browserController: BrowserController): Promise<ToolActionResult> {
     try {
+      // Debug: Log the action being executed
+      debug(`[LLM] Executing action:`, JSON.stringify(action, null, 2));
+
       // Use Registry to execute action
       const result = await this.registry.execute(action.type, action, browserController);
 
-      // Convert new ActionResult format to legacy format
-      const observation = result.extractedContent || result.longTermMemory || result.error || 'Action completed';
+      const obs = result.extractedContent || result.longTermMemory || result.error || 'Action completed';
       const success = !result.error;
+      debug(`[LLM] Action result - success: ${success}, observation: ${obs}`);
 
-      return {
-        success,
-        observation,
-        error: result.error,
-      };
+      return result;
     } catch (error: any) {
+      debug(`[LLM] Action execution error:`, error);
       return {
-        success: false,
-        observation: 'Error executing action',
         error: error.message,
       };
     }
@@ -373,6 +382,30 @@ Remember:
     const response = await modelWithTools.invoke(langchainMessages);
 
     return response;
+  }
+
+  /**
+   * Simple chat helper for single-turn prompts (used by Electron quick actions)
+   */
+  async chat(messages: Array<{ role: string; content: string }>): Promise<string> {
+    // Convert messages to LangChain format
+    const langchainMessages = messages.map(msg => {
+      if (msg.role === 'user') return new HumanMessage(msg.content);
+      if (msg.role === 'assistant') return new AIMessage(msg.content);
+      if (msg.role === 'system') return new SystemMessage(msg.content);
+      return new HumanMessage(msg.content);
+    });
+
+    const response = await this.model.invoke(langchainMessages);
+    const content = (response as any)?.content;
+    if (typeof content === 'string') return content;
+    try {
+      return Array.isArray(content)
+        ? content.map((c: any) => (typeof c?.text === 'string' ? c.text : '')).join('\n').trim()
+        : String(content ?? '');
+    } catch {
+      return '';
+    }
   }
 
   /**

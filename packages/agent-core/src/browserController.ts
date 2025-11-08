@@ -20,7 +20,7 @@ import {
 } from './events/browserEvents.js';
 import { BrowserProfile } from './browser/BrowserProfile.js';
 import { BaseWatchdog, createDefaultWatchdogs, destroyWatchdogs } from './watchdogs/index.js';
-import { BrowserError, ElementNotFoundError } from './errors/index.js';
+// Removed unused error imports
 import { BrowserSession } from './browser/BrowserSession.js';
 import { Element } from './actor/Element.js';
 import { debug, info, warn, error as logError } from './utils/logger.js';
@@ -64,11 +64,22 @@ export class BrowserController {
 
   // DOM state cache
   private cachedDOMState: SerializedDOMState | null = null;
+  private cachedSelectorMap: Record<number, any> = {};
   private cacheTimestamp: number = 0;
   private readonly CACHE_TTL = 500; // ms
 
   // BrowserSession for CDP session management (browser-use style)
   private browserSession: BrowserSession | null = null;
+
+  /**
+   * Invalidate DOM cache (called on navigation, tab switch)
+   */
+  private invalidateDOMCache(): void {
+    debug('[BrowserController] DOM cache invalidated');
+    this.cachedDOMState = null;
+    this.cachedSelectorMap = {};
+    this.cacheTimestamp = 0;
+  }
 
   constructor(debugMode: boolean = false, profile?: BrowserProfile) {
     this.debugMode = debugMode;
@@ -232,6 +243,8 @@ export class BrowserController {
 
   /**
    * Get comprehensive browser state including DOM, screenshot, tabs
+   *
+   * DOM caching: Within CACHE_TTL (500ms), returns cached DOM to avoid expensive re-collection
    */
   async getBrowserState(
     includeScreenshot: boolean = true,
@@ -246,29 +259,80 @@ export class BrowserController {
 
     // Get basic page info
     const url = this.page.url();
-    const title = await this.page.title();
 
-    // Get screenshot
+    // Protect title access - can fail during navigation with "execution context destroyed"
+    let title = '';
+    try {
+      title = await this.page.title();
+    } catch (error: any) {
+      debug('[BrowserController] Failed to get title (navigation in progress):', error.message);
+      title = '';
+    }
+
+    // Get screenshot (CRITICAL: Use CDP to avoid Playwright's navigation waiting)
     let screenshot: string | null = null;
     if (includeScreenshot) {
       const screenshotStart = Date.now();
-      const screenshotBuffer = await this.page.screenshot({ type: 'png', fullPage: false });
-      screenshot = Buffer.from(screenshotBuffer).toString('base64');
+
+      // Try CDP first to avoid HTTP/2 errors during navigation
+      let screenshotData: string | null = null;
+      if (this.browserSession && this.browserSession.agentFocus) {
+        const targetId = this.browserSession.agentFocus.targetId;
+        if (targetId) {
+          try {
+            const cdpSession = await this.browserSession.getOrCreateCDPSession(targetId, false);
+            const result = await (cdpSession.cdpSession as any).send('Page.captureScreenshot', {
+              format: 'jpeg',
+              quality: 70,
+            });
+            screenshotData = result.data;
+          } catch (error: any) {
+            debug('[BrowserController] CDP screenshot failed, using Playwright fallback:', error.message);
+          }
+        }
+      }
+
+      // Fallback to Playwright if CDP fails
+      if (!screenshotData) {
+        const screenshotBuffer = await this.page.screenshot({ type: 'jpeg', quality: 70, fullPage: false });
+        screenshotData = Buffer.from(screenshotBuffer).toString('base64');
+      }
+
+      screenshot = screenshotData;
       timing.screenshot = Date.now() - screenshotStart;
     }
 
-    // Get DOM state
+    // Get DOM state (OPTIMIZED: Cache for 500ms to avoid redundant collection)
     let domState: SerializedDOMState | null = null;
     let llmRepresentation = '';
     let selectorMap: Record<number, any> = {};
 
     if (includeDOM && this.domService) {
-      const domStart = Date.now();
-      const domResult = await this.domService.getSerializedDOMTree();
-      domState = domResult.state;
-      selectorMap = domState.selectorMap;
-      llmRepresentation = domResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
-      timing.dom = Date.now() - domStart;
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+
+      // Use cache if within TTL
+      if (this.cachedDOMState && cacheAge < this.CACHE_TTL) {
+        debug(`[BrowserController] Using cached DOM (age: ${cacheAge}ms)`);
+        domState = this.cachedDOMState;
+        selectorMap = this.cachedSelectorMap;
+        llmRepresentation = this.formatDOMForLLM(selectorMap);
+        timing.dom = 0; // Cache hit
+      } else {
+        // Cache miss or expired - fetch fresh DOM
+        const domStart = Date.now();
+        const domResult = await this.domService.getSerializedDOMTree();
+        domState = domResult.state;
+        selectorMap = domState.selectorMap;
+        llmRepresentation = domResult.llmRepresentation || this.formatDOMForLLM(domState.selectorMap);
+        timing.dom = Date.now() - domStart;
+
+        // Update cache
+        this.cachedDOMState = domState;
+        this.cachedSelectorMap = selectorMap;
+        this.cacheTimestamp = now;
+        debug(`[BrowserController] DOM cache refreshed (${timing.dom}ms)`);
+      }
     }
 
     // Get scroll position and viewport
@@ -366,6 +430,7 @@ export class BrowserController {
 
   /**
    * Click element by index (browser-use style with Element class)
+   * OPTIMIZED: Reuses cached selectorMap instead of re-fetching DOM
    */
   async clickElement(index: number): Promise<{ success: boolean; error?: string }> {
     try {
@@ -373,8 +438,21 @@ export class BrowserController {
         throw new Error('Browser not launched');
       }
 
-      const state = await this.getBrowserState(false, true);
-      const elementData = state.selectorMap[index];
+      // OPTIMIZATION: Reuse cached selectorMap if available (avoids DOM re-fetch)
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+      let selectorMap = this.cachedSelectorMap;
+
+      // Only fetch fresh DOM if cache is stale or empty
+      if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+        debug(`[BrowserController] Cache miss in clickElement, fetching DOM (age: ${cacheAge}ms)`);
+        const state = await this.getBrowserState(false, true);
+        selectorMap = state.selectorMap;
+      } else {
+        debug(`[BrowserController] Using cached selectorMap in clickElement (age: ${cacheAge}ms)`);
+      }
+
+      const elementData = selectorMap[index];
 
       if (!elementData || !elementData.backendNodeId) {
         return { success: false, error: `Element at index ${index} not found` };
@@ -389,8 +467,12 @@ export class BrowserController {
 
       await element.click();
 
-      // Wait briefly for click to register (browser-use: 50-80ms)
-      await this.page.waitForTimeout(80);
+      // Wait for navigation or timeout (race condition fix)
+      // Some clicks trigger navigation - wait for DOMContentLoaded or 250ms, whichever comes first
+      await Promise.race([
+        this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
+        this.page.waitForTimeout(250),
+      ]);
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Clicked element ${index}`);
@@ -404,6 +486,7 @@ export class BrowserController {
 
   /**
    * Type text into element by index (browser-use style with Element class)
+   * OPTIMIZED: Reuses cached selectorMap instead of re-fetching DOM
    */
   async inputText(index: number, text: string, clear: boolean = true): Promise<{ success: boolean; error?: string }> {
     try {
@@ -411,8 +494,21 @@ export class BrowserController {
         throw new Error('Browser not launched');
       }
 
-      const state = await this.getBrowserState(false, true);
-      const elementData = state.selectorMap[index];
+      // OPTIMIZATION: Reuse cached selectorMap if available (avoids DOM re-fetch)
+      const now = Date.now();
+      const cacheAge = now - this.cacheTimestamp;
+      let selectorMap = this.cachedSelectorMap;
+
+      // Only fetch fresh DOM if cache is stale or empty
+      if (!selectorMap || Object.keys(selectorMap).length === 0 || cacheAge >= this.CACHE_TTL) {
+        debug(`[BrowserController] Cache miss in inputText, fetching DOM (age: ${cacheAge}ms)`);
+        const state = await this.getBrowserState(false, true);
+        selectorMap = state.selectorMap;
+      } else {
+        debug(`[BrowserController] Using cached selectorMap in inputText (age: ${cacheAge}ms)`);
+      }
+
+      const elementData = selectorMap[index];
 
       if (!elementData || !elementData.backendNodeId) {
         return { success: false, error: `Element at index ${index} not found` };
@@ -478,16 +574,34 @@ export class BrowserController {
           timestamp: Date.now(),
         } as TabCreatedEvent);
 
-        await newPage.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
         this.page = newPage; // Switch to new page
-      } else {
-        await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
       }
 
+      // Use CDP Page.navigate instead of Playwright's page.goto()
+      // This avoids HTTP/2 protocol errors on sites like Coupang
+      if (!this.browserSession || !this.browserSession.agentFocus) {
+        throw new Error('Browser session not initialized');
+      }
+
+      const targetId = this.browserSession.agentFocus.targetId;
+      if (!targetId) {
+        throw new Error('No target ID available for navigation');
+      }
+
+      const cdpSession = await this.browserSession.getOrCreateCDPSession(targetId, false);
+
+      await (cdpSession.cdpSession as any).send('Page.navigate', {
+        url: url,
+        transitionType: 'address_bar',
+      });
+
       // Wait for page to stabilize (browser-use: minimal wait)
-      await this.page.waitForTimeout(100);
+      await this.page.waitForTimeout(200);
 
       const title = await this.page.title();
+
+      // Invalidate DOM cache after navigation
+      this.invalidateDOMCache();
 
       // Emit navigation complete event
       await this.eventBus.emit(BrowserEventTypes.NAVIGATION_COMPLETE, {
@@ -595,6 +709,9 @@ export class BrowserController {
       this.page = pages[tabIndex];
       await this.page.bringToFront();
 
+      // Invalidate DOM cache after tab switch
+      this.invalidateDOMCache();
+
       // Emit switch tab event
       await this.eventBus.emit(BrowserEventTypes.SWITCH_TAB, {
         type: 'switch_tab',
@@ -672,8 +789,25 @@ export class BrowserController {
 
   async goTo(url: string): Promise<void> {
     if (!this.page) throw new Error('Page not initialized');
+
+    // Use CDP Page.navigate instead of Playwright's page.goto()
+    // This avoids HTTP/2 protocol errors on sites like Coupang
+    if (this.browserSession && this.browserSession.agentFocus) {
+      const targetId = this.browserSession.agentFocus.targetId;
+      if (targetId) {
+        const cdpSession = await this.browserSession.getOrCreateCDPSession(targetId, false);
+        await (cdpSession.cdpSession as any).send('Page.navigate', {
+          url: url,
+          transitionType: 'typed',
+        });
+        await this.page.waitForTimeout(200);
+        return;
+      }
+    }
+
+    // Fallback to Playwright if CDP not available
     await this.page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-    await this.page.waitForTimeout(100); // Reduced from 1000ms to 100ms
+    await this.page.waitForTimeout(100);
   }
 
   /**
@@ -740,6 +874,31 @@ export class BrowserController {
 
     try {
       this.lastScreenshotTime = now;
+
+      // Use CDP for screenshot to avoid Playwright's automatic navigation waiting
+      // This prevents HTTP/2 protocol errors on sites like Coupang
+      if (this.browserSession && this.browserSession.agentFocus) {
+        const targetId = this.browserSession.agentFocus.targetId;
+        if (targetId) {
+          const cdpSession = await this.browserSession.getOrCreateCDPSession(targetId, false);
+          const result = await (cdpSession.cdpSession as any).send('Page.captureScreenshot', {
+            format: 'png',
+          });
+          const image = result.data;
+          const url = this.page.url();
+
+          await this.eventBus.emit(BrowserEventTypes.SCREENSHOT, {
+            type: 'screenshot',
+            image,
+            action,
+            timestamp: Date.now(),
+            url,
+          } as ScreenshotEvent);
+          return;
+        }
+      }
+
+      // Fallback to Playwright if CDP not available
       const screenshot = await this.page.screenshot({ type: 'png', fullPage: false });
       const image = Buffer.from(screenshot).toString('base64');
       const url = this.page.url();

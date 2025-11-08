@@ -32,7 +32,7 @@ export interface BrowserProfileConfig {
 export class BrowserProfile {
   public headless: boolean = true;
   public disableImages: boolean = false;
-  public disableSecurity: boolean = true;
+  public disableSecurity: boolean = false; // Changed to false - aggressive security bypass triggers bot detection
   public extraChromiumArgs: string[] = [];
   public minimumWaitPageLoadTime: number = 0.5; // seconds
   public waitForNetworkIdlePageLoadTime: number = 1.0; // seconds
@@ -56,12 +56,27 @@ export class BrowserProfile {
    */
   getLaunchArgs(): string[] {
     const args = [
+      // Anti-detection (browser-use compatibility)
       '--disable-blink-features=AutomationControlled',
+      '--disable-features=AutomationControlled',
+
+      // Window settings
       '--window-size=1920,1080',
       '--start-maximized',
       '--disable-infobars',
       '--disable-notifications',
       '--disable-popup-blocking',
+
+      // Additional browser-use args for better compatibility
+      '--disable-background-networking',
+      '--disable-ipc-flooding-protection',
+      '--disable-hang-monitor',
+      '--metrics-recording-only',
+      '--no-first-run',
+      '--no-service-autorun',
+      '--disable-component-update',
+      '--disable-client-side-phishing-detection',
+      '--disable-breakpad',
     ];
 
     if (this.disableSecurity) {

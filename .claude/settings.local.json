@@ -17,7 +17,9 @@
       "Bash(node test-integration.js:*)",
       "Bash(npm uninstall:*)",
       "Bash(grep:*)",
-      "Bash(awk:*)"
+      "Bash(awk:*)",
+      "Bash(npm run build:agent-core:*)",
+      "Read(//c/tmp/**)"
     ],
     "deny": [],
     "ask": []

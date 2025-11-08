@@ -3,6 +3,7 @@ import { BrowserSession, TargetID, SessionID } from '../browser/BrowserSession.j
 import { Element } from './Element.js';
 import { Mouse } from './Mouse.js';
 import { debug } from '../utils/logger.js';
+import { LLMService } from '../llmService.js';
 
 /**
  * Page class for page-level operations
@@ -14,11 +15,13 @@ export class Page {
   private targetId: TargetID;
   private sessionId: SessionID | null;
   private _mouse: Mouse | null = null;
+  private llm: LLMService | null = null;
 
-  constructor(browserSession: BrowserSession, targetId: TargetID, sessionId: SessionID | null = null) {
+  constructor(browserSession: BrowserSession, targetId: TargetID, sessionId: SessionID | null = null, llm: LLMService | null = null) {
     this.browserSession = browserSession;
     this.targetId = targetId;
     this.sessionId = sessionId;
+    this.llm = llm;
   }
 
   /**
@@ -294,8 +297,18 @@ export class Page {
    * Navigate this target to a URL
    */
   async goto(url: string): Promise<void> {
-    const page = this.getPlaywrightPage();
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    // Use CDP Page.navigate instead of Playwright's page.goto()
+    // This avoids HTTP/2 protocol errors on sites like Coupang
+    const sessionId = await this.ensureSession();
+    const sessionInfo = await this.browserSession.getOrCreateCDPSession(this.targetId, false);
+
+    await (sessionInfo.cdpSession as any).send('Page.navigate', {
+      url: url,
+      transitionType: 'typed',
+    });
+
+    // Wait a bit for navigation to start
+    await new Promise(resolve => setTimeout(resolve, 200));
   }
 
   /**
@@ -400,6 +413,129 @@ export class Page {
     } else {
       return { code: 'Unidentified', vkCode: null };
     }
+  }
+
+  /**
+   * Get an element by a natural language prompt using LLM
+   *
+   * Example:
+   *   const submitButton = await page.getElementByPrompt("the submit button");
+   *   await submitButton.click();
+   *
+   * @param prompt - Natural language description of the element to find
+   * @param llm - Optional LLM service (uses constructor LLM if not provided)
+   * @returns Element instance or null if not found
+   */
+  async getElementByPrompt(prompt: string, llm?: LLMService): Promise<Element | null> {
+    const useLLM = llm || this.llm;
+
+    if (!useLLM) {
+      throw new Error('LLM not provided. Pass an LLM to the Page constructor or to this method.');
+    }
+
+    // Get DOM state with element indexes
+    const browserController = (this.browserSession as any).browserController;
+    if (!browserController) {
+      throw new Error('BrowserController not available');
+    }
+
+    const browserState = await browserController.getBrowserState(false, true);
+
+    if (!browserState.llmRepresentation) {
+      throw new Error('DOM state not available');
+    }
+
+    // Create system message
+    const systemPrompt = `You are an AI created to find an element on a page by a prompt.
+
+<browser_state>
+Interactive Elements: All interactive elements will be provided in format as [index]<type>text</type> where
+- index: Numeric identifier for interaction
+- type: HTML element type (button, input, etc.)
+- text: Element description
+
+Examples:
+[33]<div>User form</div>
+[35]<button aria-label='Submit form'>Submit</button>
+
+Note that:
+- Only elements with numeric indexes in [] are interactive
+- (stacked) indentation (with \\t) is important and means that the element is a (html) child of the element above (with a lower index)
+- Pure text elements without [] are not interactive.
+</browser_state>
+
+Your task is to find an element index (if any) that matches the prompt (written in <prompt> tag).
+
+If none of the elements matches, return null in the element_index field.
+
+Before you return the element index, reason about the state and elements for a sentence or two in the thinking field.
+
+RESPONSE FORMAT (JSON):
+{
+  "thinking": "The user wants to find the submit button. Looking at the elements, index 35 is a button with aria-label 'Submit form' which matches.",
+  "element_index": 35
+}`;
+
+    const userMessage = `<browser_state>
+${browserState.llmRepresentation}
+</browser_state>
+
+<prompt>
+${prompt}
+</prompt>`;
+
+    // Call LLM
+    const messages = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ];
+
+    const response = await useLLM.chatWithTools(messages, []);
+    const responseText = response.content || '';
+
+    // Parse response
+    let elementIndex: number | null = null;
+    try {
+      // Try to extract JSON from response
+      const jsonMatch = responseText.match(/\{[\s\S]*"element_index"[\s\S]*\}/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        elementIndex = parsed.element_index;
+      }
+    } catch (error) {
+      debug('[Page] Failed to parse LLM response for element finding');
+      return null;
+    }
+
+    // Check if element exists
+    if (elementIndex === null || elementIndex === undefined) {
+      return null;
+    }
+
+    const elementData = browserState.selectorMap[elementIndex];
+    if (!elementData || !elementData.backendNodeId) {
+      return null;
+    }
+
+    // Return Element instance
+    const sessionId = await this.ensureSession();
+    return new Element(this.browserSession, elementData.backendNodeId, sessionId);
+  }
+
+  /**
+   * Get an element by prompt or throw error if not found
+   *
+   * @param prompt - Natural language description of the element
+   * @param llm - Optional LLM service
+   * @returns Element instance
+   * @throws Error if element not found
+   */
+  async mustGetElementByPrompt(prompt: string, llm?: LLMService): Promise<Element> {
+    const element = await this.getElementByPrompt(prompt, llm);
+    if (!element) {
+      throw new Error(`No element found for prompt: ${prompt}`);
+    }
+    return element;
   }
 
   /**
