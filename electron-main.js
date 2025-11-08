@@ -22,8 +22,9 @@ protocol.registerSchemesAsPrivileged([
   }
 ]);
 
-const { BrowserController } = require('./packages/agent-core/dist/browserController');
-const { LLMService } = require('./packages/agent-core/dist/llmService');
+// Use new browser-use style services
+const { NewBrowserController } = require('./packages/agent-core/dist/newBrowserController');
+const { NewLLMService } = require('./packages/agent-core/dist/newLLMService');
 
 let mainWindow;
 let browserView = null; // Current active BrowserView
@@ -767,7 +768,7 @@ ipcMain.on('browserview-translate-request', async (_event, text) => {
     console.log('[Electron] Using model for translation:', modelName);
 
     // Create LLMService with selected model
-    const tempLLMService = new LLMService(modelName);
+    const tempLLMService = new NewLLMService(modelName);
 
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
     const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
@@ -808,7 +809,7 @@ ipcMain.on('browserview-edit-request', async (_event, { text, prompt }) => {
     console.log('[Electron] Using model for AI edit:', modelName);
 
     // Create LLMService with selected model
-    const tempLLMService = new LLMService(modelName);
+    const tempLLMService = new NewLLMService(modelName);
 
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
     const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
@@ -868,7 +869,7 @@ ipcMain.handle('analyze-task', async (event, { task, model, conversationHistory 
     }
 
     // LLM이 tool을 선택하도록 함
-    const tempLLM = new LLMService(model || 'gpt-5-mini');
+    const tempLLM = new NewLLMService(model || 'gpt-4o-mini');
 
     // Build conversation context
     let contextPrompt = 'You are a helpful AI assistant.';
@@ -1063,12 +1064,15 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
       const debugMode = true;
       const headless = true; // Headless mode
-      browserController = new BrowserController(debugMode, headless);
-      llmService = new LLMService(model || 'gpt-5-mini');
+      browserController = new NewBrowserController(debugMode, headless);
+      llmService = new NewLLMService(model || 'gpt-4o-mini');
 
       console.log('[Hybrid] Will stream AI screenshots to BrowserView');
 
-      // 이벤트 리스너 설정
+      // Note: NewBrowserController doesn't emit events
+      // Screenshot streaming is handled via interval below
+
+      /* OLD EVENT LISTENER - not needed with NewBrowserController
       browserController.on('screenshot', (data) => {
         // Send to Chat UI
         if (mainWindow) {
@@ -1166,6 +1170,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
           }
         }
       });
+      */ // End of OLD EVENT LISTENER comment
 
       // 브라우저 시작
       await browserController.launch();
@@ -1174,8 +1179,10 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       screenshotInterval = setInterval(async () => {
         if (browserController && !stopRequested) {
           try {
-            const screenshot = await browserController.captureScreenshot();
-            if (screenshot && browserView) {
+            const screenshotBuffer = await browserController.captureScreenshot();
+            if (screenshotBuffer && browserView) {
+              const screenshotBase64 = screenshotBuffer.toString('base64');
+
               // Stream to BrowserView
               browserView.webContents.executeJavaScript(`
                 (function() {
@@ -1213,7 +1220,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
                   const container = document.getElementById('ai-screenshot-container');
                   if (container) {
-                    const screenshotData = 'data:image/png;base64,${screenshot}';
+                    const screenshotData = 'data:image/png;base64,${screenshotBase64}';
                     container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
                       '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
                         '<div style="display: flex; gap: 8px;">' +
@@ -1303,7 +1310,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       }
 
       // AI 작업 실행
-      const result = await llmService.planAndExecute(taskPlan, browserController, (log) => {
+      const result = await llmService.executeTask(taskPlan, browserController, (log) => {
         if (mainWindow) {
           mainWindow.webContents.send('agent-log', log);
         }
@@ -1475,7 +1482,7 @@ ipcMain.on('translate-text-request', async (_event, text) => {
   try {
     if (!llmService) {
       const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
+      llmService = new NewLLMService(modelName);
     }
 
     mainWindow.webContents.send('translate-text', { text });
@@ -1491,7 +1498,7 @@ ipcMain.on('ai-edit-text-request', async (_event, text) => {
   try {
     if (!llmService) {
       const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
+      llmService = new NewLLMService(modelName);
     }
 
     mainWindow.webContents.send('ai-edit-text', { text });
@@ -1556,7 +1563,7 @@ ipcMain.handle('translate-text', async (_event, { text }) => {
     const modelName = selectedModel || 'gpt-5-mini';
     console.log('[Electron] Using model for translation:', modelName);
 
-    const tempLLMService = new LLMService(modelName);
+    const tempLLMService = new NewLLMService(modelName);
 
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
     const response = await tempLLMService.chat([{ role: 'user', content: prompt }]);
@@ -1587,7 +1594,7 @@ ipcMain.handle('ai-edit-text', async (_event, { text, prompt }) => {
     const modelName = selectedModel || 'gpt-5-mini';
     console.log('[Electron] Using model for AI edit:', modelName);
 
-    const tempLLMService = new LLMService(modelName);
+    const tempLLMService = new NewLLMService(modelName);
 
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
     const response = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);

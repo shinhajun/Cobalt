@@ -1,8 +1,0 @@
-  async extractRecaptchaTiles(): Promise<import('./captchaSolver').RecaptchaTile[]> {
-    return await this.captchaSolver.extractRecaptchaTiles();
-  }
-
-  async clickRecaptchaTilesByIndices(indices: number[]): Promise<boolean> {
-    return await this.captchaSolver.clickRecaptchaTilesByIndices(indices);
-  }
-}
