@@ -78,7 +78,7 @@ function createWindow() {
   // Initial layout (100% for browser, chat hidden)
   updateBrowserViewBounds();
 
-  // Load Cobalt homepage as default page
+  // Load Cobalt logo page as default
   browserView.webContents.loadFile(path.join(__dirname, 'cobalt-home.html'));
 
   // Toolbar UI 로드 (상단 주소창 + Chat UI)

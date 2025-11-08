@@ -961,6 +961,17 @@ No explanation, only JSON.`;
       // Observation은 이전 루프의 결과 또는 초기값
       this.emitLog('observation', { observation });
 
+      // Get DOM element map for smarter interaction
+      let domElementsInfo = '';
+      try {
+        const elementMap = await browserController.getInteractiveElements();
+        if (elementMap.elements.length > 0) {
+          domElementsInfo = `\n=== DOM Interactive Elements (Browser-Use Style) ===\n${elementMap.summary}\n\n**IMPORTANT: You can now click elements by their index number using clickElement action!**\nExample: {"type": "BROWSER_ACTION", "command": "clickElement", "index": 5}\nThis is MORE RELIABLE than CSS selectors.\n\n`;
+        }
+      } catch (error) {
+        this.emitLog('system', { message: `[DOM] Could not extract elements: ${(error as Error).message}` });
+      }
+
       const prompt = `
         You are an AI assistant performing a web automation task.
         Current Task: ${taskDescription}
@@ -971,29 +982,40 @@ No explanation, only JSON.`;
         Observation: ${observation}
         (Observation contains information about the current page state, results of previous actions, or errors.)
 
+        ${domElementsInfo}
+
         Available Browser/Tool Actions (strictly follow this JSON format for the 'action' field):
 
-        Browser Actions:
+        Browser Actions (NEW: Index-based clicking!):
         1.  {"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL_TO_NAVIGATE_TO>"}
-        2.  {"type": "BROWSER_ACTION", "command": "click", "selector": "<CSS_SELECTOR>"}
-        3.  {"type": "BROWSER_ACTION", "command": "clickCoordinates", "x": <X_PIXEL>, "y": <Y_PIXEL>} - Click at specific coordinates (use when elements have position info)
-        4.  {"type": "BROWSER_ACTION", "command": "type", "selector": "<CSS_SELECTOR>", "text": "<TEXT_TO_TYPE>"}
-        5.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"}
-        6.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"}
-        7.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"}
+        2.  {"type": "BROWSER_ACTION", "command": "clickElement", "index": <ELEMENT_INDEX>} - **PREFERRED** Click by index from DOM Interactive Elements (most reliable!)
+        3.  {"type": "BROWSER_ACTION", "command": "typeElement", "index": <ELEMENT_INDEX>, "text": "<TEXT>"} - Type into element by index
+        4.  {"type": "BROWSER_ACTION", "command": "click", "selector": "<CSS_SELECTOR>"} - Fallback if no DOM elements available
+        5.  {"type": "BROWSER_ACTION", "command": "clickCoordinates", "x": <X_PIXEL>, "y": <Y_PIXEL>} - Click at specific coordinates
+        6.  {"type": "BROWSER_ACTION", "command": "type", "selector": "<CSS_SELECTOR>", "text": "<TEXT_TO_TYPE>"}
+        7.  {"type": "BROWSER_ACTION", "command": "getText", "selector": "<CSS_SELECTOR>", "output_variable": "<VAR_NAME>"}
+        8.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"}
+        9.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"}
+
+        Scroll Actions (NEW):
+        10. {"type": "BROWSER_ACTION", "command": "scrollDown", "pixels": <OPTIONAL_PIXELS>} - Scroll down (default 500px)
+        11. {"type": "BROWSER_ACTION", "command": "scrollUp", "pixels": <OPTIONAL_PIXELS>} - Scroll up (default 500px)
+        12. {"type": "BROWSER_ACTION", "command": "scrollToTop"} - Scroll to top of page
+        13. {"type": "BROWSER_ACTION", "command": "scrollToBottom"} - Scroll to bottom of page
+        14. {"type": "BROWSER_ACTION", "command": "scrollToElement", "index": <ELEMENT_INDEX>} - Scroll to bring element into view
 
         Multi-Tab Actions:
-        8.  {"type": "BROWSER_ACTION", "command": "createNewTab", "url": "<OPTIONAL_URL>"} - Open a new browser tab
-        9.  {"type": "BROWSER_ACTION", "command": "switchTab", "tabId": "<TAB_ID>"} - Switch to a specific tab
-        10. {"type": "BROWSER_ACTION", "command": "closeTab", "tabId": "<TAB_ID>"} - Close a specific tab
-        11. {"type": "BROWSER_ACTION", "command": "listTabs"} - List all open tabs with their IDs and URLs
-        12. {"type": "BROWSER_ACTION", "command": "getActiveTabId"} - Get the currently active tab ID
+        15. {"type": "BROWSER_ACTION", "command": "createNewTab", "url": "<OPTIONAL_URL>"} - Open a new browser tab
+        16. {"type": "BROWSER_ACTION", "command": "switchTab", "tabId": "<TAB_ID>"} - Switch to a specific tab
+        17. {"type": "BROWSER_ACTION", "command": "closeTab", "tabId": "<TAB_ID>"} - Close a specific tab
+        18. {"type": "BROWSER_ACTION", "command": "listTabs"} - List all open tabs with their IDs and URLs
+        19. {"type": "BROWSER_ACTION", "command": "getActiveTabId"} - Get the currently active tab ID
 
         CAPTCHA/Challenge Tools:
-        7.  {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
-        8.  {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
-        9.  {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
-        10. {"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<WHAT_TO_FIND_AND_CLICK>"} - Use vision to find and click elements when selectors fail
+        15. {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
+        16. {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
+        17. {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
+        18. {"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<WHAT_TO_FIND_AND_CLICK>"} - Use vision to find and click elements when selectors fail
 
         Utility Tools:
         11. {"type": "TOOL_ACTION", "tool": "calculate", "expression": "<MATH_EXPRESSION>"} - Calculate math (e.g., "3*5+2")
@@ -1014,7 +1036,6 @@ No explanation, only JSON.`;
 
         Guidelines:
         - Analyze the <Observation> carefully to understand the current browser state and results of previous actions.
-        - The observation shows you visible interactive elements with their attributes - use this to find the right selectors.
         - Formulate a <Thought> explaining your reasoning for the next step.
         - Choose an appropriate <Action> from the list above.
 
@@ -1027,12 +1048,34 @@ No explanation, only JSON.`;
         - Use extract tools (extractNumbers, extractEmails, extractURLs) to parse text efficiently
         - Format final reports using formatAsTable or formatAsJSON for better readability
 
-        Browser Actions:
-        - For selectors, use the exact attributes shown in the Interactive Elements section (name, id, aria-label, etc).
-        - **IMPORTANT: When Interactive Elements show position info (x=..., y=...), use clickCoordinates instead of click for better reliability**
-        - If a previous action failed (e.g., selector not found), try clickCoordinates with the x,y values from Interactive Elements
-        - After typing into a search box, always press Enter key to submit the search.
-        - For dynamic pages where elements detach from DOM, always prefer clickCoordinates over click
+        Browser Actions - NEW DOM-BASED SYSTEM (Browser-Use Style):
+        - **PREFERRED METHOD: Use clickElement with index numbers from "DOM Interactive Elements" section**
+          * Example: {"type": "BROWSER_ACTION", "command": "clickElement", "index": 5}
+          * This is THE MOST RELIABLE method - it uses exact element references
+          * Each element has a unique index number [0], [1], [2], etc.
+          * The DOM list shows you: element type, text content, attributes, and coordinates
+
+        - **For typing: Use typeElement with index numbers**
+          * Example: {"type": "BROWSER_ACTION", "command": "typeElement", "index": 3, "text": "search query"}
+          * More reliable than CSS selectors
+
+        - **Fallback methods (use only if DOM Interactive Elements is empty):**
+          * click with CSS selector - less reliable, may fail
+          * clickCoordinates - use when you have x,y coordinates
+
+        - **Action Strategy:**
+          1. FIRST: Check if "DOM Interactive Elements" section is available
+          2. If YES: Use clickElement/typeElement with index numbers
+          3. If NO: Use click with CSS selector or clickCoordinates
+
+        - **Scrolling:**
+          * Use scrollDown/scrollUp to explore long pages
+          * Use scrollToElement to bring an element into view before clicking
+          * Use scrollToBottom to load more content on infinite scroll pages
+          * After scrolling, new DOM elements will appear - check updated element list
+
+        - After typing into a search box, always press Enter key to submit the search
+        - After any click action, check observation for "Page changed" or "Page URL unchanged" to verify success
 
         CAPTCHA/Cloudflare Handling:
         - **CRITICAL: When you see reCAPTCHA elements or CAPTCHA-related text in the page content:**
@@ -1129,6 +1172,42 @@ No explanation, only JSON.`;
                   actionObservation = `Successfully navigated to ${action.url}.`;
                 } else { actionError = true; actionObservation = "Error: URL missing for navigate."; }
                 break;
+              case "clickElement":
+                // NEW: Browser-use style index-based clicking
+                if (typeof action.index === 'number') {
+                  const urlBefore = browserController.getCurrentUrl();
+                  const clickSuccess = await browserController.clickElementByIndex(action.index);
+
+                  if (clickSuccess) {
+                    actionObservation = `Clicked element [${action.index}] successfully.`;
+
+                    // Wait for potential page change and take screenshot to verify
+                    await browserController.waitForPageLoad(3000);
+                    await browserController.streamScreenshot('after-click-element');
+
+                    const urlAfter = browserController.getCurrentUrl();
+                    if (urlBefore !== urlAfter) {
+                      actionObservation += ` Page changed: ${urlBefore} → ${urlAfter}`;
+                      this.emitLog('system', { message: `Click caused navigation: ${urlBefore} → ${urlAfter}` });
+                    } else {
+                      actionObservation += ` Page URL unchanged (may be same-page action or modal).`;
+                    }
+                  } else {
+                    actionObservation = `Failed to click element [${action.index}].`;
+                    actionError = true;
+                  }
+                } else { actionError = true; actionObservation = "Error: index missing for clickElement."; }
+                break;
+              case "typeElement":
+                // NEW: Browser-use style index-based typing
+                if (typeof action.index === 'number' && action.text !== undefined) {
+                  const typeSuccess = await browserController.typeElementByIndex(action.index, action.text);
+                  actionObservation = typeSuccess
+                    ? `Typed '${action.text}' into element [${action.index}].`
+                    : `Failed to type into element [${action.index}].`;
+                  if(!typeSuccess) actionError = true;
+                } else { actionError = true; actionObservation = "Error: index or text missing for typeElement."; }
+                break;
               case "click":
                 if (action.selector) {
                   const urlBefore = browserController.getCurrentUrl();
@@ -1213,6 +1292,79 @@ No explanation, only JSON.`;
                   actionObservation = pressSuccess ? `Pressed key '${action.key}' on ${action.selector}.` : `Failed to press key on ${action.selector}.`;
                    if(!pressSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: Selector or key missing for pressKey."; }
+                break;
+
+              // Scroll actions
+              case "scrollDown":
+                try {
+                  const pixels = action.pixels || 500;
+                  const scrollSuccess = await browserController.scrollDown(pixels);
+                  actionObservation = scrollSuccess
+                    ? `Scrolled down ${pixels}px successfully.`
+                    : `Failed to scroll down.`;
+                  if (!scrollSuccess) actionError = true;
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to scroll down: ${e.message}`;
+                }
+                break;
+
+              case "scrollUp":
+                try {
+                  const pixels = action.pixels || 500;
+                  const scrollSuccess = await browserController.scrollUp(pixels);
+                  actionObservation = scrollSuccess
+                    ? `Scrolled up ${pixels}px successfully.`
+                    : `Failed to scroll up.`;
+                  if (!scrollSuccess) actionError = true;
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to scroll up: ${e.message}`;
+                }
+                break;
+
+              case "scrollToTop":
+                try {
+                  const scrollSuccess = await browserController.scrollToTop();
+                  actionObservation = scrollSuccess
+                    ? `Scrolled to top of page successfully.`
+                    : `Failed to scroll to top.`;
+                  if (!scrollSuccess) actionError = true;
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to scroll to top: ${e.message}`;
+                }
+                break;
+
+              case "scrollToBottom":
+                try {
+                  const scrollSuccess = await browserController.scrollToBottom();
+                  actionObservation = scrollSuccess
+                    ? `Scrolled to bottom of page successfully.`
+                    : `Failed to scroll to bottom.`;
+                  if (!scrollSuccess) actionError = true;
+                } catch (e: any) {
+                  actionError = true;
+                  actionObservation = `Failed to scroll to bottom: ${e.message}`;
+                }
+                break;
+
+              case "scrollToElement":
+                if (typeof action.index === 'number') {
+                  try {
+                    const scrollSuccess = await browserController.scrollToElementByIndex(action.index);
+                    actionObservation = scrollSuccess
+                      ? `Scrolled to element [${action.index}] successfully.`
+                      : `Failed to scroll to element [${action.index}].`;
+                    if (!scrollSuccess) actionError = true;
+                  } catch (e: any) {
+                    actionError = true;
+                    actionObservation = `Failed to scroll to element: ${e.message}`;
+                  }
+                } else {
+                  actionError = true;
+                  actionObservation = "Error: index missing for scrollToElement.";
+                }
                 break;
 
               // Multi-tab actions

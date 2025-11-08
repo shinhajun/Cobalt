@@ -249,6 +249,13 @@
       transform: translateX(4px);
     }
 
+    .tab-favicon {
+      width: 16px;
+      height: 16px;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+
     .tab-title {
       flex: 1;
       overflow: hidden;
@@ -303,6 +310,7 @@
   <!-- Tab bar -->
   <div class="tab-bar" id="tabBar">
     <div class="tab active" data-tab-id="0" draggable="true">
+      <img class="tab-favicon" id="tab-favicon-0" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='8' y='12' text-anchor='middle' font-size='12'%3E📄%3C/text%3E%3C/svg%3E" alt="">
       <span class="tab-title" id="tab-title-0">New Tab</span>
       <span class="tab-close">×</span>
     </div>
@@ -324,7 +332,9 @@
       />
     </div>
 
-    <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle AI Chat">💬</button>
+    <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle AI Chat">
+      <img src="cobalt_logo.png" alt="Cobalt">
+    </button>
   </div>
 
   <!-- Chat UI iframe -->
@@ -345,8 +355,24 @@
 
     let chatVisible = false;
     let currentTabId = 0;
-    let tabs = [{ id: 0, title: 'New Tab', url: 'cobalt-home.html' }];
+    let tabs = [{ id: 0, title: 'New Tab', url: 'cobalt-home.html', favicon: null }];
     let nextTabId = 1;
+
+    // 기본 favicon (빈 페이지용)
+    const defaultFavicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='8' y='12' text-anchor='middle' font-size='12'%3E📄%3C/text%3E%3C/svg%3E";
+
+    // Favicon 추출 함수
+    function getFaviconUrl(url) {
+      try {
+        const urlObj = new URL(url);
+        if (urlObj.protocol === 'about:' || urlObj.protocol === 'file:') {
+          return defaultFavicon;
+        }
+        return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+      } catch {
+        return defaultFavicon;
+      }
+    }
 
     // 초기 상태 설정 (채팅 닫힌 상태)
     toolbar.classList.add('full-width');
@@ -359,13 +385,11 @@
         chatIframe.classList.remove('hidden');
         toolbar.classList.remove('full-width');
         tabBar.classList.remove('full-width');
-        chatToggleBtn.textContent = '💬';
         ipcRenderer.invoke('toggle-chat', { visible: true });
       } else {
         chatIframe.classList.add('hidden');
         toolbar.classList.add('full-width');
         tabBar.classList.add('full-width');
-        chatToggleBtn.textContent = '💬';
         ipcRenderer.invoke('toggle-chat', { visible: false });
       }
     });
@@ -377,13 +401,14 @@
     // 탭 생성
     function createNewTab() {
       const tabId = nextTabId++;
-      tabs.push({ id: tabId, title: 'New Tab', url: 'cobalt-home.html' });
+      tabs.push({ id: tabId, title: 'New Tab', url: 'cobalt-home.html', favicon: defaultFavicon });
 
       const tabElement = document.createElement('div');
       tabElement.className = 'tab';
       tabElement.setAttribute('data-tab-id', tabId);
       tabElement.setAttribute('draggable', 'true');
       tabElement.innerHTML = `
+        <img class="tab-favicon" id="tab-favicon-${tabId}" src="${defaultFavicon}" alt="">
         <span class="tab-title" id="tab-title-${tabId}">New Tab</span>
         <span class="tab-close">×</span>
       `;
@@ -550,10 +575,20 @@
         currentTab.url = url;
         currentTab.title = title || 'New Tab';
 
+        // Favicon 업데이트
+        const faviconUrl = getFaviconUrl(url);
+        currentTab.favicon = faviconUrl;
+
         // 탭 제목 업데이트
         const tabTitleElement = document.getElementById(`tab-title-${currentTabId}`);
         if (tabTitleElement) {
           tabTitleElement.textContent = title || 'New Tab';
+        }
+
+        // Favicon 이미지 업데이트
+        const tabFaviconElement = document.getElementById(`tab-favicon-${currentTabId}`);
+        if (tabFaviconElement) {
+          tabFaviconElement.src = faviconUrl;
         }
       }
 

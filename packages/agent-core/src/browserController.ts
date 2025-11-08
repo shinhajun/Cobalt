@@ -2,6 +2,7 @@ import { chromium, Browser, Page, ElementHandle, BrowserContext } from 'playwrig
 import path from 'path';
 import fs from 'fs';
 import { EventEmitter } from 'events';
+import { DOMExtractor, InteractiveElementMap, InteractiveElement } from './domExtractor';
 
 // Control mode for hybrid browser support
 enum ControlMode {
@@ -25,6 +26,10 @@ export class BrowserController extends EventEmitter {
   // Hybrid mode support
   private controlMode: ControlMode = ControlMode.PLAYWRIGHT;
   private browserViewWebContents: any = null; // Electron webContents when in BrowserView mode
+
+  // DOM extraction support (browser-use style)
+  private domExtractor: DOMExtractor = new DOMExtractor();
+  private interactiveElementsCache: InteractiveElementMap | null = null;
 
   // 타임아웃 상수 정의 (빠른 응답을 위해 단축)
   private readonly TIMEOUTS = {
@@ -180,6 +185,7 @@ export class BrowserController extends EventEmitter {
     }
     this.emitLog('system', { message: `Navigating to ${url}...` });
     this.pageContentCache = null; // 캐시 무효화
+    this.clearInteractiveElementsCache(); // DOM 캐시도 무효화
     let navigated = false;
 
     // 1차: domcontentloaded로 바로 시작 (networkidle은 너무 느림)
@@ -2087,6 +2093,410 @@ export class BrowserController extends EventEmitter {
       this.emitLog('system', `[Hybrid] Set ${cookies.length} cookies to Playwright`);
     } catch (error) {
       this.emitLog('error', `[Hybrid] Failed to set cookies: ${(error as Error).message}`);
+    }
+  }
+
+  // ============================================================================
+  // DOM-BASED INTERACTION (Browser-Use Style)
+  // ============================================================================
+
+  /**
+   * Get interactive elements from the page with browser-use style indexing
+   * This provides a structured map of all clickable/interactive elements
+   * that can be referenced by index number for more reliable interaction
+   */
+  async getInteractiveElements(): Promise<InteractiveElementMap> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      const currentUrl = this.page.url();
+
+      // Check cache validity
+      if (
+        this.interactiveElementsCache &&
+        this.interactiveElementsCache.url === currentUrl &&
+        Date.now() - this.interactiveElementsCache.timestamp < this.PAGE_CONTENT_CACHE_TTL
+      ) {
+        this.emitLog('system', { message: '[DOM] Using cached interactive elements' });
+        return this.interactiveElementsCache;
+      }
+
+      this.emitLog('system', { message: '[DOM] Extracting interactive elements from page' });
+
+      // Extract elements using DOMExtractor
+      const elementMap = await this.domExtractor.extractInteractiveElements(this.page);
+
+      // Cache the result
+      this.interactiveElementsCache = elementMap;
+
+      this.emitLog('system', {
+        message: `[DOM] Extracted ${elementMap.elements.length} interactive elements`,
+      });
+
+      return elementMap;
+    } catch (error) {
+      console.error('[BrowserController] Error getting interactive elements:', error);
+      this.emitLog('error', { message: `[DOM] Error extracting elements: ${(error as Error).message}` });
+
+      // Return empty map on error
+      return {
+        elements: [],
+        timestamp: Date.now(),
+        url: this.page?.url() || '',
+        summary: 'Error: Could not extract interactive elements',
+      };
+    }
+  }
+
+  /**
+   * Click an element by its index number (browser-use style)
+   * More reliable than CSS selectors as it uses the exact element reference
+   */
+  async clickElementByIndex(index: number): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[DOM] Clicking element by index: ${index}` });
+
+      // Get fresh element map
+      const elementMap = await this.getInteractiveElements();
+
+      // Find element by index
+      const element = this.domExtractor.findElementByIndex(elementMap, index);
+
+      if (!element) {
+        this.emitLog('error', { message: `[DOM] Element with index ${index} not found` });
+        return false;
+      }
+
+      this.emitLog('system', {
+        message: `[DOM] Found element ${index}: <${element.tag}> "${element.text}" at (${element.coordinates.x}, ${element.coordinates.y})`,
+      });
+
+      // Try multiple click strategies
+
+      // Strategy 1: Try by XPath
+      try {
+        const xpathHandle = await this.page.waitForSelector(`xpath=${element.xpath}`, {
+          timeout: this.TIMEOUTS.SELECTOR_WAIT,
+          state: 'visible',
+        });
+
+        if (xpathHandle) {
+          await xpathHandle.click();
+          await this.streamScreenshot(`clicked-element-${index}-xpath`);
+          this.emitLog('system', { message: `[DOM] Successfully clicked element ${index} by XPath` });
+          return true;
+        }
+      } catch (xpathError) {
+        this.emitLog('system', { message: `[DOM] XPath click failed, trying selector...` });
+      }
+
+      // Strategy 2: Try by CSS selector
+      try {
+        const selectorHandle = await this.page.waitForSelector(element.selector, {
+          timeout: this.TIMEOUTS.SELECTOR_WAIT,
+          state: 'visible',
+        });
+
+        if (selectorHandle) {
+          await selectorHandle.click();
+          await this.streamScreenshot(`clicked-element-${index}-selector`);
+          this.emitLog('system', { message: `[DOM] Successfully clicked element ${index} by selector` });
+          return true;
+        }
+      } catch (selectorError) {
+        this.emitLog('system', { message: `[DOM] Selector click failed, trying coordinates...` });
+      }
+
+      // Strategy 3: Fallback to coordinates
+      try {
+        await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
+        await this.streamScreenshot(`clicked-element-${index}-coords`);
+        this.emitLog('system', {
+          message: `[DOM] Successfully clicked element ${index} by coordinates (${element.coordinates.x}, ${element.coordinates.y})`,
+        });
+        return true;
+      } catch (coordError) {
+        this.emitLog('error', {
+          message: `[DOM] All click strategies failed for element ${index}: ${(coordError as Error).message}`,
+        });
+        return false;
+      }
+    } catch (error) {
+      console.error(`[BrowserController] Error clicking element by index ${index}:`, error);
+      this.emitLog('error', {
+        message: `[DOM] Error clicking element ${index}: ${(error as Error).message}`,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Type text into an element by index
+   */
+  async typeElementByIndex(index: number, text: string): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[DOM] Typing into element ${index}: "${text}"` });
+
+      // Get element map
+      const elementMap = await this.getInteractiveElements();
+      const element = this.domExtractor.findElementByIndex(elementMap, index);
+
+      if (!element) {
+        this.emitLog('error', { message: `[DOM] Element with index ${index} not found` });
+        return false;
+      }
+
+      // Try by XPath first, then selector
+      try {
+        const handle = await this.page.waitForSelector(`xpath=${element.xpath}`, {
+          timeout: this.TIMEOUTS.SELECTOR_WAIT,
+          state: 'visible',
+        });
+
+        if (handle) {
+          await handle.fill(text);
+          await this.streamScreenshot(`typed-element-${index}`);
+          this.emitLog('system', { message: `[DOM] Successfully typed into element ${index}` });
+          return true;
+        }
+      } catch (error) {
+        // Try selector fallback
+        try {
+          const handle = await this.page.waitForSelector(element.selector, {
+            timeout: this.TIMEOUTS.SELECTOR_WAIT,
+            state: 'visible',
+          });
+
+          if (handle) {
+            await handle.fill(text);
+            await this.streamScreenshot(`typed-element-${index}`);
+            this.emitLog('system', { message: `[DOM] Successfully typed into element ${index} (selector)` });
+            return true;
+          }
+        } catch (fallbackError) {
+          this.emitLog('error', {
+            message: `[DOM] Failed to type into element ${index}: ${(fallbackError as Error).message}`,
+          });
+          return false;
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`[BrowserController] Error typing into element ${index}:`, error);
+      this.emitLog('error', {
+        message: `[DOM] Error typing into element ${index}: ${(error as Error).message}`,
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Clear cache when navigating to new page
+   */
+  private clearInteractiveElementsCache(): void {
+    this.interactiveElementsCache = null;
+  }
+
+  // ============================================================================
+  // SCROLL ACTIONS (Browser-Use Style)
+  // ============================================================================
+
+  /**
+   * Scroll down the page by a certain amount of pixels
+   */
+  async scrollDown(pixels: number = 500): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[Scroll] Scrolling down ${pixels}px` });
+
+      await this.page.evaluate((px) => {
+        window.scrollBy(0, px);
+      }, pixels);
+
+      await this.page.waitForTimeout(300); // Wait for scroll to complete
+      await this.streamScreenshot('after-scroll-down');
+
+      this.emitLog('system', { message: `[Scroll] Successfully scrolled down ${pixels}px` });
+      return true;
+    } catch (error) {
+      console.error('[BrowserController] Error scrolling down:', error);
+      this.emitLog('error', { message: `[Scroll] Error scrolling down: ${(error as Error).message}` });
+      return false;
+    }
+  }
+
+  /**
+   * Scroll up the page by a certain amount of pixels
+   */
+  async scrollUp(pixels: number = 500): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[Scroll] Scrolling up ${pixels}px` });
+
+      await this.page.evaluate((px) => {
+        window.scrollBy(0, -px);
+      }, pixels);
+
+      await this.page.waitForTimeout(300);
+      await this.streamScreenshot('after-scroll-up');
+
+      this.emitLog('system', { message: `[Scroll] Successfully scrolled up ${pixels}px` });
+      return true;
+    } catch (error) {
+      console.error('[BrowserController] Error scrolling up:', error);
+      this.emitLog('error', { message: `[Scroll] Error scrolling up: ${(error as Error).message}` });
+      return false;
+    }
+  }
+
+  /**
+   * Scroll to the top of the page
+   */
+  async scrollToTop(): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: '[Scroll] Scrolling to top of page' });
+
+      await this.page.evaluate(() => {
+        window.scrollTo(0, 0);
+      });
+
+      await this.page.waitForTimeout(300);
+      await this.streamScreenshot('after-scroll-top');
+
+      this.emitLog('system', { message: '[Scroll] Successfully scrolled to top' });
+      return true;
+    } catch (error) {
+      console.error('[BrowserController] Error scrolling to top:', error);
+      this.emitLog('error', { message: `[Scroll] Error scrolling to top: ${(error as Error).message}` });
+      return false;
+    }
+  }
+
+  /**
+   * Scroll to the bottom of the page
+   */
+  async scrollToBottom(): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: '[Scroll] Scrolling to bottom of page' });
+
+      await this.page.evaluate(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+      });
+
+      await this.page.waitForTimeout(300);
+      await this.streamScreenshot('after-scroll-bottom');
+
+      this.emitLog('system', { message: '[Scroll] Successfully scrolled to bottom' });
+      return true;
+    } catch (error) {
+      console.error('[BrowserController] Error scrolling to bottom:', error);
+      this.emitLog('error', { message: `[Scroll] Error scrolling to bottom: ${(error as Error).message}` });
+      return false;
+    }
+  }
+
+  /**
+   * Scroll to bring an element into view by index
+   */
+  async scrollToElementByIndex(index: number): Promise<boolean> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      this.emitLog('system', { message: `[Scroll] Scrolling to element ${index}` });
+
+      // Get element map
+      const elementMap = await this.getInteractiveElements();
+      const element = this.domExtractor.findElementByIndex(elementMap, index);
+
+      if (!element) {
+        this.emitLog('error', { message: `[Scroll] Element with index ${index} not found` });
+        return false;
+      }
+
+      // Try to scroll to element by XPath or selector
+      try {
+        const handle = await this.page.waitForSelector(`xpath=${element.xpath}`, {
+          timeout: this.TIMEOUTS.SELECTOR_WAIT,
+        });
+
+        if (handle) {
+          await handle.scrollIntoViewIfNeeded();
+          await this.page.waitForTimeout(300);
+          await this.streamScreenshot(`after-scroll-to-element-${index}`);
+          this.emitLog('system', { message: `[Scroll] Successfully scrolled to element ${index}` });
+          return true;
+        }
+      } catch (error) {
+        // Fallback: scroll to coordinates
+        this.emitLog('system', { message: `[Scroll] Using coordinate fallback for element ${index}` });
+        await this.page.evaluate((y) => {
+          window.scrollTo(0, y - window.innerHeight / 2);
+        }, element.coordinates.y);
+
+        await this.page.waitForTimeout(300);
+        await this.streamScreenshot(`after-scroll-to-element-${index}-coords`);
+        this.emitLog('system', { message: `[Scroll] Scrolled to element ${index} by coordinates` });
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error(`[BrowserController] Error scrolling to element ${index}:`, error);
+      this.emitLog('error', { message: `[Scroll] Error scrolling to element ${index}: ${(error as Error).message}` });
+      return false;
+    }
+  }
+
+  /**
+   * Get scroll position information (for LLM context)
+   */
+  async getScrollInfo(): Promise<{ scrollY: number; scrollHeight: number; viewportHeight: number; atBottom: boolean; atTop: boolean }> {
+    if (!this.page) {
+      throw new Error('Page is not initialized.');
+    }
+
+    try {
+      const info = await this.page.evaluate(() => {
+        return {
+          scrollY: window.scrollY,
+          scrollHeight: document.body.scrollHeight,
+          viewportHeight: window.innerHeight,
+          atBottom: window.scrollY + window.innerHeight >= document.body.scrollHeight - 10,
+          atTop: window.scrollY <= 10,
+        };
+      });
+
+      return info;
+    } catch (error) {
+      console.error('[BrowserController] Error getting scroll info:', error);
+      return { scrollY: 0, scrollHeight: 0, viewportHeight: 0, atBottom: false, atTop: true };
     }
   }
 }
