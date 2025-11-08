@@ -9,9 +9,10 @@ dotenv.config({ path: envPath });
 // Note: .env is only used as fallback. Primary API keys come from Settings tab (localStorage)
 console.log('[Electron] API keys will be loaded from Settings tab (preferred) or .env (fallback)');
 
-// Use new browser-use style services
-const { NewBrowserController } = require('./packages/agent-core/dist/newBrowserController');
-const { NewLLMService } = require('./packages/agent-core/dist/newLLMService');
+// Use browser-use style services
+const { BrowserController } = require('./packages/agent-core/dist/browserController');
+const { LLMService } = require('./packages/agent-core/dist/llmService');
+const { BrowserProfile } = require('./packages/agent-core/dist/browser/BrowserProfile');
 
 let mainWindow;
 let browserView = null; // Current active BrowserView
@@ -756,7 +757,7 @@ ipcMain.on('browserview-translate-request', async (_event, text) => {
     console.log('[Electron] Using model for translation:', modelName);
 
     // Create LLMService with selected model
-    const tempLLMService = new NewLLMService(modelName);
+    const tempLLMService = new LLMService(modelName);
 
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
     const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
@@ -797,7 +798,7 @@ ipcMain.on('browserview-edit-request', async (_event, { text, prompt }) => {
     console.log('[Electron] Using model for AI edit:', modelName);
 
     // Create LLMService with selected model
-    const tempLLMService = new NewLLMService(modelName);
+    const tempLLMService = new LLMService(modelName);
 
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
     const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
@@ -857,7 +858,7 @@ ipcMain.handle('analyze-task', async (event, { task, model, conversationHistory 
     }
 
     // LLM이 tool을 선택하도록 함
-    const tempLLM = new NewLLMService(model || 'gpt-4o-mini');
+    const tempLLM = new LLMService(model || 'gpt-4o-mini');
 
     // Build conversation context
     let contextPrompt = 'You are a helpful AI assistant.';
@@ -1053,123 +1054,23 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       console.log('[Hybrid] Launching Playwright in headless mode, will stream screenshots to BrowserView');
 
       const debugMode = true;
-      const headless = true; // Headless mode
-      browserController = new NewBrowserController(debugMode, headless);
-      llmService = new NewLLMService(model || 'gpt-4o-mini');
+      const profile = new BrowserProfile({ headless: true });
+      browserController = new BrowserController(debugMode, profile);
+      llmService = new LLMService(model || 'gpt-4o-mini');
 
       console.log('[Hybrid] Will stream AI screenshots to BrowserView');
-
-      // Note: NewBrowserController doesn't emit events
-      // Screenshot streaming is handled via interval below
-
-      /* OLD EVENT LISTENER - not needed with NewBrowserController
-      browserController.on('screenshot', (data) => {
-        // Send to Chat UI
-        if (mainWindow) {
-          mainWindow.webContents.send('agent-screenshot', data);
-        }
-
-        // === STREAM SCREENSHOT TO BROWSERVIEW ===
-        // Display AI's current screen in BrowserView
-        if (browserView && data.screenshot) {
-          try {
-            browserView.webContents.executeJavaScript(`
-              (function() {
-                // Create or update screenshot overlay
-                let overlay = document.getElementById('ai-screenshot-overlay');
-                if (!overlay) {
-                  overlay = document.createElement('div');
-                  overlay.id = 'ai-screenshot-overlay';
-                  overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%); background-size: 400% 400%; animation: gradientShift 20s ease infinite; z-index: 999998; display: flex; flex-direction: column;';
-                  document.body.appendChild(overlay);
-
-                  // Add header with glassmorphism
-                  const header = document.createElement('div');
-                  header.style.cssText = 'background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.18); color: white; padding: 16px 24px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);';
-                  header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 16px;"><div style="width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong style="font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">🤖 AI is Working</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.9); margin-left: 16px; font-size: 14px; font-weight: 500;">Automating browser...</span></div>';
-                  overlay.appendChild(header);
-
-                  // Add animations
-                  const style = document.createElement('style');
-                  style.textContent = \`
-                    @keyframes spin {
-                      0% { transform: rotate(0deg); }
-                      100% { transform: rotate(360deg); }
-                    }
-                    @keyframes gradientShift {
-                      0% { background-position: 0% 50%; }
-                      50% { background-position: 100% 50%; }
-                      100% { background-position: 0% 50%; }
-                    }
-                  \`;
-                  document.head.appendChild(style);
-
-                  // Add image container with padding for macOS window chrome
-                  const imgContainer = document.createElement('div');
-                  imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 40px;';
-                  imgContainer.id = 'ai-screenshot-container';
-                  overlay.appendChild(imgContainer);
-                }
-
-                // Update screenshot image with macOS window chrome
-                const container = document.getElementById('ai-screenshot-container');
-                if (container) {
-                  const screenshotUrl = '${data.screenshot}'.replace(/'/g, "\\\\'");
-                  container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
-                    '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
-                      '<div style="display: flex; gap: 8px;">' +
-                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%); box-shadow: 0 2px 4px rgba(255, 69, 58, 0.4);"></div>' +
-                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%); box-shadow: 0 2px 4px rgba(255, 189, 46, 0.4);"></div>' +
-                        '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #28ca42 0%, #26de81 100%); box-shadow: 0 2px 4px rgba(40, 202, 66, 0.4);"></div>' +
-                      '</div>' +
-                      '<div style="flex: 1; text-align: center; color: #666; font-size: 13px; font-weight: 500; letter-spacing: 0.3px;">AI Browser Automation</div>' +
-                    '</div>' +
-                    '<div style="background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 15px 50px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.2); border: 1px solid rgba(0,0,0,0.1);">' +
-                      '<img src="' + screenshotUrl + '" style="display: block; width: 100%; height: auto; max-height: 80vh; object-fit: contain;" />' +
-                    '</div>' +
-                  '</div>';
-                }
-              })();
-            `).catch(() => {});
-          } catch (error) {
-            // Ignore errors
-          }
-        }
-      });
-
-      browserController.on('log', (log) => {
-        // Send to Chat UI
-        if (mainWindow) {
-          mainWindow.webContents.send('agent-log', log);
-        }
-
-        // Update status text in BrowserView screenshot overlay
-        if (browserView && log.data && log.data.message) {
-          try {
-            const message = typeof log.data === 'string' ? log.data : log.data.message || '';
-            const safeMessage = message.replace(/'/g, "\\'").substring(0, 100);
-
-            browserView.webContents.executeJavaScript(`
-              (function() {
-                const statusText = document.getElementById('ai-status-text');
-                if (statusText) statusText.textContent = '${safeMessage}';
-              })();
-            `).catch(() => {});
-          } catch (error) {
-            // Ignore errors
-          }
-        }
-      });
-      */ // End of OLD EVENT LISTENER comment
 
       // 브라우저 시작
       await browserController.launch();
 
-      // === AUTO SCREENSHOT STREAMING: 1초마다 자동 스크린샷 캡처 ===
+      // === AUTO SCREENSHOT STREAMING ===
+      // BrowserController doesn't auto-emit screenshot events in Electron environment
+      // So we manually capture screenshots every 1 second and stream to Chat UI + BrowserView overlay
       screenshotInterval = setInterval(async () => {
         if (browserController && !stopRequested && aiWorkingTabId !== null) {
           try {
             const screenshotBuffer = await browserController.captureScreenshot();
+
             if (screenshotBuffer) {
               const screenshotBase64 = screenshotBuffer.toString('base64');
               const screenshotDataURL = `data:image/png;base64,${screenshotBase64}`;
@@ -1185,66 +1086,99 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                 });
               }
 
-              // Only inject overlay if AI working tab is currently active
+              // Inject overlay to AI working tab with screenshot
               const aiTabView = browserViews.get(aiWorkingTabId);
-              if (aiTabView && currentTabId === aiWorkingTabId) {
-                aiTabView.webContents.executeJavaScript(`
-                (function() {
-                  let overlay = document.getElementById('ai-screenshot-overlay');
-                  if (!overlay) {
-                    overlay = document.createElement('div');
-                    overlay.id = 'ai-screenshot-overlay';
-                    overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%); background-size: 400% 400%; animation: gradientShift 20s ease infinite; z-index: 999998; display: flex; flex-direction: column;';
-                    document.body.appendChild(overlay);
+              if (aiTabView && aiTabView.webContents && !aiTabView.webContents.isDestroyed()) {
+                // Check if page is ready
+                if (!aiTabView.webContents.isLoading()) {
+                  try {
+                    // Use executeJavaScript with minimal code to update/create overlay
+                    // This approach works better than CSS for dynamic image updates
+                    aiTabView.webContents.executeJavaScript(`
+                      (function(screenshot) {
+                        let overlay = document.getElementById('__ai_overlay');
+                        if (!overlay) {
+                          // Create overlay first time
+                          overlay = document.createElement('div');
+                          overlay.id = '__ai_overlay';
+                          overlay.innerHTML = \`
+                            <style>
+                              #__ai_overlay {
+                                position: fixed;
+                                top: 0;
+                                left: 0;
+                                width: 100vw;
+                                height: 100vh;
+                                background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
+                                background-size: 400% 400%;
+                                animation: gradient 20s ease infinite;
+                                z-index: 999999;
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                              }
+                              @keyframes gradient {
+                                0% { background-position: 0% 50%; }
+                                50% { background-position: 100% 50%; }
+                                100% { background-position: 0% 50%; }
+                              }
+                              #__ai_content {
+                                background: white;
+                                border-radius: 16px;
+                                box-shadow: 0 30px 90px rgba(0,0,0,0.4);
+                                overflow: hidden;
+                                max-width: 90%;
+                                max-height: 90%;
+                              }
+                              #__ai_header {
+                                background: #667eea;
+                                color: white;
+                                padding: 16px 24px;
+                                text-align: center;
+                                font-family: -apple-system, sans-serif;
+                                font-weight: 600;
+                                font-size: 18px;
+                              }
+                              #__ai_img {
+                                display: block;
+                                max-width: 100%;
+                                max-height: 70vh;
+                                object-fit: contain;
+                              }
+                            </style>
+                            <div id="__ai_content">
+                              <div id="__ai_header">🤖 AI is Working</div>
+                              <img id="__ai_img" src="" />
+                            </div>
+                          \`;
+                          document.body.appendChild(overlay);
+                        }
 
-                    const header = document.createElement('div');
-                    header.style.cssText = 'background: rgba(255, 255, 255, 0.15); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-bottom: 1px solid rgba(255, 255, 255, 0.18); color: white; padding: 16px 24px; text-align: center; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);';
-                    header.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; gap: 16px;"><div style="width: 20px; height: 20px; border: 3px solid rgba(255,255,255,0.3); border-top-color: white; border-radius: 50%; animation: spin 1s linear infinite;"></div><strong style="font-size: 18px; font-weight: 600; letter-spacing: 0.5px;">🤖 AI is Working</strong><span id="ai-status-text" style="color: rgba(255,255,255,0.9); margin-left: 16px; font-size: 14px; font-weight: 500;">Automating browser...</span></div>';
-                    overlay.appendChild(header);
-
-                    const style = document.createElement('style');
-                    style.textContent = \`
-                      @keyframes spin {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                      }
-                      @keyframes gradientShift {
-                        0% { background-position: 0% 50%; }
-                        50% { background-position: 100% 50%; }
-                        100% { background-position: 0% 50%; }
-                      }
-                    \`;
-                    document.head.appendChild(style);
-
-                    const imgContainer = document.createElement('div');
-                    imgContainer.style.cssText = 'flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; position: relative; padding: 40px;';
-                    imgContainer.id = 'ai-screenshot-container';
-                    overlay.appendChild(imgContainer);
+                        // Update screenshot
+                        const img = document.getElementById('__ai_img');
+                        if (img && screenshot) {
+                          img.src = screenshot;
+                        }
+                      })(${JSON.stringify(screenshotDataURL)});
+                    `).then(() => {
+                      console.log('[Hybrid] Overlay with screenshot injected successfully');
+                    }).catch((err) => {
+                      console.error('[Hybrid] Failed to inject overlay:', err.message);
+                    });
+                  } catch (err) {
+                    console.error('[Hybrid] Overlay injection error:', err);
                   }
-
-                  const container = document.getElementById('ai-screenshot-container');
-                  if (container) {
-                    const screenshotData = '${screenshotDataURL}';
-                    container.innerHTML = '<div style="position: relative; max-width: 92%; max-height: 92%; display: flex; flex-direction: column;">' +
-                      '<div style="background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 12px 12px 0 0; padding: 12px 16px; display: flex; align-items: center; gap: 8px; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);">' +
-                        '<div style="display: flex; gap: 8px;">' +
-                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%); box-shadow: 0 2px 4px rgba(255, 69, 58, 0.4);"></div>' +
-                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%); box-shadow: 0 2px 4px rgba(255, 189, 46, 0.4);"></div>' +
-                          '<div style="width: 12px; height: 12px; border-radius: 50%; background: linear-gradient(135deg, #28ca42 0%, #26de81 100%); box-shadow: 0 2px 4px rgba(40, 202, 66, 0.4);"></div>' +
-                        '</div>' +
-                        '<div style="flex: 1; text-align: center; color: #666; font-size: 13px; font-weight: 500; letter-spacing: 0.3px;">AI Browser Automation</div>' +
-                      '</div>' +
-                      '<div style="background: white; border-radius: 0 0 12px 12px; overflow: hidden; box-shadow: 0 25px 80px rgba(0,0,0,0.4), 0 15px 50px rgba(0,0,0,0.3), 0 8px 20px rgba(0,0,0,0.2); border: 1px solid rgba(0,0,0,0.1);">' +
-                        '<img src="' + screenshotData + '" style="display: block; width: 100%; height: auto; max-height: 80vh; object-fit: contain;" />' +
-                      '</div>' +
-                    '</div>';
-                  }
-                })();
-                `).catch(() => {});
+                } else {
+                  console.log('[Hybrid] AI tab is still loading, skipping overlay injection');
+                }
+              } else {
+                console.log('[Hybrid] AI tab view not available or destroyed');
               }
+            } else {
+              console.log('[Hybrid] No screenshot buffer captured');
             }
           } catch (error) {
-            // Ignore screenshot errors
+            console.error('[Hybrid] Screenshot capture failed:', error);
           }
         }
       }, 1000); // Every 1 second
@@ -1334,21 +1268,19 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       console.log('[Electron] AI task ended, releasing tab:', aiWorkingTabId);
       aiWorkingTabId = null;
 
-      // Remove overlay BEFORE navigating to preserve it on current page
-      if (browserView) {
+      // Remove overlay from AI working tab
+      const completedTabView = browserViews.get(aiWorkingTabId);
+      if (completedTabView && completedTabView.webContents && !completedTabView.webContents.isDestroyed()) {
         try {
-          await browserView.webContents.executeJavaScript(`
+          await completedTabView.webContents.executeJavaScript(`
             (function() {
-              const overlay = document.getElementById('ai-screenshot-overlay');
-              if (overlay) {
-                overlay.remove();
-                console.log('[BrowserView] Screenshot overlay removed');
-              }
+              const overlay = document.getElementById('__ai_overlay');
+              if (overlay) overlay.remove();
             })();
           `);
-          console.log('[Hybrid] Screenshot overlay removed');
+          console.log('[Hybrid] Overlay removed successfully');
         } catch (error) {
-          console.log('[Hybrid] Could not remove overlay (may have already navigated):', error.message);
+          console.log('[Hybrid] Could not remove overlay:', error.message);
         }
       }
 
@@ -1422,18 +1354,24 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
       // Clear AI working tab on error
       console.log('[Electron] AI task error, releasing tab:', aiWorkingTabId);
-      aiWorkingTabId = null;
 
-      if (browserView) {
+      // Remove overlay from AI working tab
+      const errorTabView = browserViews.get(aiWorkingTabId);
+      if (errorTabView && errorTabView.webContents && !errorTabView.webContents.isDestroyed()) {
         try {
-          await browserView.webContents.executeJavaScript(`
+          await errorTabView.webContents.executeJavaScript(`
             (function() {
-              const overlay = document.getElementById('ai-screenshot-overlay');
+              const overlay = document.getElementById('__ai_overlay');
               if (overlay) overlay.remove();
             })();
           `);
-        } catch (_) {}
+          console.log('[Hybrid] Overlay removed on error');
+        } catch (err) {
+          console.log('[Hybrid] Failed to remove overlay on error:', err.message);
+        }
       }
+
+      aiWorkingTabId = null;
 
       if (mainWindow && isTaskRunning) {
         mainWindow.webContents.send('agent-stopped', {
@@ -1495,7 +1433,7 @@ ipcMain.on('translate-text-request', async (_event, text) => {
   try {
     if (!llmService) {
       const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new NewLLMService(modelName);
+      llmService = new LLMService(modelName);
     }
 
     mainWindow.webContents.send('translate-text', { text });
@@ -1511,7 +1449,7 @@ ipcMain.on('ai-edit-text-request', async (_event, text) => {
   try {
     if (!llmService) {
       const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new NewLLMService(modelName);
+      llmService = new LLMService(modelName);
     }
 
     mainWindow.webContents.send('ai-edit-text', { text });
@@ -1576,7 +1514,7 @@ ipcMain.handle('translate-text', async (_event, { text }) => {
     const modelName = selectedModel || 'gpt-5-mini';
     console.log('[Electron] Using model for translation:', modelName);
 
-    const tempLLMService = new NewLLMService(modelName);
+    const tempLLMService = new LLMService(modelName);
 
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
     const response = await tempLLMService.chat([{ role: 'user', content: prompt }]);
@@ -1607,7 +1545,7 @@ ipcMain.handle('ai-edit-text', async (_event, { text, prompt }) => {
     const modelName = selectedModel || 'gpt-5-mini';
     console.log('[Electron] Using model for AI edit:', modelName);
 
-    const tempLLMService = new NewLLMService(modelName);
+    const tempLLMService = new LLMService(modelName);
 
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
     const response = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
@@ -1636,18 +1574,24 @@ ipcMain.handle('stop-task', async (event) => {
 
       // Clear AI working tab on stop
       console.log('[Electron] AI task stopped, releasing tab:', aiWorkingTabId);
-      aiWorkingTabId = null;
 
-      if (browserView) {
+      // Remove overlay from AI working tab
+      const stoppedTabView = browserViews.get(aiWorkingTabId);
+      if (stoppedTabView && stoppedTabView.webContents && !stoppedTabView.webContents.isDestroyed()) {
         try {
-          await browserView.webContents.executeJavaScript(`
+          await stoppedTabView.webContents.executeJavaScript(`
             (function() {
-              const overlay = document.getElementById('ai-screenshot-overlay');
+              const overlay = document.getElementById('__ai_overlay');
               if (overlay) overlay.remove();
             })();
           `);
-        } catch (_) {}
+          console.log('[Hybrid] Overlay removed on stop');
+        } catch (err) {
+          console.log('[Hybrid] Failed to remove overlay on stop:', err.message);
+        }
       }
+
+      aiWorkingTabId = null;
 
       // 브라우저가 열려 있으면 즉시 닫아 리소스 해제 (try/catch 보호)
       if (browserController) {

@@ -475,6 +475,34 @@ Remember:
   }
 
   /**
+   * Chat with tools support for function calling
+   */
+  async chatWithTools(
+    messages: Array<{ role: string; content: string }>,
+    tools: any[]
+  ): Promise<any> {
+    // Convert messages to LangChain format
+    const langchainMessages = messages.map(msg => {
+      if (msg.role === 'user') {
+        return new HumanMessage(msg.content);
+      } else if (msg.role === 'assistant') {
+        return new AIMessage(msg.content);
+      } else if (msg.role === 'system') {
+        return new SystemMessage(msg.content);
+      }
+      return new HumanMessage(msg.content);
+    });
+
+    // Bind tools to model
+    const modelWithTools = this.model.bind({ tools });
+
+    // Invoke model
+    const response = await modelWithTools.invoke(langchainMessages);
+
+    return response;
+  }
+
+  /**
    * Plan and execute task (wrapper for executeTask for compatibility with server.ts)
    */
   async planAndExecute(
