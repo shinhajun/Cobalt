@@ -112,7 +112,7 @@ function createWindow() {
         // Listen for messages from injected script
         window.addEventListener('message', async (event) => {
           if (event.data.type === 'translate-text-request') {
-            showNotification('번역 중...', true);
+            showNotification('Translating...', false);
             // Use fetch to call the translation via window context
             try {
               const response = await fetch('electron://translate', {
@@ -129,8 +129,9 @@ function createWindow() {
               window.__pendingTranslate = event.data.text;
             }
           } else if (event.data.type === 'ai-edit-text-request') {
-            showNotification('AI 수정 중...', true);
             window.__pendingEdit = { text: event.data.text, prompt: event.data.prompt };
+            // Store reference to the popup for later update
+            window.__pendingEditPopup = popup;
           } else if (event.data.type === 'translation-result') {
             // Copy to clipboard
             const tempInput = document.createElement('textarea');
@@ -142,7 +143,26 @@ function createWindow() {
             document.execCommand('copy');
             document.body.removeChild(tempInput);
 
-            showNotification('<strong>✅ 번역 완료!</strong> (클립보드에 복사됨)<br><br>' + event.data.result, true);
+            // Update button with result
+            if (window.__pendingTranslateButton) {
+              const btn = window.__pendingTranslateButton;
+              btn.textContent = event.data.result;
+              btn.disabled = false;
+              btn.style.cursor = 'pointer';
+              btn.style.opacity = '1';
+              btn.style.width = 'auto';
+              btn.style.maxWidth = '400px';
+              btn.style.whiteSpace = 'nowrap';
+              btn.style.overflow = 'hidden';
+              btn.style.textOverflow = 'ellipsis';
+              btn.style.background = '#dcfce7';
+              btn.style.color = '#166534';
+
+              delete window.__pendingTranslateButton;
+              delete window.__pendingTranslateText;
+            } else {
+              showNotification(event.data.result, true);
+            }
           } else if (event.data.type === 'edit-result') {
             // Copy to clipboard
             const tempInput = document.createElement('textarea');
@@ -154,7 +174,31 @@ function createWindow() {
             document.execCommand('copy');
             document.body.removeChild(tempInput);
 
-            showNotification('<strong>✅ AI 수정 완료!</strong> (클립보드에 복사됨)<br><br>' + event.data.result, true);
+            // Update popup with result
+            if (window.__pendingEditPopup && window.__pendingEditPopup.parentNode) {
+              const popup = window.__pendingEditPopup;
+
+              // Clear popup content
+              popup.innerHTML = '';
+
+              // Create result display
+              const resultDiv = document.createElement('div');
+              resultDiv.textContent = event.data.result;
+              resultDiv.style.cssText = 'background: #dcfce7; color: #166534; padding: 6px 12px; border-radius: 4px; font-size: 13px; max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+
+              popup.appendChild(resultDiv);
+
+              // Auto-close after 3 seconds
+              setTimeout(() => {
+                if (popup.parentNode) {
+                  popup.remove();
+                }
+              }, 3000);
+
+              delete window.__pendingEditPopup;
+            } else {
+              showNotification(event.data.result, true);
+            }
           }
         });
 
@@ -181,7 +225,7 @@ function createWindow() {
             animationName = 'slideUp';
           }
 
-          notification.style.cssText = 'position: fixed; ' + position + ' left: 50%; transform: translateX(-50%); background: ' + (isSuccess ? '#06a77d' : '#4361ee') + '; color: white; padding: 16px 24px; border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); z-index: 1000000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 15px; max-width: 600px; word-wrap: break-word; animation: ' + animationName + ' 0.3s ease-out;';
+          notification.style.cssText = 'position: fixed; ' + position + ' left: 50%; transform: translateX(-50%); background: rgba(255, 255, 255, 0.98); color: #1f2937; border: 1px solid ' + (isSuccess ? '#d1fae5' : '#dbeafe') + '; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 1000000; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 14px; max-width: 500px; word-wrap: break-word; animation: ' + animationName + ' 0.2s ease-out;';
           notification.innerHTML = message;
 
           // Add animations
@@ -210,115 +254,131 @@ function createWindow() {
           popup = document.createElement('div');
 
           // Calculate popup position (above or below selection)
-          const popupHeight = 50; // Approximate height
+          const popupHeight = 40; // Approximate height
           const windowHeight = window.innerHeight;
           const spaceAbove = y;
           const spaceBelow = windowHeight - y;
 
           // If not enough space above, show below
-          let popupY = y - popupHeight - 10;
+          let popupY = y - popupHeight - 5;
           if (spaceAbove < popupHeight + 20) {
-            popupY = y + 10; // Show below
+            popupY = y + 5; // Show below
           }
 
-          // Adjust horizontal position to stay within viewport
-          const popupWidth = 200; // Approximate width
-          let popupX = x - popupWidth / 2;
+          // Center horizontally on selection
+          let popupX = x;
           if (popupX < 10) popupX = 10;
-          if (popupX + popupWidth > window.innerWidth - 10) {
-            popupX = window.innerWidth - popupWidth - 10;
+          if (popupX > window.innerWidth - 120) {
+            popupX = window.innerWidth - 120;
           }
 
-          popup.style.cssText = \`
-            position: fixed;
-            left: \${popupX}px;
-            top: \${popupY}px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 8px;
-            padding: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            z-index: 999999;
-            display: flex;
-            gap: 8px;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            animation: popupFadeIn 0.2s ease-out;
-          \`;
+          popup.style.cssText = 'position: fixed; left: ' + popupX + 'px; top: ' + popupY + 'px; background: rgba(255, 255, 255, 0.98); border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 6px; padding: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 999999; display: flex; gap: 4px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; animation: popupFadeIn 0.15s ease-out;';
+
+          // Prevent popup from triggering document events
+          popup.onmousedown = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          };
+          popup.onclick = (e) => {
+            e.stopPropagation();
+          };
 
           // Add animation
           if (!document.getElementById('text-selection-popup-style')) {
             const style = document.createElement('style');
             style.id = 'text-selection-popup-style';
-            style.textContent = \`
-              @keyframes popupFadeIn {
-                from { opacity: 0; transform: translateY(10px); }
-                to { opacity: 1; transform: translateY(0); }
-              }
-            \`;
+            style.textContent = '@keyframes popupFadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }';
             document.head.appendChild(style);
           }
 
           if (isEditable) {
             // AI edit button
             const editBtn = document.createElement('button');
-            editBtn.textContent = '✨ AI로 수정하기';
-            editBtn.style.cssText = \`
-              background: white;
-              color: #667eea;
-              border: none;
-              padding: 8px 16px;
-              border-radius: 6px;
-              cursor: pointer;
-              font-weight: 600;
-              font-size: 13px;
-              transition: all 0.2s;
-            \`;
+            editBtn.textContent = 'AI Edit';
+            editBtn.style.cssText = 'background: #f9fafb; color: #374151; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 13px; transition: all 0.15s;';
             editBtn.onmouseover = () => {
-              editBtn.style.background = '#f3f4f6';
-              editBtn.style.transform = 'scale(1.05)';
+              editBtn.style.background = '#e5e7eb';
             };
             editBtn.onmouseout = () => {
-              editBtn.style.background = 'white';
-              editBtn.style.transform = 'scale(1)';
+              editBtn.style.background = '#f9fafb';
             };
-            editBtn.onclick = async () => {
-              const promptText = window.prompt('어떻게 수정할까요?', '문법 수정');
-              if (promptText) {
-                popup.remove();
-                window.postMessage({
-                  type: 'ai-edit-text-request',
-                  text: text,
-                  prompt: promptText
-                }, '*');
-              } else {
-                popup.remove();
-              }
+            editBtn.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+
+              // Replace button with input field
+              const inputField = document.createElement('input');
+              inputField.type = 'text';
+              inputField.placeholder = 'How to edit?';
+              inputField.value = 'Fix grammar';
+              inputField.style.cssText = 'background: white; color: #374151; border: 1px solid #d1d5db; padding: 6px 12px; border-radius: 4px; font-size: 13px; outline: none; width: 200px;';
+
+              // Replace button with input
+              editBtn.replaceWith(inputField);
+
+              // Focus after a short delay to ensure DOM update
+              setTimeout(() => {
+                inputField.focus();
+                inputField.select();
+              }, 10);
+
+              // Handle Enter key
+              inputField.onkeydown = (e) => {
+                e.stopPropagation();
+                if (e.key === 'Enter') {
+                  const promptText = inputField.value.trim();
+                  if (promptText) {
+                    popup.remove();
+                    window.postMessage({
+                      type: 'ai-edit-text-request',
+                      text: text,
+                      prompt: promptText
+                    }, '*');
+                  }
+                } else if (e.key === 'Escape') {
+                  popup.remove();
+                }
+              };
+
+              // Prevent blur when clicking on input
+              inputField.onmousedown = (e) => {
+                e.stopPropagation();
+              };
+
+              // Handle blur (lose focus)
+              inputField.onblur = () => {
+                setTimeout(() => {
+                  if (popup && popup.parentNode) {
+                    popup.remove();
+                  }
+                }, 200);
+              };
             };
             popup.appendChild(editBtn);
           } else {
             // Translate button
             const translateBtn = document.createElement('button');
-            translateBtn.textContent = '🌐 영어로 번역';
-            translateBtn.style.cssText = \`
-              background: white;
-              color: #667eea;
-              border: none;
-              padding: 8px 16px;
-              border-radius: 6px;
-              cursor: pointer;
-              font-weight: 600;
-              font-size: 13px;
-              transition: all 0.2s;
-            \`;
+            translateBtn.textContent = 'AI Translate';
+            translateBtn.style.cssText = 'background: #f9fafb; color: #374151; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: 500; font-size: 13px; transition: all 0.15s;';
             translateBtn.onmouseover = () => {
-              translateBtn.style.background = '#f3f4f6';
-              translateBtn.style.transform = 'scale(1.05)';
+              translateBtn.style.background = '#e5e7eb';
             };
             translateBtn.onmouseout = () => {
-              translateBtn.style.background = 'white';
-              translateBtn.style.transform = 'scale(1)';
+              translateBtn.style.background = '#f9fafb';
             };
-            translateBtn.onclick = () => {
-              popup.remove();
+            translateBtn.onclick = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+
+              // Change button text to show loading
+              translateBtn.textContent = 'Translating...';
+              translateBtn.disabled = true;
+              translateBtn.style.cursor = 'wait';
+              translateBtn.style.opacity = '0.7';
+
+              // Send translation request
+              window.__pendingTranslateButton = translateBtn;
+              window.__pendingTranslateText = text;
               window.postMessage({
                 type: 'translate-text-request',
                 text: text
@@ -422,13 +482,25 @@ app.whenReady().then(() => {
         // Process translation
         console.log('[Electron] Processing translation request:', pendingTranslate.substring(0, 50) + '...');
 
-        if (!llmService) {
-          const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-          llmService = new LLMService(modelName);
-        }
+        // Get selected model and API keys from chat UI's localStorage
+        const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+        const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+        const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+        const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+        // Decode base64 API keys and set to environment
+        if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+        if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+        if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+        const modelName = selectedModel || 'gpt-5-mini';
+        console.log('[Electron] Using model for translation:', modelName);
+
+        // Always create new LLMService with selected model
+        const tempLLMService = new LLMService(modelName);
 
         const prompt = `Translate the following text to English. Only provide the translation, no explanations:\\n\\n${pendingTranslate}`;
-        const translation = await llmService.chat([{ role: 'user', content: prompt }]);
+        const translation = await tempLLMService.chat([{ role: 'user', content: prompt }]);
 
         // Send result back to BrowserView
         await browserView.webContents.executeJavaScript(`
@@ -450,13 +522,25 @@ app.whenReady().then(() => {
         // Process AI edit
         console.log('[Electron] Processing AI edit request');
 
-        if (!llmService) {
-          const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-          llmService = new LLMService(modelName);
-        }
+        // Get selected model and API keys from chat UI's localStorage
+        const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+        const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+        const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+        const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+        // Decode base64 API keys and set to environment
+        if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+        if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+        if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+        const modelName = selectedModel || 'gpt-5-mini';
+        console.log('[Electron] Using model for AI edit:', modelName);
+
+        // Always create new LLMService with selected model
+        const tempLLMService = new LLMService(modelName);
 
         const fullPrompt = `${pendingEdit.prompt}\\n\\nOriginal text:\\n${pendingEdit.text}\\n\\nOnly provide the edited text, no explanations:`;
-        const editedText = await llmService.chat([{ role: 'user', content: fullPrompt }]);
+        const editedText = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
 
         // Send result back to BrowserView
         await browserView.webContents.executeJavaScript(`
@@ -1081,13 +1165,24 @@ ipcMain.handle('translate-text', async (_event, { text }) => {
   console.log('[Electron] Translate text requested:', text.substring(0, 50) + '...');
 
   try {
-    if (!llmService) {
-      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
-    }
+    // Get selected model and API keys from chat UI's localStorage
+    const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+    const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+    const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+    const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+    // Decode base64 API keys and set to environment
+    if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+    const modelName = selectedModel || 'gpt-5-mini';
+    console.log('[Electron] Using model for translation:', modelName);
+
+    const tempLLMService = new LLMService(modelName);
 
     const prompt = `Translate the following text to English. Only provide the translation, no explanations:\n\n${text}`;
-    const response = await llmService.chat([{ role: 'user', content: prompt }]);
+    const response = await tempLLMService.chat([{ role: 'user', content: prompt }]);
 
     return { success: true, translation: response };
   } catch (error) {
@@ -1101,13 +1196,24 @@ ipcMain.handle('ai-edit-text', async (_event, { text, prompt }) => {
   console.log('[Electron] AI edit text requested');
 
   try {
-    if (!llmService) {
-      const modelName = process.env.LLM_MODEL || 'gpt-5-mini';
-      llmService = new LLMService(modelName);
-    }
+    // Get selected model and API keys from chat UI's localStorage
+    const selectedModel = await mainWindow.webContents.executeJavaScript('localStorage.getItem("selectedModel")');
+    const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+    const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+    const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+    // Decode base64 API keys and set to environment
+    if (openaiKey) process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    if (googleKey) process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    if (claudeKey) process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+
+    const modelName = selectedModel || 'gpt-5-mini';
+    console.log('[Electron] Using model for AI edit:', modelName);
+
+    const tempLLMService = new LLMService(modelName);
 
     const fullPrompt = `${prompt}\n\nOriginal text:\n${text}\n\nOnly provide the edited text, no explanations:`;
-    const response = await llmService.chat([{ role: 'user', content: fullPrompt }]);
+    const response = await tempLLMService.chat([{ role: 'user', content: fullPrompt }]);
 
     return { success: true, editedText: response };
   } catch (error) {
