@@ -1,13 +1,8 @@
 const { app, BrowserWindow, BrowserView, ipcMain, session } = require('electron');
 const path = require('path');
-const dotenv = require('dotenv');
 
-// .env 파일 로드 (프로젝트 루트) - fallback only, use Settings tab to set API keys
-const envPath = path.resolve(__dirname, '.env');
-dotenv.config({ path: envPath });
-
-// Note: .env is only used as fallback. Primary API keys come from Settings tab (localStorage)
-console.log('[Electron] API keys will be loaded from Settings tab (preferred) or .env (fallback)');
+// Note: API keys are loaded from Settings tab (localStorage)
+console.log('[Electron] API keys will be loaded from Settings tab');
 
 // Use browser-use style services
 const { BrowserController } = require('./packages/agent-core/dist/browserController');

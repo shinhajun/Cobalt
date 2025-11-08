@@ -19,7 +19,9 @@
       "Bash(grep:*)",
       "Bash(awk:*)",
       "Bash(npm run build:agent-core:*)",
-      "Read(//c/tmp/**)"
+      "Read(//c/tmp/**)",
+      "Bash(npm run dist:*)",
+      "Bash(cat:*)"
     ],
     "deny": [],
     "ask": []

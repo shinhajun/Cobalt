@@ -6,13 +6,64 @@
   "scripts": {
     "build": "cd packages/agent-core && npm run build",
     "start": "npm run build && electron .",
-    "dev": "cross-env NODE_ENV=development electron ."
+    "dev": "cross-env NODE_ENV=development electron .",
+    "dist": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:all": "npm run build && electron-builder --win --mac",
+    "pack": "npm run build && electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.cobalt.browser",
+    "productName": "Cobalt",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "**/*",
+      "packages/agent-core/node_modules/**/*",
+      "!dist",
+      "!.env"
+    ],
+    "asar": false,
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns"
+    },
+    "dmg": {
+      "title": "Cobalt Browser",
+      "icon": "build/icon.icns"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   },
   "dependencies": {
-    "dotenv": "^16.5.0"
+    "@anthropic-ai/sdk": "^0.67.0",
+    "@langchain/anthropic": "^1.0.0",
+    "@langchain/core": "^1.0.1",
+    "@langchain/google-genai": "^0.1.5",
+    "@langchain/openai": "^0.5.10",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
+    "langchain": "^0.3.26",
+    "playwright": "^1.52.0",
+    "socket.io": "^4.7.4",
+    "socket.io-client": "^4.8.1"
   },
   "devDependencies": {
     "cross-env": "^7.0.3",
-    "electron": "^31.7.7"
+    "electron": "^31.7.7",
+    "electron-builder": "^26.0.12"
   }
 }

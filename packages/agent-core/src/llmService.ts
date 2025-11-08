@@ -36,7 +36,7 @@ export class LLMService {
   private registry: Registry;
   private recentActions: Array<{ type: string; params: any; ts: number }> = [];
 
-  constructor(modelName: string = "gpt-4o-mini", config?: LLMServiceConfig) {
+  constructor(modelName: string = "gpt-5-mini", config?: LLMServiceConfig) {
     // Initialize Tools Registry
     this.registry = new Registry();
     registerDefaultActions(this.registry);
@@ -89,6 +89,40 @@ export class LLMService {
 
 AVAILABLE ACTIONS:
 ${actionDescriptions}
+
+RESPONSE SCHEMA:
+- You MUST return a single JSON object.
+- Required: "thinking": string
+- Exactly one of the following:
+  - "action": Action
+  - "actions": Action[] (ordered multi-step)
+
+ACTION OBJECT:
+- Required: "type": string (one of the registered actions listed above)
+- Plus the action-specific parameters below. Do not add undocumented fields.
+
+ACTION TYPES AND PARAMETERS:
+- search: { query: string, engine?: "google" | "bing" | "duckduckgo" }
+- navigate: { url: string, newTab?: boolean }
+- click: { index: number }
+- input: { index: number, text: string, clear?: boolean, submit?: boolean }
+- scroll: { down: boolean | "down" | "up" | "true" | "false" | 1 | 0, pages?: number, index?: number }
+- find_text: { text: string, partial?: boolean }
+- screenshot: { note?: string }
+- evaluate: { code: string }
+- extract: { query?: string, extract_links?: boolean, start_from_char?: number }
+- go_back: { }
+- wait: { seconds?: number }
+- select_dropdown: { index: number, option: string }
+- dropdown_options: { index: number }
+- upload_file: { index: number, filePath: string }
+- send_keys: { keys: string }  // Use e.g., "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight". Shortcuts like "Control+a" are allowed.
+- switch: { tabId: string }
+- close: { tabId: string }
+- write_file: { filePath: string, content: string, append?: boolean, trailingNewline?: boolean, leadingNewline?: boolean }
+- read_file: { filePath: string }
+- replace_file: { filePath: string, oldStr: string, newStr: string }
+- done: { text: string, success?: boolean }
 
 CRITICAL PARAMETER RULES:
 - For click: use "index" parameter (NOT "element_index")
