@@ -108,6 +108,7 @@ function createWindow() {
         window.__textSelectionInjected = true;
 
         let popup = null;
+        let isEditingInput = false; // Flag to prevent popup recreation
 
         // Listen for messages from injected script
         window.addEventListener('message', async (event) => {
@@ -174,6 +175,45 @@ function createWindow() {
             document.execCommand('copy');
             document.body.removeChild(tempInput);
 
+            // Replace the original text with edited text
+            if (window.__pendingEditRange && window.__pendingEditElement) {
+              try {
+                const element = window.__pendingEditElement;
+                const range = window.__pendingEditRange;
+
+                // Check if it's an input/textarea element
+                if (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA') {
+                  // For input/textarea, replace the selected portion of the value
+                  const startPos = element.selectionStart;
+                  const endPos = element.selectionEnd;
+                  const originalValue = element.value;
+
+                  element.value = originalValue.substring(0, startPos) +
+                                  event.data.result +
+                                  originalValue.substring(endPos);
+
+                  // Set cursor position after the inserted text
+                  const newCursorPos = startPos + event.data.result.length;
+                  element.selectionStart = newCursorPos;
+                  element.selectionEnd = newCursorPos;
+                  element.focus();
+
+                  console.log('[AI Edit] Input/Textarea value replaced successfully');
+                } else if (element.isContentEditable) {
+                  // For contentEditable elements, use range
+                  range.deleteContents();
+                  range.insertNode(document.createTextNode(event.data.result));
+                  console.log('[AI Edit] ContentEditable text replaced successfully');
+                } else {
+                  console.warn('[AI Edit] Unknown editable element type');
+                }
+              } catch (error) {
+                console.error('[AI Edit] Failed to replace text:', error);
+              }
+              delete window.__pendingEditRange;
+              delete window.__pendingEditElement;
+            }
+
             // Update popup with result
             if (window.__pendingEditPopup && window.__pendingEditPopup.parentNode) {
               const popup = window.__pendingEditPopup;
@@ -183,21 +223,21 @@ function createWindow() {
 
               // Create result display
               const resultDiv = document.createElement('div');
-              resultDiv.textContent = event.data.result;
-              resultDiv.style.cssText = 'background: #dcfce7; color: #166534; padding: 6px 12px; border-radius: 4px; font-size: 13px; max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;';
+              resultDiv.textContent = '✓ Text replaced';
+              resultDiv.style.cssText = 'background: #dcfce7; color: #166534; padding: 6px 12px; border-radius: 4px; font-size: 13px; white-space: nowrap;';
 
               popup.appendChild(resultDiv);
 
-              // Auto-close after 3 seconds
+              // Auto-close after 2 seconds
               setTimeout(() => {
                 if (popup.parentNode) {
                   popup.remove();
                 }
-              }, 3000);
+              }, 2000);
 
               delete window.__pendingEditPopup;
             } else {
-              showNotification(event.data.result, true);
+              showNotification('✓ Text replaced', true);
             }
           }
         });
@@ -246,9 +286,14 @@ function createWindow() {
           }, 5000);
         }
 
-        function createPopup(text, x, y, isEditable) {
+        function createPopup(selectedText, x, y, isEditable, selectionRange, editableElement) {
           // Remove existing popup
           if (popup) popup.remove();
+
+          // Store the selected text, range, and element (they may be cleared when clicking button)
+          const text = selectedText;
+          const range = selectionRange;
+          const element = editableElement;
 
           // Create popup container
           popup = document.createElement('div');
@@ -302,11 +347,21 @@ function createWindow() {
             editBtn.onmouseout = () => {
               editBtn.style.background = '#f9fafb';
             };
+            editBtn.onmousedown = (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            };
+
             editBtn.onclick = (e) => {
               e.preventDefault();
               e.stopPropagation();
 
-              // Replace button with input field
+              // Set flag to prevent popup recreation
+              isEditingInput = true;
+
+              console.log('[AI Edit] Button clicked, creating input field');
+
+              // Create input field
               const inputField = document.createElement('input');
               inputField.type = 'text';
               inputField.placeholder = 'How to edit?';
@@ -315,19 +370,48 @@ function createWindow() {
 
               // Replace button with input
               editBtn.replaceWith(inputField);
+              console.log('[AI Edit] Input field created and replaced button');
 
-              // Focus after a short delay to ensure DOM update
-              setTimeout(() => {
+              // Immediately focus and select
+              requestAnimationFrame(() => {
                 inputField.focus();
                 inputField.select();
-              }, 10);
+                console.log('[AI Edit] Input field focused');
+              });
+
+              // Prevent all event propagation from input
+              inputField.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[AI Edit] Input mousedown prevented');
+              }, true);
+
+              inputField.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('[AI Edit] Input click prevented');
+              }, true);
+
+              inputField.addEventListener('focus', (e) => {
+                e.stopPropagation();
+                console.log('[AI Edit] Input focused');
+              }, true);
 
               // Handle Enter key
-              inputField.onkeydown = (e) => {
+              inputField.addEventListener('keydown', (e) => {
                 e.stopPropagation();
+                console.log('[AI Edit] Key pressed:', e.key);
                 if (e.key === 'Enter') {
+                  e.preventDefault();
                   const promptText = inputField.value.trim();
                   if (promptText) {
+                    console.log('[AI Edit] Submitting:', promptText);
+                    isEditingInput = false; // Reset flag
+
+                    // Store range and element for later text replacement
+                    window.__pendingEditRange = range;
+                    window.__pendingEditElement = element;
+
                     popup.remove();
                     window.postMessage({
                       type: 'ai-edit-text-request',
@@ -336,23 +420,24 @@ function createWindow() {
                     }, '*');
                   }
                 } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  console.log('[AI Edit] Cancelled');
+                  isEditingInput = false; // Reset flag
                   popup.remove();
                 }
-              };
+              }, true);
 
-              // Prevent blur when clicking on input
-              inputField.onmousedown = (e) => {
-                e.stopPropagation();
-              };
-
-              // Handle blur (lose focus)
-              inputField.onblur = () => {
+              // Handle blur
+              inputField.addEventListener('blur', () => {
+                console.log('[AI Edit] Input blurred, closing in 300ms');
                 setTimeout(() => {
                   if (popup && popup.parentNode) {
+                    console.log('[AI Edit] Removing popup after blur');
                     popup.remove();
+                    isEditingInput = false; // Reset flag
                   }
-                }, 200);
-              };
+                }, 300);
+              });
             };
             popup.appendChild(editBtn);
           } else {
@@ -389,19 +474,32 @@ function createWindow() {
 
           document.body.appendChild(popup);
 
-          // Remove popup on click outside
-          setTimeout(() => {
-            document.addEventListener('click', function removePopup(e) {
-              if (!popup.contains(e.target)) {
-                popup.remove();
-                document.removeEventListener('click', removePopup);
-              }
-            });
-          }, 100);
+          // Store popup reference for later cleanup
+          window.__currentPopup = popup;
+
+          // Remove popup on click outside - but only for translate button
+          // For edit button, the input field handles its own blur event
+          if (!isEditable) {
+            setTimeout(() => {
+              const clickHandler = function(e) {
+                if (popup && popup.parentNode && !popup.contains(e.target)) {
+                  popup.remove();
+                  document.removeEventListener('click', clickHandler);
+                }
+              };
+              document.addEventListener('click', clickHandler);
+            }, 100);
+          }
         }
 
         document.addEventListener('mouseup', (e) => {
           setTimeout(() => {
+            // Don't create new popup if editing input is active
+            if (isEditingInput) {
+              console.log('[Selection] Ignoring mouseup - editing input is active');
+              return;
+            }
+
             const selection = window.getSelection();
             const text = selection.toString().trim();
 
@@ -418,11 +516,15 @@ function createWindow() {
               activeElement.isContentEditable
             );
 
-            // Get selection position
+            // Get selection position and range
             const range = selection.getRangeAt(0);
             const rect = range.getBoundingClientRect();
 
-            createPopup(text, rect.left + rect.width / 2, rect.top, isEditable);
+            // Clone the range to preserve it and store the element
+            const clonedRange = range.cloneRange();
+            const editableElement = isEditable ? activeElement : null;
+
+            createPopup(text, rect.left + rect.width / 2, rect.top, isEditable, clonedRange, editableElement);
           }, 10);
         });
       })();
