@@ -932,6 +932,69 @@ No explanation, only JSON.`;
     }
   }
 
+  /**
+   * Analyze screenshot with vision AI model
+   * @param screenshotBase64 - Base64 encoded PNG screenshot
+   * @param instruction - What to analyze in the screenshot
+   * @returns Analysis result from vision model
+   */
+  async analyzeScreenshot(screenshotBase64: string, instruction: string): Promise<string> {
+    if (!this.visionModel) {
+      return "Vision model not available. Cannot analyze screenshot. Please configure VISION_MODEL environment variable.";
+    }
+
+    try {
+      const prompt = `You are analyzing a browser screenshot to help with web automation.
+
+User instruction: ${instruction}
+
+Analyze the image carefully and provide a detailed response. If asked to find elements, describe their location (e.g., "top-left corner", "center of page", "bottom-right", coordinates if possible) and visual characteristics (color, size, text, icons).
+
+Be specific and helpful. If you see multiple matching elements, describe all of them.`;
+
+      this.emitLog('system', { message: `[Vision] Analyzing screenshot: ${instruction.substring(0, 100)}...` });
+
+      const message = new HumanMessage({
+        content: [
+          { type: "text", text: prompt },
+          {
+            type: "image_url",
+            image_url: {
+              url: `data:image/png;base64,${screenshotBase64}`
+            }
+          }
+        ]
+      });
+
+      const response = await this.visionModel.invoke([message]);
+
+      let analysisResult = '';
+      if (typeof response.content === 'string') {
+        analysisResult = response.content;
+      } else if (Array.isArray(response.content)) {
+        const textParts: string[] = [];
+        for (const item of response.content) {
+          if (typeof item === 'string') {
+            textParts.push(item);
+          } else if (item && typeof item === 'object' && item.type === 'text' && item.text) {
+            textParts.push(item.text);
+          }
+        }
+        analysisResult = textParts.join('\n');
+      } else {
+        analysisResult = JSON.stringify(response.content);
+      }
+
+      this.emitLog('system', { message: `[Vision] Analysis complete (${analysisResult.length} chars)` });
+      return analysisResult;
+
+    } catch (error) {
+      console.error("[LLMService] Error analyzing screenshot:", error);
+      this.emitLog('error', { message: `Failed to analyze screenshot: ${(error as Error).message}` });
+      return `Failed to analyze screenshot: ${(error as Error).message}`;
+    }
+  }
+
   async planAndExecute(taskDescription: string, browserController: BrowserController, logCallback?: AgentLogCallback, stopSignal?: () => boolean): Promise<any> {
     if (logCallback) this.logCallback = logCallback; // 외부에서 제공된 콜백 사용
 
@@ -973,159 +1036,90 @@ No explanation, only JSON.`;
       }
 
       const prompt = `
-        You are an AI assistant performing a web automation task.
-        Current Task: ${taskDescription}
-        Your Role: You are to act as a diligent web automation agent. Your goal is to complete the task by interacting with the browser.
+You are a web automation AI agent. Complete the task efficiently in 3-5 iterations (max 15).
 
-        Previous Iteration Summary:
-        Thought: ${thought}
-        Observation: ${observation}
-        (Observation contains information about the current page state, results of previous actions, or errors.)
+TASK: ${taskDescription}
 
-        ${domElementsInfo}
+PREVIOUS STATE:
+Thought: ${thought}
+Observation: ${observation}
 
-        Available Browser/Tool Actions (strictly follow this JSON format for the 'action' field):
+${domElementsInfo}
 
-        === BROWSER ACTIONS (DOM-Based - Browser-Use Style) ===
-        1.  {"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL_TO_NAVIGATE_TO>"}
-        2.  {"type": "BROWSER_ACTION", "command": "clickElement", "index": <ELEMENT_INDEX>} - Click element by index from "DOM Interactive Elements"
-        3.  {"type": "BROWSER_ACTION", "command": "typeElement", "index": <ELEMENT_INDEX>, "text": "<TEXT>"} - Type into element by index
-        4.  {"type": "BROWSER_ACTION", "command": "pressKeyOnElement", "index": <ELEMENT_INDEX>, "key": "<KEY>"} - Press keyboard key on specific element (e.g., "Enter" on search box)
-        5.  {"type": "BROWSER_ACTION", "command": "getPageContent", "output_variable": "<VAR_NAME>"} - Get full page text content
-        6.  {"type": "BROWSER_ACTION", "command": "pressKey", "selector": "<CSS_SELECTOR_OR_BODY>", "key": "<KEY_TO_PRESS>"} - Press keyboard key on selector (legacy, prefer pressKeyOnElement)
+=== AVAILABLE ACTIONS ===
 
-        Scroll Actions (Page-Based like Browser-Use):
-        10. {"type": "BROWSER_ACTION", "command": "scrollDown", "pages": <PAGES>} - Scroll down by viewport pages (range: 0.5-10.0, default: 1.0)
-        11. {"type": "BROWSER_ACTION", "command": "scrollUp", "pages": <PAGES>} - Scroll up by viewport pages (range: 0.5-10.0, default: 1.0)
-        12. {"type": "BROWSER_ACTION", "command": "scrollToTop"} - Scroll to top of page
-        13. {"type": "BROWSER_ACTION", "command": "scrollToBottom"} - Scroll to bottom of page
-        14. {"type": "BROWSER_ACTION", "command": "scrollToElement", "index": <ELEMENT_INDEX>} - Scroll to bring element into view
+BROWSER ACTIONS:
+{"type": "BROWSER_ACTION", "command": "navigate", "url": "<URL>"}
+{"type": "BROWSER_ACTION", "command": "clickElement", "index": <NUM>}
+{"type": "BROWSER_ACTION", "command": "typeElement", "index": <NUM>, "text": "<TEXT>"}
+{"type": "BROWSER_ACTION", "command": "pressKeyOnElement", "index": <NUM>, "key": "Enter"}
+{"type": "BROWSER_ACTION", "command": "takeScreenshot", "instruction": "<COMPREHENSIVE_ANALYSIS_REQUEST>"}
+{"type": "BROWSER_ACTION", "command": "scrollDown|scrollUp", "pages": <0.5-10.0>}
+{"type": "BROWSER_ACTION", "command": "scrollToTop|scrollToBottom"}
+{"type": "BROWSER_ACTION", "command": "createNewTab|switchTab|closeTab|listTabs", "tabId": "<ID>"}
 
-        Multi-Tab Actions:
-        15. {"type": "BROWSER_ACTION", "command": "createNewTab", "url": "<OPTIONAL_URL>"} - Open a new browser tab
-        16. {"type": "BROWSER_ACTION", "command": "switchTab", "tabId": "<TAB_ID>"} - Switch to a specific tab
-        17. {"type": "BROWSER_ACTION", "command": "closeTab", "tabId": "<TAB_ID>"} - Close a specific tab
-        18. {"type": "BROWSER_ACTION", "command": "listTabs"} - List all open tabs with their IDs and URLs
-        19. {"type": "BROWSER_ACTION", "command": "getActiveTabId"} - Get the currently active tab ID
+VISION/CAPTCHA TOOLS:
+{"type": "TOOL_ACTION", "tool": "solveCaptcha"} - Auto-detect and solve CAPTCHAs
+{"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<VISUAL_DESCRIPTION>"} - Find element by vision when DOM fails
 
-        CAPTCHA/Challenge Tools:
-        15. {"type": "TOOL_ACTION", "tool": "solveCaptcha"}
-        16. {"type": "TOOL_ACTION", "tool": "recaptchaGrid", "instruction": "<TEXT_FROM_CHALLENGE>"}
-        17. {"type": "TOOL_ACTION", "tool": "visionInteract", "instruction": "<WHAT_TO_SOLVE_ON_SCREEN>"}
-        18. {"type": "TOOL_ACTION", "tool": "findElement", "instruction": "<WHAT_TO_FIND_AND_CLICK>"} - Use vision to find and click elements when selectors fail
+UTILITY TOOLS:
+{"type": "TOOL_ACTION", "tool": "formatAsTable|formatAsJSON", "data": [...]} - Format results
+{"type": "TOOL_ACTION", "tool": "storeMemory|retrieveMemory", "key": "<KEY>", "value": "<VAL>"}
+{"type": "TOOL_ACTION", "tool": "calculate|extractNumbers|extractEmails|extractURLs|getCurrentDateTime"}
 
-        Utility Tools:
-        11. {"type": "TOOL_ACTION", "tool": "calculate", "expression": "<MATH_EXPRESSION>"} - Calculate math (e.g., "3*5+2")
-        12. {"type": "TOOL_ACTION", "tool": "storeMemory", "key": "<KEY>", "value": "<VALUE>"} - Store info for later
-        13. {"type": "TOOL_ACTION", "tool": "retrieveMemory", "key": "<KEY>"} - Recall stored info
-        14. {"type": "TOOL_ACTION", "tool": "listMemory"} - List all stored keys
-        15. {"type": "TOOL_ACTION", "tool": "getCurrentDateTime", "format": "full|date|time"} - Get current date/time
-        16. {"type": "TOOL_ACTION", "tool": "calculateDateDiff", "date1": "<ISO_DATE>", "date2": "<ISO_DATE>"} - Calculate days between dates
-        17. {"type": "TOOL_ACTION", "tool": "extractNumbers", "text": "<TEXT>"} - Extract all numbers from text
-        18. {"type": "TOOL_ACTION", "tool": "extractEmails", "text": "<TEXT>"} - Extract email addresses
-        19. {"type": "TOOL_ACTION", "tool": "extractURLs", "text": "<TEXT>"} - Extract URLs from text
-        20. {"type": "TOOL_ACTION", "tool": "formatAsTable", "data": [{"col1":"val1"},...]} - Format data as markdown table
-        21. {"type": "TOOL_ACTION", "tool": "formatAsJSON", "data": <ANY>, "pretty": true} - Format as JSON
+COMPLETION:
+{"type": "FINISH", "message": "<BRIEF_SUMMARY_MAX_500_CHARS>"}
+{"type": "FAIL", "message": "<REASON>"}
 
-        Task Completion Actions:
-        22. {"type": "FINISH", "message": "<DETAILED_REPORT_OF_TASK_COMPLETION_AND_ALL_GATHERED_INFORMATION>"}
-        22. {"type": "FAIL", "message": "<MESSAGE_DESCRIBING_FAILURE_REASON>"}
+=== CORE STRATEGY ===
 
-        Guidelines:
-        - Analyze the <Observation> carefully to understand the current browser state and results of previous actions.
-        - Formulate a <Thought> explaining your reasoning for the next step.
-        - Choose an appropriate <Action> from the list above.
+**Priority Order:**
+1. DOM actions (clickElement/typeElement) - fastest
+2. takeScreenshot for visual analysis
+3. findElement if DOM fails
+4. solveCaptcha for challenges
 
-        Smart Tool Usage:
-        - Use utility tools to process information (calculate, extract, format)
-        - Store important information in memory using storeMemory so you don't lose it
-        - Retrieve stored info when needed instead of re-navigating
-        - Use getCurrentDateTime for any time-related tasks
-        - Use calculate for any math instead of trying to do it yourself
-        - Use extract tools (extractNumbers, extractEmails, extractURLs) to parse text efficiently
-        - Format final reports using formatAsTable or formatAsJSON for better readability
+**Efficiency Rules:**
+✓ Complete in 3-5 iterations (don't waste actions)
+✓ DON'T repeat same action unless page changed
+✓ Batch info gathering: ask EVERYTHING in ONE takeScreenshot
+  - Good: "Find X. If not found, list ALL nav options with coordinates"
+  - Bad: "Find X" → (next) → "Find nav" → (next) → "Find coords"
+✓ After getting info, ACT immediately (don't ask again)
 
-        === Browser Interaction Strategy (Browser-Use Style) ===
+**DOM Interaction:**
+- Use index numbers from "DOM Interactive Elements": clickElement index=5
+- Workflow: typeElement → pressKeyOnElement (same index) for form submission
+- Scroll measured in pages (1.0 = one screen height)
 
-        **DOM Index-Based Interaction:**
-        - ALWAYS check "DOM Interactive Elements" section in your observation
-        - Use clickElement/typeElement with index numbers [0], [1], [2], etc.
-        - Examples:
-          * {"type": "BROWSER_ACTION", "command": "clickElement", "index": 5}
-          * {"type": "BROWSER_ACTION", "command": "typeElement", "index": 3, "text": "search query"}
-        - Each index corresponds to an interactive element shown in DOM list
-        - DOM list shows: element type, text, attributes, coordinates
-        - The system automatically handles XPath → CSS → coordinate fallback internally
+**Screenshot Analysis:**
+- Use for visual tasks: images, colors, layouts, UI elements
+- Ask comprehensive questions in ONE instruction to minimize iterations
+- After analysis, FINISH or take action (don't screenshot again)
 
-        - **Scrolling (Page-Based like Browser-Use):**
-          * scrollDown/scrollUp uses PAGES (viewport heights), not pixels
-          * 1.0 pages = scroll by one full screen height (adaptive to any screen size)
-          * Examples: {"command": "scrollDown", "pages": 1.0} or {"command": "scrollDown", "pages": 2.5}
-          * Range: 0.5 to 10.0 pages (clamped automatically)
-          * Use scrollDown/scrollUp to explore long pages
-          * Use scrollToElement to bring an element into view before clicking
-          * Use scrollToBottom to load more content on infinite scroll pages
-          * After scrolling, new DOM elements will appear - check updated element list
+**CAPTCHA Handling:**
+- See reCAPTCHA/CAPTCHA → use solveCaptcha immediately
+- captcha_status=cloudflare_waiting → wait max 3 times, then FAIL
+- Don't manually click CAPTCHA elements
 
-        - **Pressing Keys:**
-          * To submit a form after typing, use pressKeyOnElement with the SAME index: {"command": "pressKeyOnElement", "index": 14, "key": "Enter"}
-          * This is more accurate than pressKey on "body" - targets the exact element
-          * Example workflow: typeElement → pressKeyOnElement on same index
-          * Legacy pressKey with selector still works but is less preferred
-        - After any click action, check observation for "Page changed" or "Page URL unchanged" to verify success
+**Task Completion:**
+✓ Use FINISH when task complete OR target clearly not found
+✓ Examples:
+  - Found: {"type":"FINISH","message":"검색 완료. 10개 상품 발견."}
+  - NOT found: {"type":"FINISH","message":"이 페이지에는 vegetable이 없습니다."}
+✓ For data results: formatAsTable FIRST, then FINISH with brief summary
+✓ Don't search forever - if clearly unavailable, report and finish
+✓ Message max 500 chars, use Korean if task was Korean
 
-        CAPTCHA/Cloudflare Handling:
-        - **CRITICAL: When you see reCAPTCHA elements or CAPTCHA-related text in the page content:**
-          * IMMEDIATELY use {"type":"TOOL_ACTION","tool":"solveCaptcha"} - DO NOT try manual clicking
-          * The solveCaptcha tool will automatically detect and solve reCAPTCHA, image grids, and text CAPTCHAs
-          * DO NOT click on reCAPTCHA iframes or checkboxes manually - let solveCaptcha handle it
-          * If solveCaptcha fails 3 times in a row, use FAIL action (site has strong bot detection)
+**Web Search:**
+Navigate to google.com → type query in search box → press Enter
+(Don't construct search URLs directly)
 
-        - **IMPORTANT: If you see captcha_status=cloudflare_waiting:**
-          * This is a Cloudflare security check that the system is handling automatically in the background.
-          * For the FIRST occurrence: wait by using getPageContent and check again.
-          * For the SECOND occurrence: wait again with getPageContent.
-          * For the THIRD occurrence: wait one more time with getPageContent.
-          * For the FOURTH occurrence or more: Use FAIL action as Cloudflare cannot be bypassed.
-          * Count how many times you've seen cloudflare_waiting in your thought process.
-
-        Visual Challenge Solving (Advanced):
-        - Only use visionInteract for CUSTOM/non-standard image challenges (not reCAPTCHA)
-        - When you see instructions like "Select all squares with [object]", this is likely reCAPTCHA - use solveCaptcha instead
-        - visionInteract is for unusual challenges on specific websites that solveCaptcha doesn't handle
-
-        Web Searching:
-        - For web searches, use Google (https://www.google.com) by default.
-        - Google search box: Use input/textarea elements with name="q" or aria-label that contains "Search" or localized equivalents (e.g., "검색").
-        - Type the query into the box and press Enter to submit.
-        - Do NOT navigate directly to a results URL (e.g., https://www.google.com/search?q=...). Always type then press Enter to reduce bot detection.
-
-        Click Verification:
-        - After clicking, the system automatically takes a screenshot and checks if URL changed
-        - If URL unchanged after click, the element may not have been clicked properly - try different selector or coordinates
-        - Check the observation message for "Page changed" or "Page URL unchanged" to verify click success
-        - If a click should open a new page but URL is unchanged, the click likely failed - try alternative approach
-
-        Using findElement Tool:
-        - **CRITICAL: When standard selectors fail to find an element (e.g., "Element not found for click"), use findElement tool**
-        - findElement uses vision AI to locate and click elements based on visual description
-        - Example: If clicking 'a[aria-label="Blank document"]' fails, use {"type":"TOOL_ACTION","tool":"findElement","instruction":"Find and click the Blank document button"}
-        - The tool will take a screenshot, identify the element visually, and click it
-        - Use findElement for complex UIs where DOM selectors don't work (Google Docs, dynamic web apps, etc.)
-
-        Task Completion:
-        - Keep your thoughts concise but clear.
-        - When the task is complete, use the FINISH action with a comprehensive report in the message field:
-          * Include ALL information gathered (dates, schedules, important details, etc.)
-          * Use tools like formatAsTable or formatAsJSON to make the report well-structured
-          * Use Korean if the task was in Korean, otherwise use English
-          * Make the report detailed and easy to read
-
-        Your Response (JSON only):
-        {
-          "thought": "<YOUR_DETAILED_THOUGHT_PROCESS_AND_REASONING_FOR_THE_ACTION>",
-          "action": <CHOSEN_ACTION_JSON_OBJECT_FROM_ABOVE_LIST>
-        }
+**Response Format (JSON only):**
+{
+  "thought": "<REASONING>",
+  "action": <ACTION_OBJECT>
+}
       `;
 
       const llmResponse = await this.generateText(prompt);
@@ -1215,6 +1209,29 @@ No explanation, only JSON.`;
                     : `Failed to press key '${action.key}' on element [${action.index}].`;
                   if(!pressSuccess) actionError = true;
                 } else { actionError = true; actionObservation = "Error: index or key missing for pressKeyOnElement."; }
+                break;
+
+              case "takeScreenshot":
+                // NEW: Capture screenshot and analyze with vision AI
+                if (action.instruction) {
+                  try {
+                    const screenshot = await browserController.captureScreenshot();
+                    if (screenshot) {
+                      this.emitLog('system', { message: `[Screenshot] Captured screenshot for analysis: ${action.instruction}` });
+                      const analysis = await this.analyzeScreenshot(screenshot, action.instruction);
+                      actionObservation = `Screenshot analysis result:\n\n${analysis}`;
+                    } else {
+                      actionObservation = "Failed to capture screenshot.";
+                      actionError = true;
+                    }
+                  } catch (e: any) {
+                    actionError = true;
+                    actionObservation = `Failed to analyze screenshot: ${e.message}`;
+                  }
+                } else {
+                  actionError = true;
+                  actionObservation = "Error: instruction missing for takeScreenshot.";
+                }
                 break;
 
               case "getPageContent":
@@ -1993,14 +2010,30 @@ No explanation, only JSON.`;
   // Chat with tool calling support
   async chatWithTools(messages: Array<{ role: string; content: string }>, tools: any[]): Promise<any> {
     try {
-      const modelWithTools = this.model.bind({ tools });
+      // Check if model supports .bind() (OpenAI) or needs different approach (Claude, Gemini)
+      let response;
 
-      const response = await modelWithTools.invoke(messages.map(m => {
-        if (m.role === 'user') {
-          return new HumanMessage(m.content);
-        }
-        return m;
-      }));
+      if (typeof this.model.bind === 'function') {
+        // OpenAI style: use .bind()
+        const modelWithTools = this.model.bind({ tools });
+        response = await modelWithTools.invoke(messages.map(m => {
+          if (m.role === 'user') {
+            return new HumanMessage(m.content);
+          }
+          return m;
+        }));
+      } else {
+        // Claude/Gemini style: pass tools directly in invoke
+        response = await this.model.invoke(
+          messages.map(m => {
+            if (m.role === 'user') {
+              return new HumanMessage(m.content);
+            }
+            return m;
+          }),
+          { tools }
+        );
+      }
 
       // Parse tool calls from response
       const toolCalls = response.tool_calls || response.additional_kwargs?.tool_calls || [];

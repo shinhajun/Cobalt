@@ -953,15 +953,17 @@ Choose the appropriate tool now.`;
       const toolName = toolCall.function.name;
       const toolArgs = JSON.parse(toolCall.function.arguments);
 
-      console.log('[Electron] Tool selected:', toolName, 'Args:', toolArgs);
+      console.log('[Electron] ✅ Tool selected:', toolName, 'Args:', toolArgs);
 
       if (toolName === 'answer_directly') {
+        console.log('[Electron] 💬 Returning CHAT type');
         return {
           taskType: 'chat',
           reason: 'AI chose to answer directly',
           response: toolArgs.response
         };
       } else if (toolName === 'needs_browser') {
+        console.log('[Electron] 🌐 Returning BROWSER type');
         return {
           taskType: 'browser',
           reason: toolArgs.reason || 'Needs browser automation'
@@ -969,9 +971,16 @@ Choose the appropriate tool now.`;
       }
     }
 
-    // Fallback: if no tool call, treat as browser task
-    console.log('[Electron] No tool call detected, defaulting to browser task');
-    return { taskType: 'browser', reason: 'No tool selected' };
+    // Fallback: if no tool call, treat as CHAT (direct answer) to avoid opening browser unnecessarily
+    console.log('[Electron] ⚠️ NO TOOL CALL detected - Defaulting to CHAT mode');
+    console.log('[Electron] Response content:', response.content);
+
+    // LLM이 직접 답변한 경우 (tool 사용 안 함)
+    return {
+      taskType: 'chat',
+      reason: 'No tool call (LLM answered directly)',
+      response: response.content || "I couldn't process that request. Please try rephrasing."
+    };
 
   } catch (error) {
     console.error('[Electron] Error analyzing task:', error);
