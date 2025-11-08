@@ -355,7 +355,9 @@
 
     let chatVisible = false;
     let currentTabId = 0;
-    let tabs = [{ id: 0, title: 'New Tab', url: 'cobalt-home.html', favicon: null }];
+    // 초기 탭의 URL을 절대 경로로 설정
+    const homePageUrl = `file:///${__dirname.replace(/\\/g, '/')}/cobalt-home.html`;
+    let tabs = [{ id: 0, title: 'New Tab', url: homePageUrl, favicon: null }];
     let nextTabId = 1;
 
     // 기본 favicon (빈 페이지용)
@@ -401,7 +403,7 @@
     // 탭 생성
     function createNewTab() {
       const tabId = nextTabId++;
-      tabs.push({ id: tabId, title: 'New Tab', url: 'cobalt-home.html', favicon: defaultFavicon });
+      tabs.push({ id: tabId, title: 'New Tab', url: homePageUrl, favicon: defaultFavicon });
 
       const tabElement = document.createElement('div');
       tabElement.className = 'tab';
@@ -493,8 +495,12 @@
 
       // 탭 정보 가져오기
       const tab = tabs.find(t => t.id === tabId);
-      if (tab) {
-        ipcRenderer.invoke('switch-tab', { tabId, url: tab.url });
+      if (tab && tab.url) {
+        // URL이 비어있지 않은지 확인
+        const urlToLoad = tab.url.startsWith('http') || tab.url.startsWith('file://')
+          ? tab.url
+          : homePageUrl;
+        ipcRenderer.invoke('switch-tab', { tabId, url: urlToLoad });
       }
     }
 

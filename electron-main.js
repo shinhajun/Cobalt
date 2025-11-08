@@ -2,29 +2,12 @@ const { app, BrowserWindow, BrowserView, ipcMain } = require('electron');
 const path = require('path');
 const dotenv = require('dotenv');
 
-// .env 파일 로드 (프로젝트 루트)
+// .env 파일 로드 (프로젝트 루트) - fallback only, use Settings tab to set API keys
 const envPath = path.resolve(__dirname, '.env');
-console.log('[Electron] Loading .env from:', envPath);
 dotenv.config({ path: envPath });
 
-// API 키 확인 (OpenAI 또는 Google 중 하나만 있어도 시작 가능)
-const hasOpenAI = !!process.env.OPENAI_API_KEY;
-const hasGoogle = !!process.env.GOOGLE_API_KEY;
-if (!hasOpenAI && !hasGoogle) {
-  console.error('[Electron] ERROR: No API key found! Set OPENAI_API_KEY or GOOGLE_API_KEY in .env');
-  console.error('[Electron] .env path:', envPath);
-} else {
-  if (hasOpenAI) {
-    console.log('[Electron] OPENAI_API_KEY loaded:', process.env.OPENAI_API_KEY.substring(0, 20) + '...');
-  } else {
-    console.log('[Electron] OPENAI_API_KEY not set (OK if using Gemini)');
-  }
-  if (hasGoogle) {
-    console.log('[Electron] GOOGLE_API_KEY loaded:', process.env.GOOGLE_API_KEY.substring(0, 20) + '...');
-  } else {
-    console.log('[Electron] GOOGLE_API_KEY not set (OK if using OpenAI)');
-  }
-}
+// Note: .env is only used as fallback. Primary API keys come from Settings tab (localStorage)
+console.log('[Electron] API keys will be loaded from Settings tab (preferred) or .env (fallback)');
 
 const { BrowserController } = require('./packages/agent-core/dist/browserController');
 const { LLMService } = require('./packages/agent-core/dist/llmService');
@@ -766,6 +749,22 @@ ipcMain.handle('analyze-task', async (event, { task, model, conversationHistory 
   console.log('[Electron] Conversation history length:', conversationHistory ? conversationHistory.length : 0);
 
   try {
+    // Get API keys from settings tab (localStorage)
+    const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+    const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+    const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+    // Decode base64 API keys and set to environment
+    if (openaiKey) {
+      process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    }
+    if (googleKey) {
+      process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    }
+    if (claudeKey) {
+      process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+    }
+
     // LLM이 tool을 선택하도록 함
     const tempLLM = new LLMService(model || 'gpt-5-mini');
 
@@ -931,6 +930,25 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       // 이전 인스턴스 정리
       if (browserController) {
         await browserController.close();
+      }
+
+      // Get API keys from settings tab (localStorage)
+      const openaiKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("openai_api_key")');
+      const googleKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("google_api_key")');
+      const claudeKey = await mainWindow.webContents.executeJavaScript('localStorage.getItem("claude_api_key")');
+
+      // Decode base64 API keys and set to environment
+      if (openaiKey) {
+        process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+        console.log('[Electron] Using OpenAI API key from settings tab');
+      }
+      if (googleKey) {
+        process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+        console.log('[Electron] Using Google API key from settings tab');
+      }
+      if (claudeKey) {
+        process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+        console.log('[Electron] Using Claude API key from settings tab');
       }
 
       // 환경 구성 병합: UI에서 온 설정값이 있으면 우선 적용 (프로세스 env override)
@@ -1137,16 +1155,13 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
         }
       }
 
-      // === HYBRID MODE: Step 4 - Handle "이 페이지에서" commands ===
-      const isCurrentPageCommand =
-        taskPlan.includes('이 페이지') ||
-        taskPlan.includes('현재 페이지') ||
-        taskPlan.includes('this page') ||
-        taskPlan.includes('current page');
-
-      if (isCurrentPageCommand && currentURL && currentURL !== 'about:blank' && !currentURL.startsWith('chrome://')) {
-        console.log('[Hybrid] Current page command detected, navigating to:', currentURL);
+      // === HYBRID MODE: Step 4 - Always start from current BrowserView page ===
+      // If user is viewing a page (not blank/chrome), start AI agent from that page
+      if (currentURL && currentURL !== 'about:blank' && !currentURL.startsWith('chrome://') && !currentURL.startsWith('devtools://')) {
+        console.log('[Hybrid] Starting AI agent from current BrowserView URL:', currentURL);
         await browserController.goTo(currentURL);
+      } else {
+        console.log('[Hybrid] No valid current page, AI will start from scratch');
       }
 
       if (mainWindow) {
@@ -1162,7 +1177,32 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
 
       console.log('[Electron] Task completed:', result);
 
-      // === HYBRID MODE: Step 5 - Restore BrowserView and sync result ===
+      // === HYBRID MODE: Step 5 - Stop auto-screenshot and remove overlay FIRST ===
+      if (screenshotInterval) {
+        clearInterval(screenshotInterval);
+        screenshotInterval = null;
+        console.log('[Hybrid] Auto-screenshot streaming stopped');
+      }
+
+      // Remove overlay BEFORE navigating to preserve it on current page
+      if (browserView) {
+        try {
+          await browserView.webContents.executeJavaScript(`
+            (function() {
+              const overlay = document.getElementById('ai-screenshot-overlay');
+              if (overlay) {
+                overlay.remove();
+                console.log('[BrowserView] Screenshot overlay removed');
+              }
+            })();
+          `);
+          console.log('[Hybrid] Screenshot overlay removed');
+        } catch (error) {
+          console.log('[Hybrid] Could not remove overlay (may have already navigated):', error.message);
+        }
+      }
+
+      // === HYBRID MODE: Step 6 - Restore BrowserView and sync result ===
       const syncResult = settings && settings.syncResultToBrowserView !== false; // default true
       if (syncResult && browserView) {
         try {
@@ -1174,7 +1214,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
             await browserView.webContents.loadURL(finalURL);
             console.log('[Hybrid] BrowserView navigated to:', finalURL);
 
-            // === HYBRID MODE: Step 6 - Sync cookies back to BrowserView ===
+            // === HYBRID MODE: Step 7 - Sync cookies back to BrowserView ===
             if (settings && settings.syncCookies) {
               console.log('[Hybrid] Syncing cookies back to BrowserView...');
               try {
@@ -1208,27 +1248,6 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
           }
         } catch (error) {
           console.error('[Hybrid] Failed to sync result to BrowserView:', error);
-        }
-      }
-
-      // === HYBRID MODE: Stop auto-screenshot and remove overlay ===
-      if (screenshotInterval) {
-        clearInterval(screenshotInterval);
-        screenshotInterval = null;
-        console.log('[Hybrid] Auto-screenshot streaming stopped');
-      }
-
-      if (browserView) {
-        try {
-          await browserView.webContents.executeJavaScript(`
-            (function() {
-              const overlay = document.getElementById('ai-screenshot-overlay');
-              if (overlay) overlay.remove();
-            })();
-          `);
-          console.log('[Hybrid] Screenshot overlay removed');
-        } catch (error) {
-          // Ignore errors if page changed
         }
       }
 

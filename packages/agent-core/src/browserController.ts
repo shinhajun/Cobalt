@@ -340,34 +340,6 @@ export class BrowserController extends EventEmitter {
     return false;
   }
 
-  async typeCaptchaAndSubmit(inputSelector: string | undefined, text: string, submitSelectorCandidates: string[] = []): Promise<boolean> {
-    if (!this.page) return false;
-    try {
-      const sel = inputSelector || 'input[name="captcha"], input#captcha, input[type="text"]';
-      const el = await this.findElement([sel]);
-      if (!el) return false;
-      await el.click();
-      await this.page.waitForTimeout(150);
-      await this.page.keyboard.type(text, { delay: 80 + Math.floor(Math.random() * 70) });
-      // Try submit
-      const clicked = await this.tryClickSelectors(submitSelectorCandidates.length ? submitSelectorCandidates : [
-        'input[type="submit"]',
-        'button[type="submit"]',
-        'button:has-text("Submit")',
-        'button:has-text("확인")',
-      ]);
-      if (!clicked) {
-        try { await this.page.keyboard.press('Enter'); } catch (_) {}
-      }
-      await this.waitForPageLoad(8000);
-      try { await this.streamScreenshot('captcha-text-submitted'); } catch (_) {}
-      return true;
-    } catch (e) {
-      this.emitLog('error', { message: 'Failed to type captcha text: ' + (e as Error).message });
-      return false;
-    }
-  }
-
   // --- reCAPTCHA (vision-based interaction) helpers ---
   private async getRecaptchaFramesDOM(): Promise<{ anchorFrame: any, challengeFrame: any }> {
     if (!this.page) return { anchorFrame: null as any, challengeFrame: null as any };
@@ -2028,47 +2000,279 @@ export class BrowserController extends EventEmitter {
     }
   }
 
+  // ============================================================================
+  // BROWSER-USE STYLE TYPING UTILITIES
+  // ============================================================================
+
   /**
-   * Type text into an element by index
-   * Clicks element by coordinates then types using keyboard
+   * Get CDP key code for a character (browser-use style)
    */
-  async typeElementByIndex(index: number, text: string): Promise<boolean> {
+  private getKeyCodeForChar(char: string): string {
+    // Letters
+    if (char >= 'a' && char <= 'z') return `Key${char.toUpperCase()}`;
+    if (char >= 'A' && char <= 'Z') return `Key${char}`;
+
+    // Digits
+    if (char >= '0' && char <= '9') return `Digit${char}`;
+
+    // Special characters mapping
+    const specialKeys: { [key: string]: string } = {
+      ' ': 'Space',
+      '\n': 'Enter',
+      '\r': 'Enter',
+      '\t': 'Tab',
+      '!': 'Digit1',
+      '@': 'Digit2',
+      '#': 'Digit3',
+      '$': 'Digit4',
+      '%': 'Digit5',
+      '^': 'Digit6',
+      '&': 'Digit7',
+      '*': 'Digit8',
+      '(': 'Digit9',
+      ')': 'Digit0',
+      '-': 'Minus',
+      '_': 'Minus',
+      '=': 'Equal',
+      '+': 'Equal',
+      '[': 'BracketLeft',
+      '{': 'BracketLeft',
+      ']': 'BracketRight',
+      '}': 'BracketRight',
+      '\\': 'Backslash',
+      '|': 'Backslash',
+      ';': 'Semicolon',
+      ':': 'Semicolon',
+      "'": 'Quote',
+      '"': 'Quote',
+      ',': 'Comma',
+      '<': 'Comma',
+      '.': 'Period',
+      '>': 'Period',
+      '/': 'Slash',
+      '?': 'Slash',
+      '`': 'Backquote',
+      '~': 'Backquote',
+    };
+
+    return specialKeys[char] || 'KeyA'; // Fallback
+  }
+
+  /**
+   * Get modifier and virtual key for a character (browser-use style)
+   * Returns [modifier, virtualKey, baseKey]
+   * modifier: 8 = Shift
+   */
+  private getCharModifiersAndVK(char: string): [number, string, string] {
+    const needsShift = /[A-Z!@#$%^&*()_+{}|:"<>?~]/.test(char);
+    const modifier = needsShift ? 8 : 0;
+    const virtualKey = this.getKeyCodeForChar(char);
+
+    return [modifier, virtualKey, char];
+  }
+
+  /**
+   * Focus element with fallback strategies (browser-use style)
+   * CDP focus -> JS focus -> Click
+   */
+  private async focusElement(element: ElementHandle): Promise<void> {
+    if (!this.page) return;
+
+    try {
+      // Try CDP focus first (most reliable)
+      await element.focus();
+    } catch (cdpError) {
+      try {
+        // Fallback to JavaScript focus
+        await element.evaluate((el: HTMLElement) => el.focus());
+      } catch (jsError) {
+        // Final fallback: click element
+        try {
+          await element.click();
+        } catch (clickError) {
+          this.emitLog('error', { message: 'All focus strategies failed' });
+        }
+      }
+    }
+  }
+
+  /**
+   * Clear text field using JS value manipulation + event dispatch (browser-use style)
+   */
+  private async clearTextField(element: ElementHandle): Promise<void> {
+    if (!this.page) return;
+
+    try {
+      // Primary strategy: Direct JS value manipulation with events
+      await element.evaluate((el: any) => {
+        if ('value' in el) {
+          el.value = '';
+          // Dispatch events to notify frameworks (React, Vue, etc.)
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      });
+    } catch (error) {
+      // Fallback: Triple-click + Delete
+      try {
+        await element.click({ clickCount: 3 });
+        await this.page.waitForTimeout(50);
+        await this.page.keyboard.press('Delete');
+      } catch (fallbackError) {
+        this.emitLog('error', { message: 'Failed to clear text field' });
+      }
+    }
+  }
+
+  /**
+   * Type text using low-level keyboard events (browser-use style)
+   * Uses keyboard.type() with human-like delays for better compatibility
+   * This ensures proper event handling for React/Vue/Angular frameworks
+   */
+  private async typeTextHumanLike(text: string): Promise<void> {
+    if (!this.page) return;
+
+    // Use Playwright's keyboard.type() which properly handles all characters including Unicode
+    // This sends proper keydown, keypress, input, and keyup events
+    // Human-like delay between keystrokes: 15-25ms random
+    const delay = 15 + Math.floor(Math.random() * 10);
+    await this.page.keyboard.type(text, { delay });
+  }
+
+  /**
+   * Unified typing method (browser-use style)
+   * Replaces both typeElementByIndex and typeCaptchaAndSubmit
+   *
+   * @param target - Element index (number) or selector (string)
+   * @param text - Text to type
+   * @param options - Optional configuration
+   */
+  async typeText(
+    target: number | string,
+    text: string,
+    options?: {
+      clearFirst?: boolean;
+      submit?: boolean;
+      submitSelectors?: string[];
+    }
+  ): Promise<boolean> {
     if (!this.page) {
       throw new Error('Page is not initialized.');
     }
 
+    const { clearFirst = true, submit = false, submitSelectors = [] } = options || {};
+
     try {
-      this.emitLog('system', { message: `[DOM] Typing into element ${index}: "${text}"` });
+      this.emitLog('system', {
+        message: `[TypeText] Typing into ${typeof target === 'number' ? `element ${target}` : `selector "${target}"`}: "${text}"`
+      });
 
-      // Get element map
-      const elementMap = await this.getInteractiveElements();
-      const element = this.domExtractor.findElementByIndex(elementMap, index);
+      let element: ElementHandle | null = null;
 
-      if (!element) {
-        this.emitLog('error', { message: `[DOM] Element with index ${index} not found` });
-        return false;
+      // Get element by index or selector
+      if (typeof target === 'number') {
+        // DOM index-based (browser-use style)
+        const elementMap = await this.getInteractiveElements();
+        const elementInfo = this.domExtractor.findElementByIndex(elementMap, target);
+
+        if (!elementInfo) {
+          this.emitLog('error', { message: `[TypeText] Element with index ${target} not found` });
+          return false;
+        }
+
+        // Click element by coordinates to focus
+        await this.page.mouse.click(elementInfo.coordinates.x, elementInfo.coordinates.y);
+        await this.page.waitForTimeout(150);
+
+        // Clear existing text if requested
+        if (clearFirst) {
+          // Triple-click to select all, then delete
+          await this.page.mouse.click(elementInfo.coordinates.x, elementInfo.coordinates.y, { clickCount: 3 });
+          await this.page.waitForTimeout(50);
+          await this.page.keyboard.press('Delete');
+          await this.page.waitForTimeout(50);
+        }
+      } else {
+        // Selector-based
+        element = await this.page.$(target);
+        if (!element) {
+          this.emitLog('error', { message: `[TypeText] Element not found: ${target}` });
+          return false;
+        }
+
+        // Focus element
+        await this.focusElement(element);
+        await this.page.waitForTimeout(100);
+
+        // Clear existing text if requested
+        if (clearFirst) {
+          await this.clearTextField(element);
+          await this.page.waitForTimeout(50);
+        }
       }
 
-      // Click to focus element using coordinates
-      await this.page.mouse.click(element.coordinates.x, element.coordinates.y);
-      await this.page.waitForTimeout(100); // Brief wait for focus
+      // Type text using browser-use style (keyDown/char/keyUp sequence)
+      await this.typeTextHumanLike(text);
 
-      // Clear existing text first (Ctrl+A then type)
-      await this.page.keyboard.press('Control+A');
+      await this.streamScreenshot(`typed-text`);
+      this.emitLog('system', { message: `[TypeText] Successfully typed text` });
 
-      // Type the text
-      await this.page.keyboard.type(text, { delay: 20 }); // 20ms delay between keystrokes
+      // Submit if requested
+      if (submit) {
+        const defaultSubmitSelectors = [
+          'input[type="submit"]',
+          'button[type="submit"]',
+          'button:has-text("Submit")',
+          'button:has-text("확인")',
+        ];
 
-      await this.streamScreenshot(`typed-element-${index}`);
-      this.emitLog('system', { message: `[DOM] Successfully typed into element ${index}` });
+        const selectors = submitSelectors.length > 0 ? submitSelectors : defaultSubmitSelectors;
+        const clicked = await this.tryClickSelectors(selectors);
+
+        if (!clicked) {
+          // Fallback: press Enter
+          try {
+            await this.page.keyboard.press('Enter');
+          } catch (_) {}
+        }
+
+        await this.waitForPageLoad(8000);
+        await this.streamScreenshot('after-submit');
+      }
+
       return true;
     } catch (error) {
-      console.error(`[BrowserController] Error typing into element ${index}:`, error);
+      console.error(`[BrowserController] Error typing text:`, error);
       this.emitLog('error', {
-        message: `[DOM] Error typing into element ${index}: ${(error as Error).message}`,
+        message: `[TypeText] Error: ${(error as Error).message}`,
       });
       return false;
     }
+  }
+
+  /**
+   * Type text into an element by index
+   * @deprecated Use typeText() instead - this is a wrapper for backwards compatibility
+   */
+  async typeElementByIndex(index: number, text: string): Promise<boolean> {
+    return this.typeText(index, text, { clearFirst: true, submit: false });
+  }
+
+  /**
+   * Type captcha text and submit
+   * @deprecated Use typeText() instead - this is a wrapper for backwards compatibility
+   */
+  async typeCaptchaAndSubmit(
+    inputSelector: string | undefined,
+    text: string,
+    submitSelectorCandidates: string[] = []
+  ): Promise<boolean> {
+    const selector = inputSelector || 'input[name="captcha"], input#captcha, input[type="text"]';
+    return this.typeText(selector, text, {
+      clearFirst: true,
+      submit: true,
+      submitSelectors: submitSelectorCandidates,
+    });
   }
 
   /**

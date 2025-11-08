@@ -1196,9 +1196,9 @@ No explanation, only JSON.`;
                 } else { actionError = true; actionObservation = "Error: index missing for clickElement."; }
                 break;
               case "typeElement":
-                // NEW: Browser-use style index-based typing
+                // Browser-use style index-based typing with unified typeText method
                 if (typeof action.index === 'number' && action.text !== undefined) {
-                  const typeSuccess = await browserController.typeElementByIndex(action.index, action.text);
+                  const typeSuccess = await browserController.typeText(action.index, action.text, { clearFirst: true, submit: false });
                   actionObservation = typeSuccess
                     ? `Typed '${action.text}' into element [${action.index}].`
                     : `Failed to type into element [${action.index}].`;
@@ -1572,8 +1572,13 @@ No explanation, only JSON.`;
                     actionError = true;
                     actionObservation = 'Vision model failed to extract text from captcha image.';
                   } else {
-                    // Best-effort: try common input/submit without URL selectors
-                    const typed = await browserController.typeCaptchaAndSubmit(undefined as any, text, []);
+                    // Best-effort: try common input/submit using unified typeText method
+                    const selector = 'input[name="captcha"], input#captcha, input[type="text"]';
+                    const typed = await browserController.typeText(selector, text, {
+                      clearFirst: true,
+                      submit: true,
+                      submitSelectors: []
+                    });
                     actionObservation = typed ? `Captcha text "${text}" entered and submitted.` : 'Failed to enter/submit captcha text.';
                     if (!typed) actionError = true;
                   }
