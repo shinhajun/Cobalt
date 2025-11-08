@@ -183,6 +183,43 @@
           </div>
         </div>
 
+        <!-- Limits Section -->
+        <div class="setting-section">
+          <h3>Limits</h3>
+
+          <div class="setting-item">
+            <label for="maxIterationsInput">Max Iterations:</label>
+            <input
+              type="number"
+              id="maxIterationsInput"
+              class="setting-input"
+              min="1"
+              max="1000"
+              placeholder="100"
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Maximum reasoning iterations per task (default 100)
+            </small>
+          </div>
+
+          <div class="setting-item">
+            <label for="maxActionsPerStepInput">Max Actions Per Step:</label>
+            <input
+              type="number"
+              id="maxActionsPerStepInput"
+              class="setting-input"
+              min="1"
+              max="20"
+              placeholder="5"
+            />
+            <small style="color: #666; display: block; margin-top: 4px;">
+              Maximum tool actions executed per iteration (1–20, default 5)
+            </small>
+          </div>
+
+          <button class="btn-save-keys" id="btnSaveLimits">Save Limits</button>
+        </div>
+
         <!-- Logs Section (Hidden in Settings) -->
         <div class="logs-section-modal">
           <h3>Execution Logs</h3>

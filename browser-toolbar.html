@@ -143,6 +143,74 @@
       box-shadow: 0 1px 4px rgba(102, 126, 234, 0.2);
     }
 
+    /* Record button */
+    .record-btn {
+      border: none;
+      background: white;
+      border-radius: 16px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 14px;
+      margin-left: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #5f6368;
+      letter-spacing: 0.3px;
+      transition: all 0.3s ease;
+      position: relative;
+      box-shadow: 0 0 0 2px transparent;
+      height: 28px;
+      gap: 6px;
+    }
+
+    .record-btn::before {
+      content: '';
+      position: absolute;
+      top: -1.5px;
+      left: -1.5px;
+      right: -1.5px;
+      bottom: -1.5px;
+      background: linear-gradient(135deg, #9ca3af 0%, #6b7280 100%);
+      border-radius: 16px;
+      z-index: -1;
+    }
+
+    .record-btn:hover {
+      box-shadow: 0 2px 12px rgba(107, 114, 128, 0.25);
+    }
+
+    .record-btn:active {
+      box-shadow: 0 1px 4px rgba(107, 114, 128, 0.2);
+    }
+
+    .record-btn.recording {
+      color: #dc2626;
+    }
+
+    .record-btn.recording::before {
+      background: linear-gradient(135deg, #fca5a5 0%, #dc2626 100%);
+    }
+
+    .record-icon {
+      font-size: 16px;
+      display: inline-block;
+    }
+
+    .record-btn.recording .record-icon {
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .record-status {
+      font-size: 12px;
+    }
+
     /* Chat UI iframe - 오른쪽 25% */
     .chat-iframe {
       position: fixed;
@@ -437,6 +505,11 @@
       />
     </div>
 
+    <button class="record-btn" id="recordBtn" title="Record Macro">
+      <span class="record-icon">⏺</span>
+      <span class="record-status">Record</span>
+    </button>
+
     <button class="chat-toggle-btn" id="chatToggleBtn" title="Toggle AI Chat">
       AI Chat
     </button>
@@ -462,6 +535,7 @@
     const forwardBtn = document.getElementById('forwardBtn');
     const refreshBtn = document.getElementById('refreshBtn');
     const urlInput = document.getElementById('urlInput');
+    const recordBtn = document.getElementById('recordBtn');
     const chatToggleBtn = document.getElementById('chatToggleBtn');
     const chatIframe = document.getElementById('chatIframe');
     const toolbar = document.getElementById('toolbar');
@@ -477,6 +551,7 @@
     const findCloseBtn = document.getElementById('findCloseBtn');
 
     let chatVisible = false;
+    let isRecording = false;
     let currentTabId = 0;
     // 초기 탭의 URL을 절대 경로로 설정
     const homePageUrl = `file:///${__dirname.replace(/\\/g, '/')}/cobalt-home.html`;
@@ -502,6 +577,50 @@
 
     // 초기 상태 설정 (채팅 닫힌 상태)
     toolbar.classList.add('full-width');
+
+    // Record 버튼 토글
+    recordBtn.addEventListener('click', async () => {
+      if (!isRecording) {
+        // Start recording
+        console.log('[Toolbar] Starting macro recording');
+
+        const result = await ipcRenderer.invoke('macro-start-recording', { name: 'New Macro' });
+
+        if (result.success) {
+          isRecording = true;
+          recordBtn.classList.add('recording');
+          recordBtn.querySelector('.record-status').textContent = 'Recording...';
+          console.log('[Toolbar] Recording started successfully');
+        } else {
+          console.error('[Toolbar] Failed to start recording:', result.error);
+          alert('Failed to start recording: ' + result.error);
+        }
+      } else {
+        // Stop recording
+        console.log('[Toolbar] Stopping macro recording');
+
+        const result = await ipcRenderer.invoke('macro-stop-recording');
+
+        if (result.success) {
+          isRecording = false;
+          recordBtn.classList.remove('recording');
+          recordBtn.querySelector('.record-status').textContent = 'Record';
+          console.log('[Toolbar] Recording stopped successfully');
+          console.log('[Toolbar] Recorded events:', result.events?.length || 0);
+
+          // Open flowchart viewer with recorded macro
+          if (result.macro && result.events && result.events.length > 0) {
+            console.log('[Toolbar] Opening flowchart viewer');
+            ipcRenderer.invoke('macro-show-flowchart', result.macro);
+          } else {
+            alert('No events were recorded. Try recording some actions on the page.');
+          }
+        } else {
+          console.error('[Toolbar] Failed to stop recording:', result.error);
+          alert('Failed to stop recording: ' + result.error);
+        }
+      }
+    });
 
     // Chat 토글
     chatToggleBtn.addEventListener('click', () => {
@@ -1028,6 +1147,44 @@
         statusBar.textContent = '';
       }
     });
+
+    // ========================================
+    // Macro Execution - Forward to Chat UI
+    // ========================================
+
+    // Forward macro events to chat iframe (same as AI agent events)
+    ipcRenderer.on('macro-started', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-started', data }, '*');
+    });
+
+    ipcRenderer.on('macro-step-start', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-step-start', data }, '*');
+    });
+
+    ipcRenderer.on('macro-step-complete', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-step-complete', data }, '*');
+    });
+
+    ipcRenderer.on('macro-step-error', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-step-error', data }, '*');
+    });
+
+    ipcRenderer.on('macro-screenshot', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-screenshot', data }, '*');
+    });
+
+    ipcRenderer.on('macro-complete', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-complete', data }, '*');
+    });
+
+    ipcRenderer.on('macro-stopped', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-stopped', data }, '*');
+    });
+
+    ipcRenderer.on('macro-error', (event, data) => {
+      chatIframe.contentWindow.postMessage({ type: 'macro-error', data }, '*');
+    });
+
   </script>
 </body>
 </html>

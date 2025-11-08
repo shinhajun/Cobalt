@@ -19,6 +19,10 @@ const { registerPermissionHandler } = require('./electron/permissions');
 const { registerAutofillIPC } = require('./electron/autofill/ipc');
 const fs = require('fs');
 
+// Macro recording system
+const RecordingManager = require('./macro/recording/RecordingManager');
+const EventCollector = require('./macro/recording/EventCollector');
+
 let mainWindow;
 let browserView = null; // Current active BrowserView
 let browserViews = new Map(); // Map of tabId -> BrowserView
@@ -30,6 +34,12 @@ let isTaskRunning = false;
 let stopRequested = false;
 let screenshotInterval = null; // Auto-screenshot timer
 let chatVisible = false; // Chat visibility state - 기본값 false로 변경
+let currentMacroExecutor = null; // Current running macro executor
+
+// Macro recording instances
+let recordingManager = new RecordingManager();
+let eventCollector = null;
+let currentEditingMacro = null; // Current macro being edited in flowchart
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -1217,6 +1227,19 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
       const profile = new BrowserProfile({ headless: true });
       browserController = new BrowserController(debugMode, profile);
       llmService = new LLMService(model || 'gpt-4o-mini');
+      // Apply iteration/action limits from settings if provided
+      try {
+        if (settings && typeof settings.maxIterations === 'number') {
+          llmService.setMaxIterations(settings.maxIterations);
+          console.log('[Electron] Applied maxIterations:', settings.maxIterations);
+        }
+        if (settings && typeof settings.maxActionsPerStep === 'number') {
+          llmService.setMaxActionsPerStep(settings.maxActionsPerStep);
+          console.log('[Electron] Applied maxActionsPerStep:', settings.maxActionsPerStep);
+        }
+      } catch (e) {
+        console.warn('[Electron] Failed to apply limit settings:', e?.message || e);
+      }
 
       console.log('[Hybrid] Will stream AI screenshots to BrowserView');
 
@@ -2079,4 +2102,369 @@ ipcMain.handle('open-incognito-tab', async (_event, url) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+// ============================================================================
+// MACRO RECORDING IPC HANDLERS
+// ============================================================================
+
+// IPC: Start macro recording
+ipcMain.handle('macro-start-recording', async (event, { name }) => {
+  console.log('[Electron] Starting macro recording:', name);
+
+  try {
+    // Start recording in manager
+    const result = recordingManager.startRecording(name);
+
+    if (!result.success) {
+      return result;
+    }
+
+    // Initialize event collector
+    if (!eventCollector) {
+      eventCollector = new EventCollector(mainWindow, recordingManager);
+    }
+
+    // Start collecting events from current BrowserView
+    if (browserView) {
+      await eventCollector.startCollecting(browserView);
+      console.log('[Electron] Event collector started for current tab');
+    } else {
+      console.warn('[Electron] No active BrowserView to record');
+    }
+
+    return {
+      success: true,
+      macroId: result.macroId,
+      startTime: result.startTime
+    };
+  } catch (error) {
+    console.error('[Electron] Failed to start recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Stop macro recording
+ipcMain.handle('macro-stop-recording', async (event) => {
+  console.log('[Electron] Stopping macro recording');
+
+  try {
+    // Stop event collector
+    if (eventCollector) {
+      eventCollector.stopCollecting();
+      console.log('[Electron] Event collector stopped');
+    }
+
+    // Stop recording in manager
+    const result = recordingManager.stopRecording();
+
+    if (!result.success) {
+      return result;
+    }
+
+    console.log('[Electron] Recording stopped, total events:', result.events.length);
+
+    // Analyze and generate flowchart
+    if (result.events.length > 0) {
+      const ActionAnalyzer = require('./macro/analysis/ActionAnalyzer');
+      const FlowchartGenerator = require('./macro/analysis/FlowchartGenerator');
+
+      // Analyze events
+      const analyzer = new ActionAnalyzer();
+      const analyzedSteps = analyzer.analyze(result.events);
+      console.log('[Electron] Events analyzed, steps:', analyzedSteps.length);
+
+      // Generate flowchart data
+      const generator = new FlowchartGenerator();
+      const macro = generator.generate(result.macro, analyzedSteps);
+      console.log('[Electron] Flowchart generated');
+
+      // Store for viewing
+      currentEditingMacro = macro;
+
+      return {
+        success: true,
+        macro: macro,
+        events: result.events,
+        duration: result.duration
+      };
+    }
+
+    return result;
+  } catch (error) {
+    console.error('[Electron] Failed to stop recording:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Record event from BrowserView
+ipcMain.on('macro-record-event', (event, eventData) => {
+  if (recordingManager.isRecording() && eventCollector) {
+    eventCollector.handleEvent(eventData);
+  }
+});
+
+// IPC: Show flowchart viewer
+ipcMain.handle('macro-show-flowchart', async (event, macro) => {
+  console.log('[Electron] Opening flowchart viewer for macro:', macro.name);
+
+  try {
+    currentEditingMacro = macro;
+
+    // Create new window for flowchart
+    const { BrowserWindow } = require('electron');
+
+    const flowchartWindow = new BrowserWindow({
+      width: 900,
+      height: 700,
+      title: `Macro: ${macro.name}`,
+      parent: mainWindow,
+      modal: false,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      }
+    });
+
+    // Use new React-based flowchart viewer
+    flowchartWindow.loadFile(path.join(__dirname, 'macro', 'ui', 'MacroFlowchart-new.html'));
+
+    return { success: true };
+  } catch (error) {
+    console.error('[Electron] Failed to open flowchart:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Get current macro being edited
+ipcMain.handle('get-current-macro', async (event) => {
+  return currentEditingMacro;
+});
+
+// IPC: Save macro
+ipcMain.handle('save-macro', async (event, macroData) => {
+  console.log('[Electron] Saving macro:', macroData.name);
+
+  try {
+    const MacroStorage = require('./macro/execution/MacroStorage');
+    const storage = new MacroStorage();
+
+    await storage.save(macroData);
+
+    return { success: true, id: macroData.id };
+  } catch (error) {
+    console.error('[Electron] Failed to save macro:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Load macro
+ipcMain.handle('load-macro', async (event, macroId) => {
+  console.log('[Electron] Loading macro:', macroId);
+
+  try {
+    const MacroStorage = require('./macro/execution/MacroStorage');
+    const storage = new MacroStorage();
+
+    const macro = await storage.load(macroId);
+
+    return { success: true, macro: macro };
+  } catch (error) {
+    console.error('[Electron] Failed to load macro:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: List all macros
+ipcMain.handle('list-macros', async (event) => {
+  console.log('[Electron] Listing all macros');
+
+  try {
+    const MacroStorage = require('./macro/execution/MacroStorage');
+    const storage = new MacroStorage();
+
+    const macros = await storage.listAll();
+
+    return { success: true, macros: macros };
+  } catch (error) {
+    console.error('[Electron] Failed to list macros:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Execute macro
+ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
+  console.log('[Electron] Executing macro:', macroData.name, 'with model:', model);
+
+  try {
+    // 1. Load API keys from localStorage
+    const openaiKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("openai_api_key")'
+    );
+    const googleKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("google_api_key")'
+    );
+    const claudeKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("claude_api_key")'
+    );
+
+    // 2. Decode and set environment variables
+    if (openaiKey) {
+      process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    }
+    if (googleKey) {
+      process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    }
+    if (claudeKey) {
+      process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+    }
+
+    // 3. Create LLMService with selected model
+    const { LLMService } = require('./packages/agent-core/dist/llmService');
+    const llmService = model ? new LLMService(model) : null;
+
+    // 4. Create MacroExecutor with LLMService
+    const MacroExecutor = require('./macro/execution/MacroExecutor');
+    const executor = new MacroExecutor(browserView, mainWindow, llmService);
+
+    // Store current executor
+    currentMacroExecutor = executor;
+
+    // Forward all executor events to renderer process
+    executor.on('macro-started', (data) => {
+      mainWindow.webContents.send('macro-started', data);
+    });
+
+    executor.on('step-start', (data) => {
+      mainWindow.webContents.send('macro-step-start', data);
+    });
+
+    executor.on('step-complete', (data) => {
+      mainWindow.webContents.send('macro-step-complete', data);
+    });
+
+    executor.on('step-error', (data) => {
+      mainWindow.webContents.send('macro-step-error', data);
+    });
+
+    executor.on('screenshot', (data) => {
+      mainWindow.webContents.send('macro-screenshot', data);
+    });
+
+    executor.on('macro-complete', (data) => {
+      mainWindow.webContents.send('macro-complete', data);
+      currentMacroExecutor = null; // Clear executor after completion
+    });
+
+    executor.on('macro-stopped', (data) => {
+      mainWindow.webContents.send('macro-stopped', data);
+      currentMacroExecutor = null; // Clear executor after stop
+    });
+
+    executor.on('macro-error', (data) => {
+      mainWindow.webContents.send('macro-error', data);
+      currentMacroExecutor = null; // Clear executor after error
+    });
+
+    const result = await executor.execute(macroData);
+
+    return { success: true, result: result };
+  } catch (error) {
+    console.error('[Electron] Failed to execute macro:', error);
+    currentMacroExecutor = null; // Clear executor on error
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Optimize macro with AI
+ipcMain.handle('optimize-macro', async (event, { macroData, model }) => {
+  console.log('[Electron] Optimizing macro:', macroData.name, 'with model:', model);
+
+  try {
+    // 1. Load API keys from localStorage
+    const openaiKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("openai_api_key")'
+    );
+    const googleKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("google_api_key")'
+    );
+    const claudeKey = await mainWindow.webContents.executeJavaScript(
+      'localStorage.getItem("claude_api_key")'
+    );
+
+    // 2. Decode and set environment variables
+    if (openaiKey) {
+      process.env.OPENAI_API_KEY = Buffer.from(openaiKey, 'base64').toString('utf8');
+    }
+    if (googleKey) {
+      process.env.GOOGLE_API_KEY = Buffer.from(googleKey, 'base64').toString('utf8');
+    }
+    if (claudeKey) {
+      process.env.CLAUDE_API_KEY = Buffer.from(claudeKey, 'base64').toString('utf8');
+    }
+
+    // 3. Create LLMService with selected model
+    const { LLMService } = require('./packages/agent-core/dist/llmService');
+    const llmService = new LLMService(model || 'gpt-5-mini');
+
+    // 4. Create FlowOptimizer with LLMService
+    const FlowOptimizer = require('./macro/optimization/FlowOptimizer');
+    const optimizer = new FlowOptimizer(llmService);
+
+    const result = await optimizer.optimize(macroData);
+
+    // Create optimized macro
+    const optimizedMacro = { ...macroData };
+    optimizedMacro.steps = result.optimizedSteps;
+    optimizedMacro.updatedAt = Date.now();
+
+    return {
+      success: true,
+      optimizedMacro,
+      removedSteps: result.removedSteps,
+      aiSuggestions: result.aiSuggestions,
+      savings: result.savings
+    };
+  } catch (error) {
+    console.error('[Electron] Failed to optimize macro:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Execute macro with AI agent
+ipcMain.handle('ai-execute-macro', async (event, macroData) => {
+  console.log('[Electron] AI executing macro:', macroData.name);
+
+  try {
+    const AIAgentBridge = require('./macro/integration/AIAgentBridge');
+    const bridge = new AIAgentBridge(browserView, mainWindow);
+
+    const result = await bridge.executeWithAI(macroData);
+
+    return result;
+  } catch (error) {
+    console.error('[Electron] AI execution failed:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC: Stop macro execution
+ipcMain.on('macro-stop', (event) => {
+  console.log('[Electron] Stopping macro execution');
+
+  if (currentMacroExecutor) {
+    currentMacroExecutor.stop();
+  }
+});
+
+// IPC: Pause macro execution (placeholder for future implementation)
+ipcMain.on('macro-pause', (event) => {
+  console.log('[Electron] Pause macro - not yet implemented');
+  // TODO: Implement pause functionality
+});
+
+// IPC: Resume macro execution (placeholder for future implementation)
+ipcMain.on('macro-resume', (event) => {
+  console.log('[Electron] Resume macro - not yet implemented');
+  // TODO: Implement resume functionality
 });

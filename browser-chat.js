@@ -70,6 +70,8 @@ function init() {
     settingsModal.style.display = 'flex';
     // Reload API keys when opening settings
     loadApiKeys();
+    // Reload Limits when opening settings
+    loadLimits();
   });
 
   closeSettingsBtn.addEventListener('click', () => {
@@ -100,6 +102,13 @@ function init() {
   const btnSaveKeys = document.getElementById('btnSaveKeys');
   if (btnSaveKeys) {
     btnSaveKeys.addEventListener('click', saveApiKeys);
+  }
+
+  // Load and bind Limits settings
+  loadLimits();
+  const btnSaveLimits = document.getElementById('btnSaveLimits');
+  if (btnSaveLimits) {
+    btnSaveLimits.addEventListener('click', saveLimits);
   }
 
   // Model selection
@@ -165,6 +174,82 @@ function init() {
             updateScreenshotDisplay(event.data.data.screenshot, tabId);
           }
           break;
+
+        case 'macro-started':
+          isRunning = true;
+          btnRun.style.display = 'none';
+          btnStop.style.display = 'flex';
+          taskInput.disabled = true;
+          addSystemMessage('🎬 매크로 실행 시작: ' + event.data.data.name);
+          addMacroProgressIndicator(event.data.data);
+          break;
+
+        case 'macro-step-start':
+          updateMacroProgress(event.data.data);
+          addLog({
+            type: 'info',
+            timestamp: event.data.data.timestamp,
+            data: { message: `[Step ${event.data.data.stepNumber}] ${event.data.data.description}` }
+          });
+          break;
+
+        case 'macro-screenshot':
+          // Reuse AI screenshot display for macro screenshots
+          if (event.data.data && event.data.data.screenshot) {
+            updateScreenshotDisplay(event.data.data.screenshot, null);
+          }
+          break;
+
+        case 'macro-step-complete':
+          updateMacroProgress(event.data.data);
+          break;
+
+        case 'macro-step-error':
+          addLog({
+            type: 'error',
+            timestamp: event.data.data.timestamp,
+            data: { message: `❌ Step ${event.data.data.stepNumber} 실패: ${event.data.data.error}` }
+          });
+          break;
+
+        case 'macro-complete':
+          isRunning = false;
+          btnRun.style.display = 'flex';
+          btnStop.style.display = 'none';
+          taskInput.disabled = false;
+          removeMacroProgressIndicator();
+          removeScreenshotDisplay();
+
+          if (event.data.data.success) {
+            addAssistantMessage(`✅ 매크로 완료!\n\n${event.data.data.executedSteps}/${event.data.data.totalSteps} 단계 실행됨`);
+          } else {
+            addErrorMessage(`⚠️ 매크로 오류 발생\n\n${event.data.data.executedSteps}/${event.data.data.totalSteps} 단계 실행, ${event.data.data.errors.length}개 오류`);
+          }
+
+          removeThinkingIndicator();
+          break;
+
+        case 'macro-stopped':
+          isRunning = false;
+          btnRun.style.display = 'flex';
+          btnStop.style.display = 'none';
+          taskInput.disabled = false;
+          removeMacroProgressIndicator();
+          removeScreenshotDisplay();
+          addSystemMessage(`⏹ 매크로 중단됨 (${event.data.data.executedSteps}/${event.data.data.totalSteps} 단계 실행)`);
+          removeThinkingIndicator();
+          break;
+
+        case 'macro-error':
+          isRunning = false;
+          btnRun.style.display = 'flex';
+          btnStop.style.display = 'none';
+          taskInput.disabled = false;
+          removeMacroProgressIndicator();
+          removeScreenshotDisplay();
+          addErrorMessage(`❌ 매크로 실행 실패: ${event.data.data.error}`);
+          removeThinkingIndicator();
+          break;
       }
     }
   });
@@ -206,7 +291,9 @@ async function runTask() {
   const settings = {
     visionModel: document.getElementById('visionModelSelect').value,
     syncResultToBrowserView: document.getElementById('syncResultToBrowserView').checked,
-    syncCookies: document.getElementById('syncCookies').checked
+    syncCookies: document.getElementById('syncCookies').checked,
+    maxIterations: parseInt(localStorage.getItem('max_iterations') || '100', 10),
+    maxActionsPerStep: parseInt(localStorage.getItem('max_actions_per_step') || '5', 10)
   };
 
   const model = modelSelect.value;
@@ -395,6 +482,46 @@ async function saveApiKeys() {
   }
 }
 
+// Limits Management
+function loadLimits() {
+  const maxIterInput = document.getElementById('maxIterationsInput');
+  const maxActsInput = document.getElementById('maxActionsPerStepInput');
+
+  const savedMaxIter = localStorage.getItem('max_iterations');
+  const savedMaxActs = localStorage.getItem('max_actions_per_step');
+
+  if (maxIterInput) {
+    maxIterInput.value = savedMaxIter ? String(parseInt(savedMaxIter, 10)) : '100';
+  }
+  if (maxActsInput) {
+    maxActsInput.value = savedMaxActs ? String(parseInt(savedMaxActs, 10)) : '5';
+  }
+}
+
+function saveLimits() {
+  const maxIterInput = document.getElementById('maxIterationsInput');
+  const maxActsInput = document.getElementById('maxActionsPerStepInput');
+  const btnSaveLimits = document.getElementById('btnSaveLimits');
+
+  let maxIter = parseInt(maxIterInput && maxIterInput.value ? maxIterInput.value : '100', 10);
+  let maxActs = parseInt(maxActsInput && maxActsInput.value ? maxActsInput.value : '5', 10);
+
+  if (!Number.isFinite(maxIter) || maxIter < 1) maxIter = 1;
+  if (maxIter > 1000) maxIter = 1000;
+  if (!Number.isFinite(maxActs) || maxActs < 1) maxActs = 1;
+  if (maxActs > 20) maxActs = 20;
+
+  localStorage.setItem('max_iterations', String(maxIter));
+  localStorage.setItem('max_actions_per_step', String(maxActs));
+
+  if (btnSaveLimits) {
+    btnSaveLimits.textContent = 'Saved!';
+    setTimeout(() => {
+      btnSaveLimits.textContent = 'Save Limits';
+    }, 1500);
+  }
+}
+
 // Log functions
 function addLog(log) {
   logHistory.push(log);
@@ -528,10 +655,6 @@ function deleteChatRoom(roomId) {
   const room = chatRooms.find(r => r.id === roomId);
   if (!room) {
     console.error('Room not found:', roomId);
-    return;
-  }
-
-  if (!confirm(`Delete "${room.title}"?`)) {
     return;
   }
 
@@ -920,6 +1043,72 @@ function removeScreenshotDisplay() {
       statusSpan.style.color = '#28ca42';
     }
     lastScreenshotMessageDiv = null;
+  }
+}
+
+// ==========================================
+// Macro Progress Display
+// ==========================================
+
+let macroProgressDiv = null;
+
+function addMacroProgressIndicator(data) {
+  // Remove existing indicator if any
+  if (macroProgressDiv && messagesContainer.contains(macroProgressDiv)) {
+    macroProgressDiv.remove();
+  }
+
+  macroProgressDiv = document.createElement('div');
+  macroProgressDiv.className = 'message macro-progress';
+  macroProgressDiv.style.cssText = `
+    padding: 16px;
+    margin: 12px 0;
+    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+    border-left: 4px solid #667eea;
+    border-radius: 8px;
+  `;
+
+  macroProgressDiv.innerHTML = `
+    <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+      <span style="font-weight: 600; color: #667eea;">▶ ${data.name}</span>
+      <span class="macro-progress-text" style="color: #667eea; font-weight: 600;">0%</span>
+    </div>
+    <div style="height: 6px; background: rgba(0,0,0,0.1); border-radius: 3px; overflow: hidden; margin-bottom: 8px;">
+      <div class="macro-progress-fill" style="height: 100%; width: 0%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s ease;"></div>
+    </div>
+    <div class="macro-current-step" style="font-size: 12px; color: #666;">준비 중...</div>
+  `;
+
+  messagesContainer.appendChild(macroProgressDiv);
+  scrollToBottom();
+}
+
+function updateMacroProgress(data) {
+  if (!macroProgressDiv) return;
+
+  const progressText = macroProgressDiv.querySelector('.macro-progress-text');
+  const progressFill = macroProgressDiv.querySelector('.macro-progress-fill');
+  const currentStep = macroProgressDiv.querySelector('.macro-current-step');
+
+  if (progressText) progressText.textContent = data.progress + '%';
+  if (progressFill) progressFill.style.width = data.progress + '%';
+  if (currentStep) currentStep.textContent = `Step ${data.stepNumber}: ${data.description}`;
+
+  scrollToBottom();
+}
+
+function removeMacroProgressIndicator() {
+  if (macroProgressDiv && messagesContainer.contains(macroProgressDiv)) {
+    // Fade out animation
+    macroProgressDiv.style.opacity = '0';
+    macroProgressDiv.style.transition = 'opacity 0.3s ease';
+
+    setTimeout(() => {
+      if (macroProgressDiv && messagesContainer.contains(macroProgressDiv)) {
+        macroProgressDiv.remove();
+      }
+      macroProgressDiv = null;
+    }, 300);
   }
 }
 

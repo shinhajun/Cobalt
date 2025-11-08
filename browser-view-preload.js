@@ -61,6 +61,12 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
   autofillSaveProfile: (payload) => ipcRenderer.invoke('autofill-save-profile', payload),
   autofillNeverForSite: (payload) => ipcRenderer.invoke('autofill-never-for-site', payload),
   autofillMarkUsed: (profileId) => ipcRenderer.invoke('autofill-mark-used', { profileId }),
+
+  // Macro recording API
+  sendMacroEvent: (event) => {
+    console.log('[BrowserView Preload] sendMacroEvent called:', event.type);
+    ipcRenderer.send('macro-record-event', event);
+  }
 });
 
 console.log('[BrowserView Preload] API exposed via contextBridge as window.__browserViewAPI');
