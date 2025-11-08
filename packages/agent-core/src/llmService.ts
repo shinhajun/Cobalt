@@ -96,6 +96,18 @@ CRITICAL PARAMETER RULES:
 - Element indices come from the browser state's interactive elements list
 - Indices are numbers (e.g., 42, not "42")
 
+VERIFICATION RULES:
+- Do NOT assume an action succeeded because it was issued. Verify via the latest browser state (and screenshot if available).
+- Only call done when clear, external success criteria are visible (e.g., a filter chip appears, URL/query reflects applied filter, or visible items match the constraint).
+- If an expected element or change is missing, try targeted recovery: wait, scroll_to_text, container scroll via index, or navigate back.
+- Prefer small waits when content updates asynchronously; then re-check the state.
+
+TARGETED ACTION GUIDANCE:
+- Use scroll_to_text to jump to specific sections (e.g., "Price", "Filters", "Add to Cart").
+- Use scroll with an element index to scroll inside a scrollable container (left filter column, dropdown panels) rather than the whole page.
+- For search bars, set submit=true on input_text or press Enter via send_keys after typing.
+- Avoid alternating up/down scrolls without progress. If that happens, switch to targeted scroll_to_text or container scrolling.
+
 INSTRUCTIONS:
 - Think step by step about what you need to do
 - Examine the current page state carefully (URL, title, interactive elements)
@@ -120,7 +132,7 @@ Click element example (use "index", NOT "element_index"):
 Input text example (use "index", NOT "element_index"):
 {
   "thinking": "I need to type into the search box at index 15",
-  "action": {"type": "input_text", "index": 15, "text": "hello world", "clear": true}
+  "action": {"type": "input_text", "index": 15, "text": "hello world", "clear": true, "submit": true}
 }
 
 Scroll to text example:

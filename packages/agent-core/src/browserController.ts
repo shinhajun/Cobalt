@@ -468,11 +468,14 @@ export class BrowserController {
       await element.click();
 
       // Wait for navigation or timeout (race condition fix)
-      // Some clicks trigger navigation - wait for DOMContentLoaded or 250ms, whichever comes first
+      // Some clicks trigger navigation - wait for DOMContentLoaded or a short settle, whichever comes first
       await Promise.race([
         this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
-        this.page.waitForTimeout(250),
+        this.page.waitForTimeout(400),
       ]);
+
+      // Invalidate DOM cache after potential DOM change due to click
+      this.invalidateDOMCache();
 
       // Emit screenshot event after action
       await this.emitScreenshot(`Clicked element ${index}`);
@@ -596,7 +599,7 @@ export class BrowserController {
       });
 
       // Wait for page to stabilize (browser-use: minimal wait)
-      await this.page.waitForTimeout(200);
+      await this.page.waitForTimeout(300);
 
       const title = await this.page.title();
 
@@ -771,6 +774,224 @@ export class BrowserController {
       await this.page.waitForTimeout(50);
 
       return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Wait for a selector to reach a given state
+   */
+  async waitForSelector(
+    selector: string,
+    timeoutMs: number = 5000,
+    state: 'visible' | 'attached' | 'detached' | 'hidden' = 'visible'
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      const loc = this.page.locator(selector);
+      await loc.waitFor({ state, timeout: timeoutMs });
+      await this.emitScreenshot(`Waited for selector '${selector}' to be ${state}`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Click element by selector (CSS or XPath if starts with //)
+   */
+  async clickSelector(selector: string, nth?: number): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      let locator = selector.startsWith('//') ? this.page.locator(`xpath=${selector}`) : this.page.locator(selector);
+      if (typeof nth === 'number' && nth >= 0) locator = locator.nth(nth);
+
+      await locator.first().click({ timeout: 5000 });
+
+      // Allow page to settle or navigate
+      await Promise.race([
+        this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
+        this.page.waitForTimeout(300),
+      ]);
+
+      this.invalidateDOMCache();
+      await this.emitScreenshot(`Clicked selector '${selector}'${typeof nth === 'number' ? ` [nth=${nth}]` : ''}`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Type into element matched by selector
+   */
+  async inputSelector(selector: string, text: string, clear: boolean = true): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      const locator = selector.startsWith('//') ? this.page.locator(`xpath=${selector}`) : this.page.locator(selector);
+      if (clear) {
+        await locator.fill('', { timeout: 5000 }).catch(() => {});
+      }
+      await locator.fill(text, { timeout: 5000 });
+      await this.page.waitForTimeout(50);
+      await this.emitScreenshot(`Filled selector '${selector}' with text '${text}'`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Click by visible text content (uses Playwright text engine)
+   */
+  async clickText(text: string, exact: boolean = false): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      await this.page.getByText(text, { exact }).first().click({ timeout: 5000 });
+      await Promise.race([
+        this.page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {}),
+        this.page.waitForTimeout(300),
+      ]);
+      this.invalidateDOMCache();
+      await this.emitScreenshot(`Clicked text '${text}' (exact=${exact})`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Select <option> on a <select> matched by selector by visible text or value
+   */
+  async selectDropdownBySelector(selector: string, option: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      const locator = selector.startsWith('//') ? this.page.locator(`xpath=${selector}`) : this.page.locator(selector);
+      await locator.selectOption({ label: option }).catch(async () => {
+        await locator.selectOption({ value: option });
+      });
+      await this.page.waitForTimeout(50);
+      await this.emitScreenshot(`Selected option '${option}' on selector '${selector}'`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Assert current URL contains substring(s). Optionally wait for navigation first.
+   */
+  async assertUrlContains(includes: string | string[], timeoutMs: number = 3000): Promise<{ success: boolean; error?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+      // Small wait to allow URL updates after actions
+      if (timeoutMs > 0) {
+        await Promise.race([
+          this.page.waitForLoadState('domcontentloaded', { timeout: timeoutMs }).catch(() => {}),
+          this.page.waitForTimeout(Math.min(500, timeoutMs)),
+        ]);
+      }
+
+      const url = this.page.url();
+      const needles = Array.isArray(includes) ? includes : [includes];
+      const missing = needles.filter(n => !url.includes(n));
+      if (missing.length > 0) {
+        return { success: false, error: `URL '${url}' missing: ${missing.join(', ')}` };
+      }
+      await this.emitScreenshot(`Asserted URL contains: ${needles.join(' | ')}`);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Public helper: request a screenshot now (force bypass throttle)
+   */
+  async requestScreenshot(note: string = 'Requested screenshot'): Promise<{ success: boolean; error?: string }> {
+    try {
+      await this.emitScreenshot(note, true);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Evaluate arbitrary JS in the page context and return stringified result
+   */
+  async evaluateJS(code: string): Promise<{ success: boolean; error?: string; value?: string }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      // Wrap code in an async IIFE with error capture to avoid breaking the page
+      const wrapped = `(() => { try { const r = (function(){ ${code}\n})(); return typeof r === 'string' ? r : JSON.stringify(r); } catch(e){ return 'Error: ' + (e && e.message || e); } })()`;
+      const result = await this.page.evaluate(wrapped);
+      const value = typeof result === 'string' ? result : String(result);
+      await this.emitScreenshot('Evaluated JS');
+      return { success: true, value };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Extract simple markdown-like text from the page and optional links
+   */
+  async extractPageMarkdown(extractLinks: boolean = false, startFromChar: number = 0): Promise<{ success: boolean; error?: string; markdown?: string; stats?: any }> {
+    try {
+      if (!this.page) throw new Error('Browser not launched');
+
+      const data = await this.page.evaluate(({ withLinks }) => {
+        const text = (document.body && (document.body as any).innerText) ? (document.body as any).innerText : '';
+        let links: Array<{ text: string; href: string }> = [];
+        if (withLinks) {
+          links = Array.from(document.querySelectorAll('a[href]')).slice(0, 200).map(a => ({
+            text: ((a.textContent || '').trim()).slice(0, 200),
+            href: (a as HTMLAnchorElement).href,
+          }));
+        }
+        return { text, links };
+      }, { withLinks: extractLinks });
+
+      const MAX = 30000;
+      let content = data.text || '';
+      if (startFromChar > 0) {
+        if (startFromChar >= content.length) {
+          return { success: false, error: `start_from_char (${startFromChar}) exceeds content length (${content.length})` };
+        }
+        content = content.slice(startFromChar);
+      }
+      let truncated = false;
+      let nextStart = 0;
+      if (content.length > MAX) {
+        content = content.slice(0, MAX);
+        truncated = true;
+        nextStart = (startFromChar || 0) + MAX;
+      }
+
+      let md = content;
+      if (extractLinks && Array.isArray(data.links)) {
+        const lines = data.links.map((l: any) => `- [${l.text || 'link'}](${l.href})`);
+        md += `\n\nLinks:\n${lines.join('\n')}`;
+      }
+
+      const stats = {
+        original_chars: (data.text || '').length,
+        returned_chars: md.length,
+        truncated,
+        next_start_char: truncated ? nextStart : undefined,
+        links_count: extractLinks ? (data.links || []).length : 0,
+      };
+
+      await this.emitScreenshot('Extracted page content');
+      return { success: true, markdown: md, stats };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
