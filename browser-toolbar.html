@@ -166,13 +166,50 @@
       background: #e8eaed;
       display: flex;
       align-items: center;
-      gap: 2px;
-      padding: 0 4px;
+      gap: 0; /* 브랜드와 탭 사이 구분 */
+      padding: 0;
       padding-right: 150px; /* 윈도우 컨트롤 버튼 공간 확보 */
       overflow-x: auto;
       overflow-y: hidden;
       z-index: 10001;
       -webkit-app-region: drag; /* 타이틀바처럼 드래그 가능 */
+    }
+
+    /* Cobalt 브랜드 로고 */
+    .cobalt-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      height: 100%;
+      background: #fff;
+      border-right: 1px solid #dadce0;
+      flex-shrink: 0; /* 크기 고정 */
+      -webkit-app-region: drag; /* 드래그 가능 */
+    }
+
+    .cobalt-logo {
+      width: 20px;
+      height: 20px;
+      object-fit: contain;
+    }
+
+    .cobalt-text {
+      font-size: 14px;
+      font-weight: 600;
+      color: #202124;
+      letter-spacing: 0.5px;
+      user-select: none;
+    }
+
+    /* 탭 컨테이너 */
+    .tabs-container {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 0 4px;
+      flex: 1; /* 남은 공간 차지 */
+      overflow-x: auto;
     }
 
     .tab {
@@ -291,12 +328,21 @@
 <body>
   <!-- Tab bar -->
   <div class="tab-bar" id="tabBar">
-    <div class="tab active" data-tab-id="0" draggable="true">
-      <img class="tab-favicon" id="tab-favicon-0" src="cobalt_logo.png" alt="">
-      <span class="tab-title" id="tab-title-0">New Tab</span>
-      <span class="tab-close">×</span>
+    <!-- Cobalt 브랜드 로고 -->
+    <div class="cobalt-brand">
+      <img src="cobalt_logo.png" alt="Cobalt" class="cobalt-logo">
+      <span class="cobalt-text">Cobalt</span>
     </div>
-    <button class="new-tab-btn" id="newTabBtn">+</button>
+
+    <!-- 탭 컨테이너 -->
+    <div class="tabs-container" id="tabsContainer">
+      <div class="tab active" data-tab-id="0" draggable="true">
+        <img class="tab-favicon" id="tab-favicon-0" src="cobalt_logo.png" alt="">
+        <span class="tab-title" id="tab-title-0">New Tab</span>
+        <span class="tab-close">×</span>
+      </div>
+      <button class="new-tab-btn" id="newTabBtn">+</button>
+    </div>
   </div>
 
   <div class="browser-toolbar" id="toolbar">
@@ -338,6 +384,7 @@
     const chatIframe = document.getElementById('chatIframe');
     const toolbar = document.getElementById('toolbar');
     const tabBar = document.getElementById('tabBar');
+    const tabsContainer = document.getElementById('tabsContainer');
     const newTabBtn = document.getElementById('newTabBtn');
 
     let chatVisible = false;
@@ -445,7 +492,7 @@
         // 드래그 이벤트
         setupTabDragEvents(tabElement, tabId);
 
-        tabBar.insertBefore(tabElement, newTabBtn);
+        tabsContainer.insertBefore(tabElement, newTabBtn);
         console.log('[Toolbar] Tab element added to DOM. DOM tabs count:', document.querySelectorAll('.tab').length);
 
         switchTab(tabId);

@@ -213,27 +213,15 @@ async function runTask() {
     // Step 1: Analyze if this is a simple question or a browser task
     const analysisResult = await electronAPI.analyzeTask(task, model, conversationHistory);
 
-    // Debug logging
-    console.log('[Chat] Analysis result:', analysisResult);
-    console.log('[Chat] Task type:', analysisResult.taskType);
-    console.log('[Chat] Reason:', analysisResult.reason);
-    console.log('[Chat] Response:', analysisResult.response);
-
     if (analysisResult.taskType === 'chat') {
       // Simple question - just get AI response without browser automation
-      console.log('[Chat] ✅ Direct answer mode - NOT opening browser');
       addAssistantMessage(analysisResult.response);
-
-      // Re-enable input
       taskInput.disabled = false;
     } else {
-      // Browser task - NOW start the automation UI
-      console.log('[Chat] 🌐 Browser automation mode - opening browser');
+      // Browser task - start the automation UI
       isRunning = true;
       btnRun.style.display = 'none';
       btnStop.style.display = 'flex';
-
-      // Show thinking indicator for browser task
       addThinkingIndicator();
 
       const result = await electronAPI.runTask(task, model, settings, conversationHistory);

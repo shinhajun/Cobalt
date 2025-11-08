@@ -745,35 +745,13 @@ No explanation, only JSON.`;
 
       let res: any;
       try {
-        this.emitLog('system', { message: 'Calling visionModel.invoke()...' });
-        console.log('[LLMService] About to call visionModel.invoke()');
-        console.log('[LLMService] Vision model type:', typeof this.visionModel);
-        console.log('[LLMService] Message structure:', JSON.stringify(messages[0].content[0]).substring(0, 200));
-
         res = await Promise.race([
           (this.visionModel as any).invoke(messages),
           timeoutPromise
         ]);
-
-        console.log('[LLMService] visionModel.invoke() returned:', typeof res);
-        console.log('[LLMService] res is null/undefined?', res == null);
-        if (res) {
-          console.log('[LLMService] res constructor:', res.constructor?.name);
-          console.log('[LLMService] res keys:', Object.keys(res).slice(0, 15).join(', '));
-          console.log('[LLMService] res.content type:', typeof res.content);
-          console.log('[LLMService] res.content value:', res.content);
-        }
-        this.emitLog('system', { message: `visionModel.invoke() completed. res type: ${typeof res}, null? ${res == null}` });
       } catch (err: any) {
-        console.error('[LLMService] Vision model invoke CAUGHT ERROR:', err);
-        console.error('[LLMService] Error type:', typeof err, 'Error name:', err?.name);
-        this.emitLog('error', { message: `Vision model invoke error: ${err.message}` });
-        this.emitLog('error', { message: `Error stack: ${err.stack?.substring(0, 500)}` });
-        this.emitLog('error', { message: `Error details: name=${err.name}, code=${err.code}, status=${err.status}` });
-        if (err.response) {
-          this.emitLog('error', { message: `Error response status: ${err.response.status}, statusText: ${err.response.statusText}` });
-          this.emitLog('error', { message: `Error response data: ${JSON.stringify(err.response.data).substring(0, 500)}` });
-        }
+        console.error('[LLMService] Vision model invoke error:', err.message);
+        this.emitLog('error', { message: `Vision model error: ${err.message}` });
         return null;
       }
 

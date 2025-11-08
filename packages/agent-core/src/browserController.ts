@@ -194,11 +194,11 @@ export class BrowserController extends EventEmitter {
     this.pageContentCache = null; // 캐시 무효화
     this.clearInteractiveElementsCache(); // DOM 캐시도 무효화
 
-    // 단순화된 네비게이션: load 이벤트까지 기다림
+    // 최적화된 네비게이션: domcontentloaded (DOM만 기다림, 훨씬 빠름!)
     try {
       await this.page.goto(url, {
-        waitUntil: 'load',
-        timeout: 30000 // 30초 타임아웃
+        waitUntil: 'domcontentloaded',  // 'load'에서 변경 (이미지 안 기다림)
+        timeout: 30000
       });
       this.emitLog('system', { message: `Successfully navigated to ${url}` });
     } catch (error: any) {
@@ -206,6 +206,11 @@ export class BrowserController extends EventEmitter {
       try { await this.streamScreenshot('navigation-failed'); } catch (_) {}
       throw error;
     }
+
+    // 주요 컨텐츠 로드 확인 (조건 기반, 즉시 리턴 가능)
+    await this.page.waitForFunction(() => {
+      return document.body && document.body.childElementCount > 0;
+    }, { timeout: 2000, polling: 100 }).catch(() => {});
 
     // Take screenshot after navigation
     await this.streamScreenshot('navigation');
@@ -242,9 +247,14 @@ export class BrowserController extends EventEmitter {
         const el = await this.page.$(sel);
         if (el) {
           this.emitLog('system', { message: `Consent detected. Clicking ${sel}` });
-          await el.click({ delay: 50 });
-          await this.page.waitForLoadState('networkidle', { timeout: 5000 }).catch(() => {});
-          await this.page.waitForTimeout(500);
+          await el.click();
+
+          // 조건 기반 대기: 버튼이 사라지면 즉시 진행!
+          await this.page.waitForSelector(sel, {
+            state: 'hidden',
+            timeout: 2000
+          }).catch(() => {});
+
           await this.streamScreenshot('consent-dismissed');
           break;
         }
@@ -375,7 +385,16 @@ export class BrowserController extends EventEmitter {
         return false;
       }
       await box.click({ delay: 50 });
-      await this.page.waitForTimeout(800);
+
+      // 조건 기반 대기: Challenge frame이 나타나는지 polling 체크
+      const startTime = Date.now();
+      while (Date.now() - startTime < 2000) {
+        const frames = this.page.frames();
+        const challengeFrame = frames.find(f => f.url().includes('recaptcha/api2/bframe'));
+        if (challengeFrame) break;
+        await this.page.waitForTimeout(100);
+      }
+
       // Stream an immediate screenshot so Live View reflects the click
       await this.streamScreenshot('recaptcha-anchor-click');
       return true;
@@ -606,7 +625,13 @@ export class BrowserController extends EventEmitter {
       const btn = await challengeFrame.$('#recaptcha-verify-button');
       if (btn) {
         await btn.click({ delay: 50 });
-        await this.page.waitForTimeout(800);
+
+        // 조건 기반 대기: Verify 버튼이 사라지거나 페이지가 변하면 즉시
+        await Promise.race([
+          challengeFrame.waitForSelector('#recaptcha-verify-button', { state: 'hidden', timeout: 2000 }),
+          this.page.waitForLoadState('domcontentloaded', { timeout: 2000 })
+        ]).catch(() => {});
+
         // Stream verify click immediately
         await this.streamScreenshot('recaptcha-verify-click');
         return true;
@@ -748,14 +773,34 @@ export class BrowserController extends EventEmitter {
     return this.page.url();
   }
 
-  async waitForPageLoad(timeout: number = 10000): Promise<void> {
+  async waitForPageLoad(timeout: number = 3000): Promise<void> {
     if (!this.page) throw new Error('Page is not initialized.');
+
+    // Smart Wait: 조건 충족 시 즉시 진행 (고정 대기 없음)
     try {
-      await this.page.waitForLoadState('networkidle', { timeout });
-      this.emitLog('system', { message: `Page load 'networkidle' state reached.`});
+      // Step 1: DOM 준비되면 즉시 (가장 빠름)
+      await this.page.waitForLoadState('domcontentloaded', { timeout: 1000 }).catch(() => {});
+
+      // Step 2: Body 존재 체크 (조건 기반)
+      await this.page.waitForSelector('body', {
+        state: 'attached',
+        timeout: 500
+      }).catch(() => {});
+
+      // Step 3: 기본 컨텐츠 로드 확인 (body에 자식 요소 있으면 즉시)
+      await this.page.waitForFunction(() => {
+        return document.body && document.body.childElementCount > 0;
+      }, { timeout: 1000, polling: 100 }).catch(() => {});
+
+      // Step 4: networkidle은 짧게만 (최대 2초, 조건 충족 시 즉시)
+      await this.page.waitForLoadState('networkidle', {
+        timeout: Math.min(timeout, 2000)
+      }).catch(() => {});
+
+      this.emitLog('system', { message: `Page ready (smart wait completed)`});
     } catch (e) {
-      this.emitLog('system', { message: `Page load 'networkidle' timed out after ${timeout}ms, continuing...`});
-      // Timeout은 일반적이므로 에러로 처리하지 않고 로그만 남김
+      // 모든 조건 실패해도 계속 진행
+      this.emitLog('system', { message: `Page load checks completed (some may have timed out)`});
     }
   }
 
@@ -1081,9 +1126,9 @@ export class BrowserController extends EventEmitter {
     if (!this.page) return false;
     try {
       await this.page.mouse.move(x, y);
-      await this.page.waitForTimeout(80);
+      await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       await this.page.mouse.click(x, y, { delay: 50 });
-      await this.page.waitForTimeout(200);
+      await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       return true;
     } catch (_) {
       return false;
@@ -1215,7 +1260,6 @@ export class BrowserController extends EventEmitter {
 
         const ok = await this.clickViewport(cx, cy);
         if (ok) clicked++;
-        await this.page.waitForTimeout(200);
       }
 
       this.emitLog('system', `[ClickGridByCoordinates] ✓ Successfully clicked ${clicked}/${indices.length} tiles via coordinates`);
@@ -1490,7 +1534,6 @@ export class BrowserController extends EventEmitter {
         const y = cy;
         const ok = await this.clickViewport(x, y);
         if (ok) clicked++;
-        await this.page!.waitForTimeout(180);
       }
       if (clicked > 0) {
         await this.streamScreenshot('checkbox-left-of-text-clicked');
@@ -2358,7 +2401,8 @@ export class BrowserController extends EventEmitter {
           await this.page.evaluate((vh) => {
             window.scrollBy(0, vh);
           }, viewportHeight);
-          await this.page.waitForTimeout(300); // 0.3s delay between scrolls
+          // 조건 기반 대기: 스크롤 완료되면 즉시 (requestAnimationFrame)
+          await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         }
 
         // Scroll remaining fraction
@@ -2366,7 +2410,7 @@ export class BrowserController extends EventEmitter {
           await this.page.evaluate((px) => {
             window.scrollBy(0, px);
           }, Math.round(viewportHeight * remainingScroll));
-          await this.page.waitForTimeout(300);
+          await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         }
       } else {
         // Single scroll less than 1 page
@@ -2374,7 +2418,7 @@ export class BrowserController extends EventEmitter {
         await this.page.evaluate((px) => {
           window.scrollBy(0, px);
         }, pixels);
-        await this.page.waitForTimeout(300);
+        await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       }
 
       await this.streamScreenshot('after-scroll-down');
@@ -2415,7 +2459,7 @@ export class BrowserController extends EventEmitter {
           await this.page.evaluate((vh) => {
             window.scrollBy(0, -vh);
           }, viewportHeight);
-          await this.page.waitForTimeout(300);
+          await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         }
 
         // Scroll remaining fraction
@@ -2423,7 +2467,7 @@ export class BrowserController extends EventEmitter {
           await this.page.evaluate((px) => {
             window.scrollBy(0, -px);
           }, Math.round(viewportHeight * remainingScroll));
-          await this.page.waitForTimeout(300);
+          await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         }
       } else {
         // Single scroll less than 1 page
@@ -2431,7 +2475,7 @@ export class BrowserController extends EventEmitter {
         await this.page.evaluate((px) => {
           window.scrollBy(0, -px);
         }, pixels);
-        await this.page.waitForTimeout(300);
+        await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       }
 
       await this.streamScreenshot('after-scroll-up');
@@ -2459,7 +2503,7 @@ export class BrowserController extends EventEmitter {
         window.scrollTo(0, 0);
       });
 
-      await this.page.waitForTimeout(300);
+      await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       await this.streamScreenshot('after-scroll-top');
 
       this.emitLog('system', { message: '[Scroll] Successfully scrolled to top' });
@@ -2486,7 +2530,7 @@ export class BrowserController extends EventEmitter {
         window.scrollTo(0, document.body.scrollHeight);
       });
 
-      await this.page.waitForTimeout(300);
+      await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
       await this.streamScreenshot('after-scroll-bottom');
 
       this.emitLog('system', { message: '[Scroll] Successfully scrolled to bottom' });
@@ -2526,7 +2570,7 @@ export class BrowserController extends EventEmitter {
 
         if (handle) {
           await handle.scrollIntoViewIfNeeded();
-          await this.page.waitForTimeout(300);
+          await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
           await this.streamScreenshot(`after-scroll-to-element-${index}`);
           this.emitLog('system', { message: `[Scroll] Successfully scrolled to element ${index}` });
           return true;
@@ -2538,7 +2582,7 @@ export class BrowserController extends EventEmitter {
           window.scrollTo(0, y - window.innerHeight / 2);
         }, element.coordinates.y);
 
-        await this.page.waitForTimeout(300);
+        await this.page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
         await this.streamScreenshot(`after-scroll-to-element-${index}-coords`);
         this.emitLog('system', { message: `[Scroll] Scrolled to element ${index} by coordinates` });
         return true;

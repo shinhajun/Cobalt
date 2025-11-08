@@ -945,35 +945,25 @@ Choose the appropriate tool now.`;
       tools
     );
 
-    console.log('[Electron] Task analysis response:', JSON.stringify(response));
-
     // Check if tool was called
     if (response.toolCalls && response.toolCalls.length > 0) {
       const toolCall = response.toolCalls[0];
       const toolName = toolCall.function.name;
       const toolArgs = JSON.parse(toolCall.function.arguments);
 
-      console.log('[Electron] ✅ Tool selected:', toolName, 'Args:', toolArgs);
-
       if (toolName === 'answer_directly') {
-        console.log('[Electron] 💬 Returning CHAT type');
         return {
           taskType: 'chat',
           reason: 'AI chose to answer directly',
           response: toolArgs.response
         };
       } else if (toolName === 'needs_browser') {
-        console.log('[Electron] 🌐 Returning BROWSER type');
         return {
           taskType: 'browser',
           reason: toolArgs.reason || 'Needs browser automation'
         };
       }
     }
-
-    // Fallback: if no tool call, treat as CHAT (direct answer) to avoid opening browser unnecessarily
-    console.log('[Electron] ⚠️ NO TOOL CALL detected - Defaulting to CHAT mode');
-    console.log('[Electron] Response content:', response.content);
 
     // LLM이 직접 답변한 경우 (tool 사용 안 함)
     return {
@@ -1025,12 +1015,8 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
         try {
           browserViewCookies = await browserView.webContents.session.cookies.get({});
           console.log('[Hybrid] Retrieved', browserViewCookies.length, 'cookies from BrowserView');
-
-          // 쿠키 동기화 설정 확인
           if (settings && settings.syncCookies) {
-            console.log('[Hybrid] ✅ Cookie sync is ENABLED - Login session will be maintained');
-          } else {
-            console.log('[Hybrid] ⚠️ Cookie sync is DISABLED - AI will not be logged in');
+            console.log('[Hybrid] Cookie sync enabled');
           }
         } catch (error) {
           console.error('[Hybrid] Failed to get BrowserView cookies:', error);
