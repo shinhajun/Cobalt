@@ -151,6 +151,54 @@ export interface AgentLogEvent extends BaseEvent {
 }
 
 // ============================================================================
+// Watchdog Events
+// ============================================================================
+
+export interface BrowserCrashEvent extends BaseEvent {
+  type: 'browser_crash';
+  tabId: string;
+  errorMessage?: string;
+}
+
+export interface BrowserCrashRecoveredEvent extends BaseEvent {
+  type: 'browser_crash_recovered';
+  tabId: string;
+  attemptNumber: number;
+}
+
+export interface PermissionRequestEvent extends BaseEvent {
+  type: 'permission_request';
+  permission: string; // 'geolocation' | 'notifications' | 'camera' | 'microphone'
+  granted: boolean;
+}
+
+export interface PopupDetectedEvent extends BaseEvent {
+  type: 'popup_detected';
+  url: string;
+  blocked: boolean;
+}
+
+export interface SecurityWarningEvent extends BaseEvent {
+  type: 'security_warning';
+  warningType: string; // 'ssl' | 'phishing' | 'malware'
+  bypassed: boolean;
+}
+
+export interface DOMStateUpdatedEvent extends BaseEvent {
+  type: 'dom_state_updated';
+  elementCount: number;
+  timing: Record<string, number>;
+}
+
+export interface NetworkRequestEvent extends BaseEvent {
+  type: 'network_request';
+  url: string;
+  method: string;
+  status?: number;
+  pending: boolean;
+}
+
+// ============================================================================
 // Union Type
 // ============================================================================
 
@@ -172,7 +220,14 @@ export type BrowserEvent =
   | FileDownloadedEvent
   | AgentFocusChangedEvent
   | ScreenshotEvent
-  | AgentLogEvent;
+  | AgentLogEvent
+  | BrowserCrashEvent
+  | BrowserCrashRecoveredEvent
+  | PermissionRequestEvent
+  | PopupDetectedEvent
+  | SecurityWarningEvent
+  | DOMStateUpdatedEvent
+  | NetworkRequestEvent;
 
 // ============================================================================
 // Event Type Names (for type-safe event emission)
@@ -197,6 +252,14 @@ export const BrowserEventTypes = {
   AGENT_FOCUS_CHANGED: 'agent_focus_changed',
   SCREENSHOT: 'screenshot',
   AGENT_LOG: 'agent_log',
+  // Watchdog Events
+  BROWSER_CRASH: 'browser_crash',
+  BROWSER_CRASH_RECOVERED: 'browser_crash_recovered',
+  PERMISSION_REQUEST: 'permission_request',
+  POPUP_DETECTED: 'popup_detected',
+  SECURITY_WARNING: 'security_warning',
+  DOM_STATE_UPDATED: 'dom_state_updated',
+  NETWORK_REQUEST: 'network_request',
 } as const;
 
 export type BrowserEventType = typeof BrowserEventTypes[keyof typeof BrowserEventTypes];

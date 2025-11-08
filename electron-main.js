@@ -66,6 +66,25 @@ function createWindow() {
   // Toolbar UI 로드 (상단 주소창 + Chat UI)
   mainWindow.loadFile(path.join(__dirname, 'browser-toolbar.html'));
 
+  // Handle new window requests for initial view (same as createBrowserViewForTab)
+  browserView.webContents.setWindowOpenHandler(({ url }) => {
+    console.log('[Electron] New window requested from initial view:', url);
+
+    // Create new tab for the URL
+    const newTabId = Date.now(); // Use timestamp as unique tab ID
+
+    // Notify toolbar to create new tab with this URL
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('create-new-tab', {
+        tabId: newTabId,
+        url: url
+      });
+    }
+
+    // Prevent default window.open behavior
+    return { action: 'deny' };
+  });
+
   // BrowserView URL 변경 시 toolbar에 알림
   browserView.webContents.on('did-navigate', () => {
     const url = browserView.webContents.getURL();
@@ -666,6 +685,25 @@ function createBrowserViewForTab(tabId) {
     }
   });
 
+  // Handle new window requests (target="_blank", window.open, etc.)
+  newBrowserView.webContents.setWindowOpenHandler(({ url }) => {
+    console.log('[Electron] New window requested:', url);
+
+    // Create new tab for the URL
+    const newTabId = Date.now(); // Use timestamp as unique tab ID
+
+    // Notify toolbar to create new tab with this URL
+    if (mainWindow && mainWindow.webContents) {
+      mainWindow.webContents.send('create-new-tab', {
+        tabId: newTabId,
+        url: url
+      });
+    }
+
+    // Prevent default window.open behavior
+    return { action: 'deny' };
+  });
+
   // Inject text selection popup script
   newBrowserView.webContents.on('did-finish-load', () => {
     // Copy the same injection script from original browserView
@@ -1116,6 +1154,7 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                                 display: flex;
                                 align-items: center;
                                 justify-content: center;
+                                padding: 40px;
                               }
                               @keyframes gradient {
                                 0% { background-position: 0% 50%; }
@@ -1124,30 +1163,57 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                               }
                               #__ai_content {
                                 background: white;
-                                border-radius: 16px;
+                                border-radius: 12px;
                                 box-shadow: 0 30px 90px rgba(0,0,0,0.4);
                                 overflow: hidden;
-                                max-width: 90%;
-                                max-height: 90%;
+                                max-width: 92%;
+                                max-height: 92%;
+                                display: flex;
+                                flex-direction: column;
                               }
                               #__ai_header {
-                                background: #667eea;
-                                color: white;
-                                padding: 16px 24px;
-                                text-align: center;
-                                font-family: -apple-system, sans-serif;
-                                font-weight: 600;
-                                font-size: 18px;
+                                background: rgba(246, 246, 246, 0.98);
+                                padding: 12px 16px;
+                                display: flex;
+                                align-items: center;
+                                gap: 8px;
+                                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                              }
+                              #__ai_dots {
+                                display: flex;
+                                gap: 8px;
+                              }
+                              .dot {
+                                width: 12px;
+                                height: 12px;
+                                border-radius: 50%;
+                                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                              }
+                              .dot-red {
+                                background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
+                              }
+                              .dot-yellow {
+                                background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
+                              }
+                              .dot-green {
+                                background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
                               }
                               #__ai_img {
                                 display: block;
-                                max-width: 100%;
-                                max-height: 70vh;
+                                width: 100%;
+                                max-height: 80vh;
                                 object-fit: contain;
+                                background: white;
                               }
                             </style>
                             <div id="__ai_content">
-                              <div id="__ai_header">🤖 AI is Working</div>
+                              <div id="__ai_header">
+                                <div id="__ai_dots">
+                                  <div class="dot dot-red"></div>
+                                  <div class="dot dot-yellow"></div>
+                                  <div class="dot dot-green"></div>
+                                </div>
+                              </div>
                               <img id="__ai_img" src="" />
                             </div>
                           \`;

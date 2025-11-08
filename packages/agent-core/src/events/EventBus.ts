@@ -3,6 +3,8 @@
  * TypeScript port of Python's bubus EventBus
  */
 
+import { v4 as uuidv4 } from 'uuid';
+
 export type EventHandler<T = any> = (event: T) => void | Promise<void>;
 
 interface EventSubscription {
@@ -10,9 +12,24 @@ interface EventSubscription {
   once: boolean;
 }
 
+export interface EnrichedEvent<T = any> {
+  eventId: string;
+  eventType: string;
+  eventParentId?: string;
+  eventCreatedAt: Date;
+  data: T;
+}
+
 export class EventBus {
   private listeners: Map<string, EventSubscription[]> = new Map();
   private wildcardListeners: EventSubscription[] = [];
+
+  // Event history for debugging and watchdog access
+  public eventHistory: Map<string, EnrichedEvent> = new Map();
+  private maxHistorySize: number = 100;
+
+  // Track current event being processed (for parent/child relationships)
+  private currentEventId?: string;
 
   /**
    * Subscribe to an event
@@ -117,37 +134,59 @@ export class EventBus {
    * @param event - Event data
    */
   async emit<T = any>(eventType: string, event: T): Promise<void> {
-    // Call wildcard listeners first
-    for (let i = this.wildcardListeners.length - 1; i >= 0; i--) {
-      const subscription = this.wildcardListeners[i];
-      try {
-        await subscription.handler(event);
-      } catch (error) {
-        console.error(`[EventBus] Error in wildcard listener for ${eventType}:`, error);
+    // Generate event ID and enrich event
+    const eventId = this.generateEventId();
+    const enrichedEvent: EnrichedEvent<T> = {
+      eventId,
+      eventType,
+      eventParentId: this.currentEventId,
+      eventCreatedAt: new Date(),
+      data: event,
+    };
+
+    // Add to history
+    this.addToHistory(enrichedEvent);
+
+    // Set as current event for child events
+    const previousEventId = this.currentEventId;
+    this.currentEventId = eventId;
+
+    try {
+      // Call wildcard listeners first
+      for (let i = this.wildcardListeners.length - 1; i >= 0; i--) {
+        const subscription = this.wildcardListeners[i];
+        try {
+          await subscription.handler(event);
+        } catch (error) {
+          console.error(`[EventBus] Error in wildcard listener for ${eventType}:`, error);
+        }
+
+        if (subscription.once) {
+          this.wildcardListeners.splice(i, 1);
+        }
       }
 
-      if (subscription.once) {
-        this.wildcardListeners.splice(i, 1);
-      }
-    }
-
-    // Call specific event listeners
-    const subscriptions = this.listeners.get(eventType);
-    if (!subscriptions) {
-      return;
-    }
-
-    for (let i = subscriptions.length - 1; i >= 0; i--) {
-      const subscription = subscriptions[i];
-      try {
-        await subscription.handler(event);
-      } catch (error) {
-        console.error(`[EventBus] Error in listener for ${eventType}:`, error);
+      // Call specific event listeners
+      const subscriptions = this.listeners.get(eventType);
+      if (!subscriptions) {
+        return;
       }
 
-      if (subscription.once) {
-        subscriptions.splice(i, 1);
+      for (let i = subscriptions.length - 1; i >= 0; i--) {
+        const subscription = subscriptions[i];
+        try {
+          await subscription.handler(event);
+        } catch (error) {
+          console.error(`[EventBus] Error in listener for ${eventType}:`, error);
+        }
+
+        if (subscription.once) {
+          subscriptions.splice(i, 1);
+        }
       }
+    } finally {
+      // Restore previous event ID
+      this.currentEventId = previousEventId;
     }
   }
 
@@ -235,5 +274,64 @@ export class EventBus {
       return this.wildcardListeners.length;
     }
     return this.listeners.get(eventType)?.length || 0;
+  }
+
+  /**
+   * Generate a unique event ID
+   */
+  private generateEventId(): string {
+    return uuidv4();
+  }
+
+  /**
+   * Add event to history with size limit
+   */
+  private addToHistory(event: EnrichedEvent): void {
+    this.eventHistory.set(event.eventId, event);
+
+    // Limit history size (remove oldest)
+    if (this.eventHistory.size > this.maxHistorySize) {
+      const oldestKey = this.eventHistory.keys().next().value;
+      if (oldestKey) {
+        this.eventHistory.delete(oldestKey);
+      }
+    }
+  }
+
+  /**
+   * Get recent events (most recent first)
+   */
+  getRecentEvents(limit: number = 10): EnrichedEvent[] {
+    const events = Array.from(this.eventHistory.values());
+    return events
+      .sort((a, b) => b.eventCreatedAt.getTime() - a.eventCreatedAt.getTime())
+      .slice(0, limit);
+  }
+
+  /**
+   * Get events by type
+   */
+  getEventsByType(eventType: string, limit?: number): EnrichedEvent[] {
+    const events = Array.from(this.eventHistory.values()).filter(
+      (e) => e.eventType === eventType
+    );
+    const sorted = events.sort(
+      (a, b) => b.eventCreatedAt.getTime() - a.eventCreatedAt.getTime()
+    );
+    return limit ? sorted.slice(0, limit) : sorted;
+  }
+
+  /**
+   * Clear event history
+   */
+  clearHistory(): void {
+    this.eventHistory.clear();
+  }
+
+  /**
+   * Set maximum history size
+   */
+  setMaxHistorySize(size: number): void {
+    this.maxHistorySize = size;
   }
 }

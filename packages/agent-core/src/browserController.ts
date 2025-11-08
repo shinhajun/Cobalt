@@ -19,6 +19,8 @@ import {
   AgentLogEvent,
 } from './events/browserEvents.js';
 import { BrowserProfile } from './browser/BrowserProfile.js';
+import { BaseWatchdog, createDefaultWatchdogs, destroyWatchdogs } from './watchdogs/index.js';
+import { BrowserError, ElementNotFoundError } from './errors/index.js';
 
 export interface BrowserStateSummary {
   url: string;
@@ -53,6 +55,14 @@ export class BrowserController {
 
   // EventBus for browser-use style events
   public eventBus: EventBus;
+
+  // Watchdogs for auto-handling browser events
+  private watchdogs: BaseWatchdog[] = [];
+
+  // DOM state cache
+  private cachedDOMState: SerializedDOMState | null = null;
+  private cacheTimestamp: number = 0;
+  private readonly CACHE_TTL = 500; // ms
 
   constructor(debugMode: boolean = false, profile?: BrowserProfile) {
     this.debugMode = debugMode;
@@ -148,6 +158,14 @@ export class BrowserController {
     this.page = await context.newPage();
     this.domService = new DomService(this.page);
 
+    // Initialize watchdogs
+    try {
+      this.watchdogs = await createDefaultWatchdogs(this.eventBus, this);
+      console.log('[BrowserController] Watchdogs initialized:', this.watchdogs.map(w => w.getName()));
+    } catch (error: any) {
+      console.error('[BrowserController] Failed to initialize watchdogs:', error.message);
+    }
+
     // Emit launch result
     await this.eventBus.emit(BrowserEventTypes.BROWSER_LAUNCH_RESULT, {
       type: 'browser_launch_result',
@@ -159,6 +177,17 @@ export class BrowserController {
   }
 
   async close(): Promise<void> {
+    // Destroy watchdogs first
+    if (this.watchdogs.length > 0) {
+      try {
+        await destroyWatchdogs(this.watchdogs);
+        console.log('[BrowserController] Watchdogs destroyed');
+      } catch (error: any) {
+        console.error('[BrowserController] Failed to destroy watchdogs:', error.message);
+      }
+      this.watchdogs = [];
+    }
+
     if (this.context) {
       await this.context.close();
     }

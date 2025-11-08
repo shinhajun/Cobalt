@@ -891,6 +891,69 @@
       }, 300);
     });
 
+    // Handle tab-switched event from main process
+    ipcRenderer.on('tab-switched', (event, { tabId }) => {
+      console.log('[Toolbar] Tab switched event received, tabId:', tabId);
+
+      // Update current tab ID
+      currentTabId = tabId;
+
+      // Update tab UI - remove active from all tabs, add to current
+      document.querySelectorAll('.tab').forEach(tab => {
+        const tabIdAttr = parseInt(tab.getAttribute('data-tab-id'));
+        if (tabIdAttr === tabId) {
+          tab.classList.add('active');
+          console.log('[Toolbar] Set tab', tabId, 'as active');
+        } else {
+          tab.classList.remove('active');
+        }
+      });
+    });
+
+    // Handle create-new-tab event from main process (when user clicks links with target="_blank")
+    ipcRenderer.on('create-new-tab', (event, { tabId, url }) => {
+      console.log('[Toolbar] Create new tab event received, tabId:', tabId, 'url:', url);
+
+      // Check if tab already exists
+      const existingTab = tabs.find(t => t.id === tabId);
+      if (existingTab) {
+        console.log('[Toolbar] Tab already exists, switching to it');
+        switchTab(tabId);
+        return;
+      }
+
+      // Create new tab with the URL
+      tabs.push({ id: tabId, title: 'Loading...', url: url, favicon: defaultFavicon });
+      console.log('[Toolbar] Tab added to array. Total tabs:', tabs.length);
+
+      const tabElement = document.createElement('div');
+      tabElement.className = 'tab';
+      tabElement.setAttribute('data-tab-id', tabId);
+      tabElement.setAttribute('draggable', 'true');
+      tabElement.innerHTML = `
+        <img class="tab-favicon" id="tab-favicon-${tabId}" src="${defaultFavicon}" alt="">
+        <span class="tab-title" id="tab-title-${tabId}">Loading...</span>
+        <span class="tab-close">×</span>
+      `;
+
+      tabElement.addEventListener('click', (e) => {
+        if (e.target.classList.contains('tab-close')) {
+          closeTab(tabId);
+        } else {
+          switchTab(tabId);
+        }
+      });
+
+      // Setup drag events
+      setupTabDragEvents(tabElement, tabId);
+
+      tabsContainer.insertBefore(tabElement, newTabBtn);
+      console.log('[Toolbar] Tab element added to DOM. DOM tabs count:', document.querySelectorAll('.tab').length);
+
+      // Switch to the new tab and load the URL
+      switchTab(tabId, url);
+    });
+
     // 초기 탭에 드래그 이벤트 설정
     const initialTab = document.querySelector('.tab[data-tab-id="0"]');
     if (initialTab) {
