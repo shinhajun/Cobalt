@@ -22,8 +22,8 @@ import EndNode from './nodes/EndNode';
 
 import { getLayoutedElements, getOptimalDirection } from './layout/AutoLayout';
 
-// Import validation utilities
-const { validateMacroName } = window.require('../../utils/validation');
+// Import validation utilities from window global (loaded via script tag)
+const { validateMacroName } = window.MacroValidation || {};
 
 const { ipcRenderer } = window.require('electron');
 
