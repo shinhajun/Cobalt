@@ -23,7 +23,12 @@ import EndNode from './nodes/EndNode';
 import { getLayoutedElements, getOptimalDirection } from './layout/AutoLayout';
 
 // Import validation utilities from window global (loaded via script tag)
-const { validateMacroName } = window.MacroValidation || {};
+const validateMacroName = (window.MacroValidation && window.MacroValidation.validateMacroName) || ((name) => {
+  // Fallback validation if script not loaded
+  if (!name || name.trim().length < 3) return 'Name must be at least 3 characters';
+  if (name.trim().length > 100) return 'Name must be less than 100 characters';
+  return null;
+});
 
 const { ipcRenderer } = window.require('electron');
 
@@ -562,15 +567,18 @@ const MacroFlowViewer = ({ macroData }) => {
                 value={macroName}
                 onChange={handleNameChange}
                 onKeyDown={(e) => {
-                  e.stopPropagation(); // Prevent React Flow from capturing keyboard events
+                  // Only handle special keys
                   if (e.key === 'Enter' && !nameError) {
+                    e.preventDefault();
+                    e.stopPropagation();
                     confirmSave();
                   } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    e.stopPropagation();
                     setShowSaveModal(false);
                   }
+                  // Let normal typing through - don't stopPropagation
                 }}
-                onKeyPress={(e) => e.stopPropagation()}
-                onKeyUp={(e) => e.stopPropagation()}
                 placeholder="Enter macro name (3-100 characters)"
                 autoFocus
                 className={nameError ? 'input-error' : ''}

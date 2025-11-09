@@ -2528,8 +2528,17 @@ ipcMain.handle('save-macro', async (event, macroData) => {
 
     console.log('[Electron] Macro saved successfully:', macroData.id);
 
-    // Notify renderer that macro was saved
-    mainWindow.webContents.send('macro-saved', { macroId: macroData.id });
+    // Notify all BrowserViews that macro was saved (for cobalt-home pages)
+    browserViews.forEach((view, tabId) => {
+      if (view && view.webContents && !view.webContents.isDestroyed()) {
+        view.webContents.send('macro-saved', { macroId: macroData.id });
+      }
+    });
+
+    // Also notify mainWindow
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('macro-saved', { macroId: macroData.id });
+    }
 
     return { success: true, id: macroData.id };
   } catch (error) {

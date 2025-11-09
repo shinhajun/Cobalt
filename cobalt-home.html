@@ -361,6 +361,11 @@
         deleteMacro(macro.id, macro.name);
       });
 
+      // Click card to open flowchart (not run)
+      card.addEventListener('click', () => {
+        editMacro(macro.id);
+      });
+
       return card;
     }
 
