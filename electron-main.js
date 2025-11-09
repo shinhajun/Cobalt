@@ -31,11 +31,13 @@ let browserView = null; // Current active BrowserView
 let browserViews = new Map(); // Map of tabId -> BrowserView
 let currentTabId = 0;
 let aiWorkingTabId = null; // AI가 작업 중인 탭 ID (탭 격리용)
+let macroWorkingTabId = null; // 매크로 작업 중인 탭 ID (탭 격리용)
 let browserController = null;
 let llmService = null;
 let isTaskRunning = false;
 let stopRequested = false;
-let screenshotInterval = null; // Auto-screenshot timer
+let screenshotInterval = null; // Auto-screenshot timer (AI)
+let macroScreenshotInterval = null; // Auto-screenshot timer (Macro)
 let chatVisible = false; // Chat visibility state - 기본값 false로 변경
 let currentMacroExecutor = null; // Current running macro executor
 
@@ -197,6 +199,39 @@ class OverlayManager {
       console.error(`[OverlayManager] Failed to remove ${type} overlay:`, err.message);
     }
   }
+}
+
+/**
+ * Cleanup macro execution - unified cleanup for macro end/stop/error
+ * Clears interval, removes overlay, resets state
+ */
+function cleanupMacroExecution() {
+  // Stop screenshot interval
+  if (macroScreenshotInterval) {
+    clearInterval(macroScreenshotInterval);
+    macroScreenshotInterval = null;
+    console.log('[Macro] Auto-screenshot streaming stopped');
+  }
+
+  // Store tab ID before clearing
+  const completedTabId = macroWorkingTabId;
+
+  // Clear macro working tab
+  if (completedTabId !== null) {
+    console.log('[Macro] Execution ended, releasing tab:', completedTabId);
+  }
+  macroWorkingTabId = null;
+
+  // Remove overlay from macro working tab
+  if (completedTabId !== null) {
+    const completedTabView = browserViews.get(completedTabId);
+    if (completedTabView && completedTabView.webContents && !completedTabView.webContents.isDestroyed()) {
+      OverlayManager.remove(completedTabView.webContents, 'macro');
+    }
+  }
+
+  // Clear executor
+  currentMacroExecutor = null;
 }
 
 // Note: We do not reserve extra overlay space for the omnibox dropdown; it overlays visually.
@@ -1138,39 +1173,6 @@ function updateBrowserViewBounds() {
     height: height - topOffset
   });
   // Do not resize omnibox here; toolbar drives its position via IPC
-}
-
-// Macro Execution Overlay Functions
-/**
- * Show macro execution overlay (wrapper for OverlayManager)
- * @deprecated Use OverlayManager.inject() directly
- */
-async function showMacroExecutionOverlay(macroName, progress, description, screenshot) {
-  if (!browserView || !browserView.webContents) {
-    console.log('[Macro Overlay] BrowserView not available');
-    return;
-  }
-
-  await OverlayManager.inject(browserView.webContents, {
-    type: 'macro',
-    screenshot,
-    title: macroName || 'Macro Running',
-    progress: progress || 0,
-    description: description || ''
-  });
-}
-
-/**
- * Remove macro execution overlay (wrapper for OverlayManager)
- * @deprecated Use OverlayManager.remove() directly
- */
-function removeMacroExecutionOverlay() {
-  if (!browserView || !browserView.webContents) {
-    console.log('[Macro Overlay] BrowserView not available');
-    return;
-  }
-
-  OverlayManager.remove(browserView.webContents, 'macro');
 }
 
 // IPC: Handle translation request from BrowserView
@@ -2648,14 +2650,15 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
     const MacroExecutor = require('./macro/execution/MacroExecutor');
     const executor = new MacroExecutor(browserView, mainWindow, llmService);
 
-    // Store current executor
+    // Store current executor and track working tab
     currentMacroExecutor = executor;
+    macroWorkingTabId = currentTabId;
+    console.log('[Macro] Started on tab:', macroWorkingTabId);
 
     // Forward all executor events to renderer process
     executor.on('macro-started', (data) => {
       mainWindow.webContents.send('macro-started', data);
-      // Show macro execution overlay
-      showMacroExecutionOverlay(macroData.name, 0, '', null);
+      // Overlay now handled by auto-screenshot interval
     });
 
     executor.on('step-start', (data) => {
@@ -2664,42 +2667,66 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
 
     executor.on('step-complete', (data) => {
       mainWindow.webContents.send('macro-step-complete', data);
-      // Update overlay with progress
-      const progress = parseFloat(data.progress) || 0;
-      const description = data.description || `Step ${data.stepNumber}`;
-      showMacroExecutionOverlay(macroData.name, progress, description, null);
+      // Overlay now handled by auto-screenshot interval
     });
 
     executor.on('step-error', (data) => {
       mainWindow.webContents.send('macro-step-error', data);
     });
 
-    executor.on('screenshot', (data) => {
-      mainWindow.webContents.send('macro-screenshot', data);
-      // Update overlay with screenshot
-      const progress = 0; // Progress will be updated by step-complete
-      const description = `Step ${data.stepNumber}`;
-      showMacroExecutionOverlay(macroData.name, progress, description, data.screenshot);
-    });
+    // Note: Screenshot event removed - now using auto-screenshot interval (same as AI)
 
     executor.on('macro-complete', (data) => {
       mainWindow.webContents.send('macro-complete', data);
-      // Remove overlay
-      removeMacroExecutionOverlay();
-      currentMacroExecutor = null; // Clear executor after completion
+      cleanupMacroExecution();
     });
 
     executor.on('macro-stopped', (data) => {
       mainWindow.webContents.send('macro-stopped', data);
-      // Remove overlay
-      removeMacroExecutionOverlay();
-      currentMacroExecutor = null; // Clear executor after stop
+      cleanupMacroExecution();
     });
 
     executor.on('macro-error', (data) => {
       mainWindow.webContents.send('macro-error', data);
-      currentMacroExecutor = null; // Clear executor after error
+      cleanupMacroExecution();
     });
+
+    // === AUTO SCREENSHOT STREAMING (same as AI) ===
+    // Capture screenshots every 1 second and stream to Chat UI + BrowserView overlay
+    macroScreenshotInterval = setInterval(async () => {
+      if (macroWorkingTabId !== null && currentMacroExecutor && !currentMacroExecutor.stopped) {
+        try {
+          const macroTabView = browserViews.get(macroWorkingTabId);
+          if (macroTabView && macroTabView.webContents && !macroTabView.webContents.isDestroyed()) {
+            const image = await macroTabView.webContents.capturePage();
+            const buffer = image.toPNG();
+            const screenshotBase64 = buffer.toString('base64');
+            const screenshotDataURL = `data:image/png;base64,${screenshotBase64}`;
+            const currentUrl = macroTabView.webContents.getURL();
+
+            // Send screenshot to Chat UI (mainWindow) with tabId
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('macro-screenshot', {
+                screenshot: screenshotDataURL,
+                timestamp: Date.now(),
+                url: currentUrl,
+                tabId: macroWorkingTabId
+              });
+            }
+
+            // Inject overlay to macro working tab with screenshot
+            OverlayManager.inject(macroTabView.webContents, {
+              type: 'macro',
+              screenshot: screenshotDataURL
+            });
+          }
+        } catch (error) {
+          console.error('[Macro] Screenshot capture failed:', error);
+        }
+      }
+    }, 1000); // Every 1 second, same as AI
+
+    console.log('[Macro] Auto-screenshot streaming started (1fps)');
 
     const result = await executor.execute(macroData).catch(err => {
       console.error('[Electron] Executor promise rejection:', err);
@@ -2709,7 +2736,7 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
     return { success: true, result: result };
   } catch (error) {
     console.error('[Electron] Failed to execute macro:', error);
-    currentMacroExecutor = null; // Clear executor on error
+    cleanupMacroExecution(); // Use unified cleanup on error
     return { success: false, error: error.message };
   }
 });
