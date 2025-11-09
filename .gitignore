@@ -1,26 +1,67 @@
-# Firebase service account key
-packages/server/config/ai-agent-cad35-firebase-adminsdk-fbsvc-e97b790820.json
-ai-agent/packages/server/config/*.json
+# API Keys and Environment Variables
+.env
+*.env
+.env.local
+.env.production
 
 # Node.js
 node_modules/
 dist/
 npm-debug.log
 yarn-error.log
-.env
-*.env
+package-lock.json
+pnpm-lock.yaml
 
 # TypeScript
 *.tsbuildinfo
 
-# Debug files with sensitive data
-debug/storageState.json
+# Debug and Development Files
+debug/
+*.log
+*.png
+*.jpg
+*.jpeg
 
-# OS generated files
+# Runtime Data and Session Files
+output/
+session/
+storage/
+cache/
+*.db
+*.sqlite
+storageState.json
+
+# Build Output
+build/
+dist/
+*.dmg
+*.exe
+*.snap
+
+# Firebase and Cloud Credentials
+packages/server/config/*.json
+*firebase*.json
+*credentials*.json
+*service-account*.json
+
+# User Data
+autofill-profiles.json
+browsing-history.json
+macros/*.json
+
+# OS Generated Files
 .DS_Store
 .DS_Store?
 ._*
 .Spotlight-V100
 .Trashes
 ehthumbs.db
-Thumbs.db 
+Thumbs.db
+desktop.ini
+
+# IDE and Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~ 
