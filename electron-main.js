@@ -68,7 +68,7 @@ class OverlayManager {
 
     const { type, screenshot, title = '', progress = 0, description = '' } = options;
     const overlayId = type === 'ai' ? '__ai_overlay' : '__macro_overlay';
-    const showProgress = type === 'macro';
+    const showProgress = false; // Use same clean design for both AI and Macro
 
     // Check if document is ready
     try {
