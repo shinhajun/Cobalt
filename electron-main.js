@@ -45,6 +45,269 @@ let eventCollector = null;
 // Map of window ID to editing macro (allows multiple flowchart windows)
 const currentEditingMacros = new Map();
 
+/**
+ * OverlayManager - Consolidated overlay system for AI and Macro execution
+ * Replaces duplicate AI/Macro overlay code with a single unified implementation
+ */
+class OverlayManager {
+  /**
+   * Inject execution overlay into a webContents
+   * @param {Electron.WebContents} webContents - Target webContents to inject into
+   * @param {Object} options - Configuration options
+   * @param {string} options.type - 'ai' or 'macro'
+   * @param {string} options.screenshot - Screenshot data URL
+   * @param {string} [options.title] - Overlay title (macro only)
+   * @param {number} [options.progress] - Progress percentage 0-100 (macro only)
+   * @param {string} [options.description] - Progress description (macro only)
+   */
+  static async inject(webContents, options) {
+    if (!webContents || webContents.isDestroyed()) {
+      console.log('[OverlayManager] WebContents not available');
+      return;
+    }
+
+    const { type, screenshot, title = '', progress = 0, description = '' } = options;
+    const overlayId = type === 'ai' ? '__ai_overlay' : '__macro_overlay';
+    const showProgress = type === 'macro';
+
+    // Check if document is ready
+    try {
+      const hasDocument = await webContents.executeJavaScript(
+        'typeof document !== "undefined" && document.readyState !== "loading"'
+      ).catch(() => false);
+
+      if (!hasDocument) {
+        console.log('[OverlayManager] Document not ready, retrying...');
+        setTimeout(() => OverlayManager.inject(webContents, options), 100);
+        return;
+      }
+    } catch (err) {
+      console.error('[OverlayManager] Failed to check document readiness:', err.message);
+      return;
+    }
+
+    try {
+      await webContents.executeJavaScript(`
+        (function(config) {
+          let overlay = document.getElementById('${overlayId}');
+          if (!overlay) {
+            // Create overlay first time
+            overlay = document.createElement('div');
+            overlay.id = '${overlayId}';
+            overlay.innerHTML = \`
+              <style>
+                #${overlayId} {
+                  position: fixed;
+                  top: 0;
+                  left: 0;
+                  width: 100vw;
+                  height: 100vh;
+                  background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
+                  background-size: 400% 400%;
+                  animation: gradient 20s ease infinite;
+                  z-index: 999999;
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  padding: 0;
+                }
+                @keyframes gradient {
+                  0% { background-position: 0% 50%; }
+                  50% { background-position: 100% 50%; }
+                  100% { background-position: 0% 50%; }
+                }
+                #${overlayId}_content {
+                  background: white;
+                  border-radius: 12px;
+                  box-shadow: 0 30px 90px rgba(0,0,0,0.4);
+                  overflow: hidden;
+                  ${showProgress ? 'width: 85vw; height: 85vh;' : 'max-width: 85vw; max-height: 85vh;'}
+                  display: flex;
+                  flex-direction: column;
+                  align-items: center;
+                  justify-content: center;
+                }
+                #${overlayId}_header {
+                  background: rgba(246, 246, 246, 0.98);
+                  padding: 12px 16px;
+                  display: flex;
+                  align-items: center;
+                  gap: ${showProgress ? '12px' : '8px'};
+                  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+                  width: 100%;
+                  flex-shrink: 0;
+                }
+                #${overlayId}_dots {
+                  display: flex;
+                  gap: 8px;
+                }
+                .${overlayId}_dot {
+                  width: 12px;
+                  height: 12px;
+                  border-radius: 50%;
+                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+                }
+                .${overlayId}_dot-red {
+                  background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
+                }
+                .${overlayId}_dot-yellow {
+                  background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
+                }
+                .${overlayId}_dot-green {
+                  background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
+                }
+                ${showProgress ? \`
+                #${overlayId}_title {
+                  flex: 1;
+                  font-size: 14px;
+                  font-weight: 600;
+                  color: #333;
+                }
+                \` : ''}
+                #${overlayId}_img {
+                  display: block;
+                  ${showProgress ? 'width: 100%; height: 100%; flex: 1;' : 'max-width: 85vw; max-height: calc(85vh - 50px); width: auto; height: auto;'}
+                  object-fit: contain;
+                  object-position: center;
+                  background: white;
+                }
+                ${showProgress ? \`
+                #${overlayId}_footer {
+                  background: rgba(246, 246, 246, 0.98);
+                  padding: 16px;
+                  border-top: 1px solid rgba(0, 0, 0, 0.1);
+                  width: 100%;
+                  flex-shrink: 0;
+                }
+                #${overlayId}_progress_container {
+                  margin-bottom: 8px;
+                }
+                #${overlayId}_progress_bar {
+                  width: 100%;
+                  height: 6px;
+                  background: rgba(102, 126, 234, 0.2);
+                  border-radius: 3px;
+                  overflow: hidden;
+                }
+                #${overlayId}_progress_fill {
+                  height: 100%;
+                  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+                  transition: width 0.3s ease;
+                  width: 0%;
+                }
+                #${overlayId}_status {
+                  display: flex;
+                  justify-content: space-between;
+                  align-items: center;
+                  margin-top: 8px;
+                }
+                #${overlayId}_description {
+                  font-size: 13px;
+                  color: #666;
+                }
+                #${overlayId}_percentage {
+                  font-size: 13px;
+                  font-weight: 600;
+                  color: #667eea;
+                }
+                \` : ''}
+              </style>
+              <div id="${overlayId}_content">
+                <div id="${overlayId}_header">
+                  <div id="${overlayId}_dots">
+                    <div class="${overlayId}_dot ${overlayId}_dot-red"></div>
+                    <div class="${overlayId}_dot ${overlayId}_dot-yellow"></div>
+                    <div class="${overlayId}_dot ${overlayId}_dot-green"></div>
+                  </div>
+                  ${showProgress ? \`<div id="${overlayId}_title"></div>\` : ''}
+                </div>
+                <img id="${overlayId}_img" src="" />
+                ${showProgress ? \`
+                <div id="${overlayId}_footer">
+                  <div id="${overlayId}_progress_container">
+                    <div id="${overlayId}_progress_bar">
+                      <div id="${overlayId}_progress_fill"></div>
+                    </div>
+                  </div>
+                  <div id="${overlayId}_status">
+                    <div id="${overlayId}_description"></div>
+                    <div id="${overlayId}_percentage">0%</div>
+                  </div>
+                </div>
+                \` : ''}
+              </div>
+            \`;
+            document.body.appendChild(overlay);
+          }
+
+          // Update screenshot
+          const img = document.getElementById('${overlayId}_img');
+          if (img && config.screenshot) {
+            img.src = config.screenshot;
+          }
+
+          ${showProgress ? \`
+          // Update title
+          const titleEl = document.getElementById('${overlayId}_title');
+          if (titleEl && config.title) {
+            titleEl.textContent = config.title;
+          }
+
+          // Update progress
+          const progressFill = document.getElementById('${overlayId}_progress_fill');
+          if (progressFill) {
+            progressFill.style.width = config.progress + '%';
+          }
+
+          // Update description
+          const descEl = document.getElementById('${overlayId}_description');
+          if (descEl && config.description) {
+            descEl.textContent = config.description;
+          }
+
+          // Update percentage
+          const percentEl = document.getElementById('${overlayId}_percentage');
+          if (percentEl) {
+            percentEl.textContent = Math.round(config.progress) + '%';
+          }
+          \` : ''}
+        })(${JSON.stringify({ screenshot, title, progress, description })});
+      `);
+      console.log(\`[OverlayManager] \${type} overlay injected successfully\`);
+    } catch (err) {
+      console.error(\`[OverlayManager] Failed to inject \${type} overlay:\`, err.message);
+    }
+  }
+
+  /**
+   * Remove execution overlay from a webContents
+   * @param {Electron.WebContents} webContents - Target webContents
+   * @param {string} type - 'ai' or 'macro'
+   */
+  static async remove(webContents, type) {
+    if (!webContents || webContents.isDestroyed()) {
+      console.log('[OverlayManager] WebContents not available for removal');
+      return;
+    }
+
+    const overlayId = type === 'ai' ? '__ai_overlay' : '__macro_overlay';
+
+    try {
+      await webContents.executeJavaScript(\`
+        (function() {
+          const overlay = document.getElementById('\${overlayId}');
+          if (overlay) {
+            overlay.remove();
+          }
+        })();
+      \`);
+      console.log(\`[OverlayManager] \${type} overlay removed\`);
+    } catch (err) {
+      console.error(\`[OverlayManager] Failed to remove \${type} overlay:\`, err.message);
+    }
+  }
+}
+
 // Note: We do not reserve extra overlay space for the omnibox dropdown; it overlays visually.
 
 // Omnibox overlay (a small BrowserView rendered above the main BrowserView)
@@ -987,240 +1250,36 @@ function updateBrowserViewBounds() {
 }
 
 // Macro Execution Overlay Functions
+/**
+ * Show macro execution overlay (wrapper for OverlayManager)
+ * @deprecated Use OverlayManager.inject() directly
+ */
 async function showMacroExecutionOverlay(macroName, progress, description, screenshot) {
   if (!browserView || !browserView.webContents) {
     console.log('[Macro Overlay] BrowserView not available');
     return;
   }
 
-  // Check if document is ready for injection
-  try {
-    const hasDocument = await browserView.webContents.executeJavaScript(
-      'typeof document !== "undefined" && document.readyState !== "loading"'
-    ).catch(() => false);
-
-    if (!hasDocument) {
-      console.log('[Macro Overlay] Document not ready, retrying in 100ms...');
-      setTimeout(() => {
-        showMacroExecutionOverlay(macroName, progress, description, screenshot);
-      }, 100);
-      return;
-    }
-  } catch (err) {
-    console.error('[Macro Overlay] Failed to check document readiness:', err.message);
-    return;
-  }
-
-  try {
-    await browserView.webContents.executeJavaScript(`
-      (function(macroName, progress, description, screenshot) {
-        let overlay = document.getElementById('__macro_overlay');
-        if (!overlay) {
-          // Create overlay first time
-          overlay = document.createElement('div');
-          overlay.id = '__macro_overlay';
-          overlay.innerHTML = \`
-            <style>
-              #__macro_overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100vw;
-                height: 100vh;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
-                background-size: 400% 400%;
-                animation: gradient 20s ease infinite;
-                z-index: 999999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                padding: 0;
-              }
-              @keyframes gradient {
-                0% { background-position: 0% 50%; }
-                50% { background-position: 100% 50%; }
-                100% { background-position: 0% 50%; }
-              }
-              #__macro_content {
-                background: white;
-                border-radius: 12px;
-                box-shadow: 0 30px 90px rgba(0,0,0,0.4);
-                overflow: hidden;
-                width: 85vw;
-                height: 85vh;
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-              }
-              #__macro_header {
-                background: rgba(246, 246, 246, 0.98);
-                padding: 12px 16px;
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                width: 100%;
-                flex-shrink: 0;
-              }
-              #__macro_dots {
-                display: flex;
-                gap: 8px;
-              }
-              .dot {
-                width: 12px;
-                height: 12px;
-                border-radius: 50%;
-                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-              }
-              .dot-red {
-                background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
-              }
-              .dot-yellow {
-                background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
-              }
-              .dot-green {
-                background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
-              }
-              #__macro_title {
-                flex: 1;
-                font-size: 14px;
-                font-weight: 600;
-                color: #333;
-              }
-              #__macro_img {
-                display: block;
-                width: 100%;
-                height: 100%;
-                max-width: 100%;
-                max-height: 100%;
-                object-fit: contain;
-                object-position: center;
-                background: white;
-                flex: 1;
-              }
-              #__macro_footer {
-                background: rgba(246, 246, 246, 0.98);
-                padding: 16px;
-                border-top: 1px solid rgba(0, 0, 0, 0.1);
-                width: 100%;
-                flex-shrink: 0;
-              }
-              #__macro_progress_container {
-                margin-bottom: 8px;
-              }
-              #__macro_progress_bar {
-                width: 100%;
-                height: 6px;
-                background: rgba(102, 126, 234, 0.2);
-                border-radius: 3px;
-                overflow: hidden;
-              }
-              #__macro_progress_fill {
-                height: 100%;
-                background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-                transition: width 0.3s ease;
-                width: 0%;
-              }
-              #__macro_status {
-                display: flex;
-                justify-content: space-between;
-                align-items: center;
-                margin-top: 8px;
-              }
-              #__macro_description {
-                font-size: 13px;
-                color: #666;
-              }
-              #__macro_percentage {
-                font-size: 13px;
-                font-weight: 600;
-                color: #667eea;
-              }
-            </style>
-            <div id="__macro_content">
-              <div id="__macro_header">
-                <div id="__macro_dots">
-                  <div class="dot dot-red"></div>
-                  <div class="dot dot-yellow"></div>
-                  <div class="dot dot-green"></div>
-                </div>
-                <div id="__macro_title">Macro Running</div>
-              </div>
-              <img id="__macro_img" src="" />
-              <div id="__macro_footer">
-                <div id="__macro_progress_container">
-                  <div id="__macro_progress_bar">
-                    <div id="__macro_progress_fill"></div>
-                  </div>
-                </div>
-                <div id="__macro_status">
-                  <div id="__macro_description"></div>
-                  <div id="__macro_percentage">0%</div>
-                </div>
-              </div>
-            </div>
-          \`;
-          document.body.appendChild(overlay);
-        }
-
-        // Update title
-        const titleEl = document.getElementById('__macro_title');
-        if (titleEl) {
-          titleEl.textContent = macroName || 'Macro Running';
-        }
-
-        // Update screenshot
-        const img = document.getElementById('__macro_img');
-        if (img && screenshot) {
-          img.src = screenshot;
-        }
-
-        // Update progress
-        const progressFill = document.getElementById('__macro_progress_fill');
-        if (progressFill) {
-          progressFill.style.width = progress + '%';
-        }
-
-        // Update description
-        const descEl = document.getElementById('__macro_description');
-        if (descEl) {
-          descEl.textContent = description || '';
-        }
-
-        // Update percentage
-        const percentEl = document.getElementById('__macro_percentage');
-        if (percentEl) {
-          percentEl.textContent = Math.round(progress) + '%';
-        }
-      })(${JSON.stringify(macroName)}, ${progress}, ${JSON.stringify(description)}, ${JSON.stringify(screenshot)});
-    `);
-    console.log('[Macro Overlay] Overlay injected successfully');
-  } catch (err) {
-    console.error('[Macro Overlay] Failed to inject overlay:', err.message);
-  }
+  await OverlayManager.inject(browserView.webContents, {
+    type: 'macro',
+    screenshot,
+    title: macroName || 'Macro Running',
+    progress: progress || 0,
+    description: description || ''
+  });
 }
 
+/**
+ * Remove macro execution overlay (wrapper for OverlayManager)
+ * @deprecated Use OverlayManager.remove() directly
+ */
 function removeMacroExecutionOverlay() {
   if (!browserView || !browserView.webContents) {
     console.log('[Macro Overlay] BrowserView not available');
     return;
   }
 
-  try {
-    browserView.webContents.executeJavaScript(`
-      (function() {
-        const overlay = document.getElementById('__macro_overlay');
-        if (overlay) {
-          overlay.remove();
-        }
-      })();
-    `).catch((err) => {
-      console.error('[Macro Overlay] Failed to remove overlay:', err.message);
-    });
-  } catch (err) {
-    console.error('[Macro Overlay] Overlay removal error:', err);
-  }
+  OverlayManager.remove(browserView.webContents, 'macro');
 }
 
 // IPC: Handle translation request from BrowserView
@@ -1594,120 +1653,11 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
               // Inject overlay to AI working tab with screenshot
               const aiTabView = browserViews.get(aiWorkingTabId);
               if (aiTabView && aiTabView.webContents && !aiTabView.webContents.isDestroyed()) {
-                // Check if page is ready
-                if (!aiTabView.webContents.isLoading()) {
-                  try {
-                    // Use executeJavaScript with minimal code to update/create overlay
-                    // This approach works better than CSS for dynamic image updates
-                    aiTabView.webContents.executeJavaScript(`
-                      (function(screenshot) {
-                        let overlay = document.getElementById('__ai_overlay');
-                        if (!overlay) {
-                          // Create overlay first time
-                          overlay = document.createElement('div');
-                          overlay.id = '__ai_overlay';
-                          overlay.innerHTML = \`
-                            <style>
-                              #__ai_overlay {
-                                position: fixed;
-                                top: 0;
-                                left: 0;
-                                width: 100vw;
-                                height: 100vh;
-                                background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
-                                background-size: 400% 400%;
-                                animation: gradient 20s ease infinite;
-                                z-index: 999999;
-                                display: flex;
-                                align-items: center;
-                                justify-content: center;
-                                padding: 0;
-                              }
-                              @keyframes gradient {
-                                0% { background-position: 0% 50%; }
-                                50% { background-position: 100% 50%; }
-                                100% { background-position: 0% 50%; }
-                              }
-                              #__ai_content {
-                                background: white;
-                                border-radius: 12px;
-                                box-shadow: 0 30px 90px rgba(0,0,0,0.4);
-                                overflow: hidden;
-                                max-width: 85vw;
-                                max-height: 85vh;
-                                display: flex;
-                                flex-direction: column;
-                                align-items: center;
-                                justify-content: center;
-                              }
-                              #__ai_header {
-                                background: rgba(246, 246, 246, 0.98);
-                                padding: 12px 16px;
-                                display: flex;
-                                align-items: center;
-                                gap: 8px;
-                                border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                                width: 100%;
-                                flex-shrink: 0;
-                              }
-                              #__ai_dots {
-                                display: flex;
-                                gap: 8px;
-                              }
-                              .dot {
-                                width: 12px;
-                                height: 12px;
-                                border-radius: 50%;
-                                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-                              }
-                              .dot-red {
-                                background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
-                              }
-                              .dot-yellow {
-                                background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
-                              }
-                              .dot-green {
-                                background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
-                              }
-                              #__ai_img {
-                                display: block;
-                                max-width: 85vw;
-                                max-height: calc(85vh - 50px);
-                                width: auto;
-                                height: auto;
-                                object-fit: contain;
-                                object-position: center;
-                                background: white;
-                              }
-                            </style>
-                            <div id="__ai_content">
-                              <div id="__ai_header">
-                                <div id="__ai_dots">
-                                  <div class="dot dot-red"></div>
-                                  <div class="dot dot-yellow"></div>
-                                  <div class="dot dot-green"></div>
-                                </div>
-                              </div>
-                              <img id="__ai_img" src="" />
-                            </div>
-                          \`;
-                          document.body.appendChild(overlay);
-                        }
-
-                        // Update screenshot
-                        const img = document.getElementById('__ai_img');
-                        if (img && screenshot) {
-                          img.src = screenshot;
-                        }
-                      })(${JSON.stringify(screenshotDataURL)});
-                    `).then(() => {
-                      console.log('[Hybrid] Overlay with screenshot injected successfully');
-                    }).catch((err) => {
-                      console.error('[Hybrid] Failed to inject overlay:', err.message);
-                    });
-                  } catch (err) {
-                    console.error('[Hybrid] Overlay injection error:', err);
-                  }
+                // Inject AI overlay using OverlayManager
+                OverlayManager.inject(aiTabView.webContents, {
+                  type: 'ai',
+                  screenshot: screenshotDataURL
+                });
                 } else {
                   console.log('[Hybrid] AI tab is still loading, skipping overlay injection');
                 }

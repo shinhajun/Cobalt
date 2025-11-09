@@ -1456,22 +1456,42 @@
       });
     });
 
-    // Forward agent events to chat iframe
-    ipcRenderer.on('agent-started', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'agent-started', data }, '*');
-    });
+    // EventForwarder - Consolidated event forwarding utility
+    class EventForwarder {
+      constructor(targetIframe) {
+        this.iframe = targetIframe;
+        this.registeredEvents = new Set();
+      }
 
-    ipcRenderer.on('agent-log', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'agent-log', data }, '*');
-    });
+      /**
+       * Forward a group of events from IPC to iframe
+       * @param {string} prefix - Event prefix (e.g., 'agent', 'macro')
+       * @param {string[]} events - Event names (e.g., ['started', 'log', 'stopped'])
+       */
+      forwardEventGroup(prefix, events) {
+        events.forEach(event => {
+          const eventName = `${prefix}-${event}`;
+          if (!this.registeredEvents.has(eventName)) {
+            ipcRenderer.on(eventName, (e, data) => {
+              this.iframe.contentWindow.postMessage({ type: eventName, data }, '*');
+            });
+            this.registeredEvents.add(eventName);
+            console.log(`[EventForwarder] Registered: ${eventName}`);
+          }
+        });
+      }
+    }
 
-    ipcRenderer.on('agent-stopped', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'agent-stopped', data }, '*');
-    });
+    // Initialize event forwarder
+    const eventForwarder = new EventForwarder(chatIframe);
 
-    ipcRenderer.on('agent-screenshot', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'agent-screenshot', data }, '*');
-    });
+    // Forward AI agent events
+    eventForwarder.forwardEventGroup('agent', [
+      'started',
+      'log',
+      'stopped',
+      'screenshot'
+    ]);
 
     // Note: Legacy translate-text and ai-edit-text event handlers removed
     // These were unused - actual translation/editing handled via browserview-* IPC channels
@@ -1675,38 +1695,17 @@
     // Macro Execution - Forward to Chat UI
     // ========================================
 
-    // Forward macro events to chat iframe (same as AI agent events)
-    ipcRenderer.on('macro-started', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-started', data }, '*');
-    });
-
-    ipcRenderer.on('macro-step-start', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-step-start', data }, '*');
-    });
-
-    ipcRenderer.on('macro-step-complete', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-step-complete', data }, '*');
-    });
-
-    ipcRenderer.on('macro-step-error', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-step-error', data }, '*');
-    });
-
-    ipcRenderer.on('macro-screenshot', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-screenshot', data }, '*');
-    });
-
-    ipcRenderer.on('macro-complete', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-complete', data }, '*');
-    });
-
-    ipcRenderer.on('macro-stopped', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-stopped', data }, '*');
-    });
-
-    ipcRenderer.on('macro-error', (event, data) => {
-      chatIframe.contentWindow.postMessage({ type: 'macro-error', data }, '*');
-    });
+    // Forward macro events to chat iframe using EventForwarder
+    eventForwarder.forwardEventGroup('macro', [
+      'started',
+      'step-start',
+      'step-complete',
+      'step-error',
+      'screenshot',
+      'complete',
+      'stopped',
+      'error'
+    ]);
 
   </script>
 </body>
