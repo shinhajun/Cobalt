@@ -2386,6 +2386,17 @@ ipcMain.handle('macro-start-recording', async (event, { name }) => {
 
     // Start collecting events from current BrowserView
     if (browserView) {
+      // Capture current URL as first navigation event
+      const currentUrl = browserView.webContents.getURL();
+      if (currentUrl && currentUrl !== 'about:blank') {
+        console.log('[Electron] Recording initial URL:', currentUrl);
+        recordingManager.addEvent({
+          type: 'navigation',
+          url: currentUrl,
+          timestamp: 0 // First event at time 0
+        });
+      }
+
       await eventCollector.startCollecting(browserView);
       console.log('[Electron] Event collector started for current tab');
     } else {
@@ -2684,17 +2695,81 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
 
     executor.on('macro-complete', (data) => {
       mainWindow.webContents.send('macro-complete', data);
+
+      // Keep macro working tab visible (same as AI behavior)
+      const completedTabId = macroWorkingTabId;
+
+      // Cleanup BEFORE switching tabs (to reset macroWorkingTabId)
       cleanupMacroExecution();
+
+      // Switch back to macro working tab to show result
+      if (completedTabId !== null && browserViews.has(completedTabId)) {
+        console.log('[Macro] Switching back to completed tab:', completedTabId);
+
+        // Switch to the tab where macro was executed
+        if (currentTabId !== completedTabId) {
+          // Hide current view
+          if (browserView) {
+            mainWindow.removeBrowserView(browserView);
+          }
+
+          // Show completed tab
+          browserView = browserViews.get(completedTabId);
+          currentTabId = completedTabId;
+          mainWindow.addBrowserView(browserView);
+          updateBrowserViewBounds();
+
+          // Send URL update to toolbar
+          const url = browserView.webContents.getURL();
+          const title = browserView.webContents.getTitle();
+          mainWindow.webContents.send('url-changed', url, title);
+          mainWindow.webContents.send('tab-switched', { tabId: completedTabId });
+        }
+      }
     });
 
     executor.on('macro-stopped', (data) => {
       mainWindow.webContents.send('macro-stopped', data);
+
+      // Keep macro working tab visible
+      const stoppedTabId = macroWorkingTabId;
       cleanupMacroExecution();
+
+      // Switch back to macro working tab
+      if (stoppedTabId !== null && browserViews.has(stoppedTabId) && currentTabId !== stoppedTabId) {
+        console.log('[Macro] Switching back to stopped tab:', stoppedTabId);
+        browserView = browserViews.get(stoppedTabId);
+        currentTabId = stoppedTabId;
+        mainWindow.addBrowserView(browserView);
+        updateBrowserViewBounds();
+
+        const url = browserView.webContents.getURL();
+        const title = browserView.webContents.getTitle();
+        mainWindow.webContents.send('url-changed', url, title);
+        mainWindow.webContents.send('tab-switched', { tabId: stoppedTabId });
+      }
     });
 
     executor.on('macro-error', (data) => {
       mainWindow.webContents.send('macro-error', data);
+
+      // Keep macro working tab visible
+      const errorTabId = macroWorkingTabId;
       cleanupMacroExecution();
+
+      // Switch back to macro working tab
+      if (errorTabId !== null && browserViews.has(errorTabId) && currentTabId !== errorTabId) {
+        console.log('[Macro] Switching back to error tab:', errorTabId);
+        browserView = browserViews.get(errorTabId);
+        currentTabId = errorTabId;
+        mainWindow.addBrowserView(browserView);
+        updateBrowserViewBounds();
+
+        const url = browserView.webContents.getURL();
+        const title = browserView.webContents.getTitle();
+        mainWindow.webContents.send('url-changed', url, title);
+        mainWindow.webContents.send('tab-switched', { tabId: errorTabId });
+      }
     });
 
     // === AUTO SCREENSHOT STREAMING (same as AI) ===
@@ -2761,7 +2836,25 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
     return { success: true, result: result };
   } catch (error) {
     console.error('[Electron] Failed to execute macro:', error);
+
+    // Keep macro working tab visible on error
+    const failedTabId = macroWorkingTabId;
     cleanupMacroExecution(); // Use unified cleanup on error
+
+    // Switch back to macro working tab to show error state
+    if (failedTabId !== null && browserViews.has(failedTabId) && currentTabId !== failedTabId) {
+      console.log('[Macro] Switching back to failed tab:', failedTabId);
+      browserView = browserViews.get(failedTabId);
+      currentTabId = failedTabId;
+      mainWindow.addBrowserView(browserView);
+      updateBrowserViewBounds();
+
+      const url = browserView.webContents.getURL();
+      const title = browserView.webContents.getTitle();
+      mainWindow.webContents.send('url-changed', url, title);
+      mainWindow.webContents.send('tab-switched', { tabId: failedTabId });
+    }
+
     return { success: false, error: error.message };
   }
 });
