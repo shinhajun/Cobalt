@@ -516,8 +516,6 @@ const MacroFlowViewer = ({ macroData }) => {
           onNodesDelete={onNodesDelete}
           onEdgesDelete={onEdgesDelete}
           nodeTypes={nodeTypes}
-          nodesDeletable={true}
-          edgesDeletable={true}
           fitView
           attributionPosition="bottom-left"
         >
