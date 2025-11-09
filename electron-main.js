@@ -86,191 +86,82 @@ class OverlayManager {
       return;
     }
 
+    // Build CSS and HTML based on type
+    const cssContent = showProgress ? `
+      #${overlayId}_title { flex: 1; font-size: 14px; font-weight: 600; color: #333; }
+      #${overlayId}_footer { background: rgba(246, 246, 246, 0.98); padding: 16px; border-top: 1px solid rgba(0, 0, 0, 0.1); width: 100%; flex-shrink: 0; }
+      #${overlayId}_progress_container { margin-bottom: 8px; }
+      #${overlayId}_progress_bar { width: 100%; height: 6px; background: rgba(102, 126, 234, 0.2); border-radius: 3px; overflow: hidden; }
+      #${overlayId}_progress_fill { height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.3s ease; width: 0%; }
+      #${overlayId}_status { display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+      #${overlayId}_description { font-size: 13px; color: #666; }
+      #${overlayId}_percentage { font-size: 13px; font-weight: 600; color: #667eea; }
+    ` : '';
+
+    const titleHtml = showProgress ? `<div id="${overlayId}_title"></div>` : '';
+    const footerHtml = showProgress ? `
+      <div id="${overlayId}_footer">
+        <div id="${overlayId}_progress_container">
+          <div id="${overlayId}_progress_bar">
+            <div id="${overlayId}_progress_fill"></div>
+          </div>
+        </div>
+        <div id="${overlayId}_status">
+          <div id="${overlayId}_description"></div>
+          <div id="${overlayId}_percentage">0%</div>
+        </div>
+      </div>
+    ` : '';
+
+    const updateCode = showProgress ? `
+      const titleEl = document.getElementById('${overlayId}_title');
+      if (titleEl && config.title) titleEl.textContent = config.title;
+      const progressFill = document.getElementById('${overlayId}_progress_fill');
+      if (progressFill) progressFill.style.width = config.progress + '%';
+      const descEl = document.getElementById('${overlayId}_description');
+      if (descEl && config.description) descEl.textContent = config.description;
+      const percentEl = document.getElementById('${overlayId}_percentage');
+      if (percentEl) percentEl.textContent = Math.round(config.progress) + '%';
+    ` : '';
+
     try {
       await webContents.executeJavaScript(`
         (function(config) {
           let overlay = document.getElementById('${overlayId}');
           if (!overlay) {
-            // Create overlay first time
             overlay = document.createElement('div');
             overlay.id = '${overlayId}';
-            overlay.innerHTML = \`
-              <style>
-                #${overlayId} {
-                  position: fixed;
-                  top: 0;
-                  left: 0;
-                  width: 100vw;
-                  height: 100vh;
-                  background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%);
-                  background-size: 400% 400%;
-                  animation: gradient 20s ease infinite;
-                  z-index: 999999;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                  padding: 0;
-                }
-                @keyframes gradient {
-                  0% { background-position: 0% 50%; }
-                  50% { background-position: 100% 50%; }
-                  100% { background-position: 0% 50%; }
-                }
-                #${overlayId}_content {
-                  background: white;
-                  border-radius: 12px;
-                  box-shadow: 0 30px 90px rgba(0,0,0,0.4);
-                  overflow: hidden;
-                  ${showProgress ? 'width: 85vw; height: 85vh;' : 'max-width: 85vw; max-height: 85vh;'}
-                  display: flex;
-                  flex-direction: column;
-                  align-items: center;
-                  justify-content: center;
-                }
-                #${overlayId}_header {
-                  background: rgba(246, 246, 246, 0.98);
-                  padding: 12px 16px;
-                  display: flex;
-                  align-items: center;
-                  gap: ${showProgress ? '12px' : '8px'};
-                  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
-                  width: 100%;
-                  flex-shrink: 0;
-                }
-                #${overlayId}_dots {
-                  display: flex;
-                  gap: 8px;
-                }
-                .${overlayId}_dot {
-                  width: 12px;
-                  height: 12px;
-                  border-radius: 50%;
-                  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-                }
-                .${overlayId}_dot-red {
-                  background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%);
-                }
-                .${overlayId}_dot-yellow {
-                  background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%);
-                }
-                .${overlayId}_dot-green {
-                  background: linear-gradient(135deg, #28ca42 0%, #26de81 100%);
-                }
-                ${showProgress ? \`
-                #${overlayId}_title {
-                  flex: 1;
-                  font-size: 14px;
-                  font-weight: 600;
-                  color: #333;
-                }
-                \` : ''}
-                #${overlayId}_img {
-                  display: block;
-                  ${showProgress ? 'width: 100%; height: 100%; flex: 1;' : 'max-width: 85vw; max-height: calc(85vh - 50px); width: auto; height: auto;'}
-                  object-fit: contain;
-                  object-position: center;
-                  background: white;
-                }
-                ${showProgress ? \`
-                #${overlayId}_footer {
-                  background: rgba(246, 246, 246, 0.98);
-                  padding: 16px;
-                  border-top: 1px solid rgba(0, 0, 0, 0.1);
-                  width: 100%;
-                  flex-shrink: 0;
-                }
-                #${overlayId}_progress_container {
-                  margin-bottom: 8px;
-                }
-                #${overlayId}_progress_bar {
-                  width: 100%;
-                  height: 6px;
-                  background: rgba(102, 126, 234, 0.2);
-                  border-radius: 3px;
-                  overflow: hidden;
-                }
-                #${overlayId}_progress_fill {
-                  height: 100%;
-                  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
-                  transition: width 0.3s ease;
-                  width: 0%;
-                }
-                #${overlayId}_status {
-                  display: flex;
-                  justify-content: space-between;
-                  align-items: center;
-                  margin-top: 8px;
-                }
-                #${overlayId}_description {
-                  font-size: 13px;
-                  color: #666;
-                }
-                #${overlayId}_percentage {
-                  font-size: 13px;
-                  font-weight: 600;
-                  color: #667eea;
-                }
-                \` : ''}
-              </style>
-              <div id="${overlayId}_content">
-                <div id="${overlayId}_header">
-                  <div id="${overlayId}_dots">
-                    <div class="${overlayId}_dot ${overlayId}_dot-red"></div>
-                    <div class="${overlayId}_dot ${overlayId}_dot-yellow"></div>
-                    <div class="${overlayId}_dot ${overlayId}_dot-green"></div>
-                  </div>
-                  ${showProgress ? \`<div id="${overlayId}_title"></div>\` : ''}
-                </div>
-                <img id="${overlayId}_img" src="" />
-                ${showProgress ? \`
-                <div id="${overlayId}_footer">
-                  <div id="${overlayId}_progress_container">
-                    <div id="${overlayId}_progress_bar">
-                      <div id="${overlayId}_progress_fill"></div>
-                    </div>
-                  </div>
-                  <div id="${overlayId}_status">
-                    <div id="${overlayId}_description"></div>
-                    <div id="${overlayId}_percentage">0%</div>
-                  </div>
-                </div>
-                \` : ''}
-              </div>
-            \`;
+            overlay.innerHTML = '<style>' +
+              '#${overlayId} { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 20%, #f093fb 40%, #4facfe 60%, #00f2fe 80%, #43e97b 100%); background-size: 400% 400%; animation: gradient 20s ease infinite; z-index: 999999; display: flex; align-items: center; justify-content: center; padding: 0; }' +
+              '@keyframes gradient { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }' +
+              '#${overlayId}_content { background: white; border-radius: 12px; box-shadow: 0 30px 90px rgba(0,0,0,0.4); overflow: hidden; ${showProgress ? 'width: 85vw; height: 85vh;' : 'max-width: 85vw; max-height: 85vh;'} display: flex; flex-direction: column; align-items: center; justify-content: center; }' +
+              '#${overlayId}_header { background: rgba(246, 246, 246, 0.98); padding: 12px 16px; display: flex; align-items: center; gap: ${showProgress ? '12px' : '8px'}; border-bottom: 1px solid rgba(0, 0, 0, 0.1); width: 100%; flex-shrink: 0; }' +
+              '#${overlayId}_dots { display: flex; gap: 8px; }' +
+              '.${overlayId}_dot { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }' +
+              '.${overlayId}_dot-red { background: linear-gradient(135deg, #ff5f57 0%, #ff4757 100%); }' +
+              '.${overlayId}_dot-yellow { background: linear-gradient(135deg, #ffbd2e 0%, #ffa502 100%); }' +
+              '.${overlayId}_dot-green { background: linear-gradient(135deg, #28ca42 0%, #26de81 100%); }' +
+              '${cssContent}' +
+              '#${overlayId}_img { display: block; ${showProgress ? 'width: 100%; height: 100%; flex: 1;' : 'max-width: 85vw; max-height: calc(85vh - 50px); width: auto; height: auto;'} object-fit: contain; object-position: center; background: white; }' +
+              '</style>' +
+              '<div id="${overlayId}_content">' +
+                '<div id="${overlayId}_header">' +
+                  '<div id="${overlayId}_dots">' +
+                    '<div class="${overlayId}_dot ${overlayId}_dot-red"></div>' +
+                    '<div class="${overlayId}_dot ${overlayId}_dot-yellow"></div>' +
+                    '<div class="${overlayId}_dot ${overlayId}_dot-green"></div>' +
+                  '</div>' +
+                  '${titleHtml}' +
+                '</div>' +
+                '<img id="${overlayId}_img" src="" />' +
+                '${footerHtml}' +
+              '</div>';
             document.body.appendChild(overlay);
           }
 
-          // Update screenshot
           const img = document.getElementById('${overlayId}_img');
-          if (img && config.screenshot) {
-            img.src = config.screenshot;
-          }
-
-          ${showProgress ? \`
-          // Update title
-          const titleEl = document.getElementById('${overlayId}_title');
-          if (titleEl && config.title) {
-            titleEl.textContent = config.title;
-          }
-
-          // Update progress
-          const progressFill = document.getElementById('${overlayId}_progress_fill');
-          if (progressFill) {
-            progressFill.style.width = config.progress + '%';
-          }
-
-          // Update description
-          const descEl = document.getElementById('${overlayId}_description');
-          if (descEl && config.description) {
-            descEl.textContent = config.description;
-          }
-
-          // Update percentage
-          const percentEl = document.getElementById('${overlayId}_percentage');
-          if (percentEl) {
-            percentEl.textContent = Math.round(config.progress) + '%';
-          }
-          \` : ''}
+          if (img && config.screenshot) img.src = config.screenshot;
+          ${updateCode}
         })(${JSON.stringify({ screenshot, title, progress, description })});
       `);
       console.log(\`[OverlayManager] \${type} overlay injected successfully\`);
