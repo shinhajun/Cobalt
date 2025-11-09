@@ -164,9 +164,9 @@ class OverlayManager {
           ${updateCode}
         })(${JSON.stringify({ screenshot, title, progress, description })});
       `);
-      console.log(\`[OverlayManager] \${type} overlay injected successfully\`);
+      console.log(`[OverlayManager] ${type} overlay injected successfully`);
     } catch (err) {
-      console.error(\`[OverlayManager] Failed to inject \${type} overlay:\`, err.message);
+      console.error(`[OverlayManager] Failed to inject ${type} overlay:`, err.message);
     }
   }
 
@@ -184,17 +184,17 @@ class OverlayManager {
     const overlayId = type === 'ai' ? '__ai_overlay' : '__macro_overlay';
 
     try {
-      await webContents.executeJavaScript(\`
+      await webContents.executeJavaScript(`
         (function() {
-          const overlay = document.getElementById('\${overlayId}');
+          const overlay = document.getElementById('${overlayId}');
           if (overlay) {
             overlay.remove();
           }
         })();
-      \`);
-      console.log(\`[OverlayManager] \${type} overlay removed\`);
+      `);
+      console.log(`[OverlayManager] ${type} overlay removed`);
     } catch (err) {
-      console.error(\`[OverlayManager] Failed to remove \${type} overlay:\`, err.message);
+      console.error(`[OverlayManager] Failed to remove ${type} overlay:`, err.message);
     }
   }
 }
@@ -1549,9 +1549,6 @@ ipcMain.handle('run-task', async (event, { taskPlan, model, settings, conversati
                   type: 'ai',
                   screenshot: screenshotDataURL
                 });
-                } else {
-                  console.log('[Hybrid] AI tab is still loading, skipping overlay injection');
-                }
               } else {
                 console.log('[Hybrid] AI tab view not available or destroyed');
               }
