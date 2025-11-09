@@ -72,7 +72,7 @@
     .macro-library {
       margin-top: 60px;
       padding: 0 40px;
-      max-width: 1200px;
+      max-width: 800px;
       margin-left: auto;
       margin-right: auto;
     }
@@ -99,39 +99,44 @@
     }
 
     .macro-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-      gap: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
       margin-bottom: 40px;
     }
 
     .macro-card {
       background: white;
       border: 2px solid #e0e0e0;
-      border-radius: 16px;
-      padding: 20px;
-      text-align: left;
+      border-radius: 12px;
+      padding: 16px 20px;
       transition: all 0.2s ease;
       cursor: pointer;
-      position: relative;
     }
 
     .macro-card:hover {
       border-color: #4285f4;
-      box-shadow: 0 4px 12px rgba(66, 133, 244, 0.15);
-      transform: translateY(-2px);
+      box-shadow: 0 2px 8px rgba(66, 133, 244, 0.15);
+      transform: translateX(4px);
     }
 
-    .macro-icon {
-      font-size: 32px;
-      margin-bottom: 12px;
+    .macro-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .macro-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      overflow: hidden;
     }
 
     .macro-name {
-      font-size: 18px;
+      font-size: 16px;
       font-weight: 600;
       color: #333;
-      margin-bottom: 8px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -141,53 +146,33 @@
     .macro-info {
       font-size: 13px;
       color: #666;
-      margin-bottom: 4px;
+      flex-shrink: 0;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     }
 
     .macro-date {
       font-size: 12px;
       color: #999;
-      margin-bottom: 16px;
+      flex-shrink: 0;
+      margin-right: 12px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     }
 
-    .macro-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 12px;
-    }
-
-    .macro-btn {
-      flex: 1;
-      padding: 10px 16px;
+    .macro-delete-btn {
+      background: none;
       border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
+      color: #999;
+      font-size: 18px;
       cursor: pointer;
+      padding: 4px 8px;
+      border-radius: 4px;
       transition: all 0.2s ease;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      flex-shrink: 0;
     }
 
-    .macro-btn-run {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-    }
-
-    .macro-btn-run:hover {
-      transform: scale(1.05);
-      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
-    }
-
-    .macro-btn-secondary {
-      background: #f5f5f5;
-      color: #666;
-      flex: 0.5;
-    }
-
-    .macro-btn-secondary:hover {
-      background: #e0e0e0;
+    .macro-delete-btn:hover {
+      background: #fee;
+      color: #ef4444;
     }
 
     .macro-empty {
@@ -272,7 +257,6 @@
     console.log('[Cobalt Home] __browserViewAPI available:', !!window.__browserViewAPI);
 
     // ===== Macro Library Functionality =====
-    const { ipcRenderer } = require('electron');
     const macroGrid = document.getElementById('macroGrid');
     const macroEmpty = document.getElementById('macroEmpty');
     const macroCount = document.getElementById('macroCount');
@@ -281,7 +265,7 @@
     async function loadMacros() {
       try {
         console.log('[Cobalt Home] Loading macros...');
-        const result = await ipcRenderer.invoke('list-macros');
+        const result = await window.__browserViewAPI.listMacros();
         console.log('[Cobalt Home] Loaded macros result:', result);
 
         if (!result.success) {
@@ -326,44 +310,34 @@
       card.className = 'macro-card';
       card.dataset.macroId = macro.id;
 
-      const stepCount = macro.steps ? macro.steps.length : (macro.metadata?.totalSteps || 0);
+      const stepCount = macro.stepCount || 0;
       const createdDate = formatDate(macro.createdAt);
 
       card.innerHTML = `
-        <div class="macro-icon">⚡</div>
-        <div class="macro-name" title="${escapeHtml(macro.name)}">${escapeHtml(macro.name)}</div>
-        <div class="macro-info">${stepCount} steps</div>
-        <div class="macro-date">Created: ${createdDate}</div>
-        <div class="macro-actions">
-          <button class="macro-btn macro-btn-run" data-action="run">▶ Run</button>
-          <button class="macro-btn macro-btn-secondary" data-action="edit">✏️</button>
-          <button class="macro-btn macro-btn-secondary" data-action="delete">🗑️</button>
+        <div class="macro-header">
+          <div class="macro-left">
+            <div class="macro-name" title="${escapeHtml(macro.name)}">${escapeHtml(macro.name)}</div>
+            <div class="macro-info">${stepCount} steps</div>
+          </div>
+          <div class="macro-date">${createdDate}</div>
+          <button class="macro-delete-btn" title="Delete macro">🗑️</button>
         </div>
       `;
 
-      // Add event listeners
-      const runBtn = card.querySelector('[data-action="run"]');
-      const editBtn = card.querySelector('[data-action="edit"]');
-      const deleteBtn = card.querySelector('[data-action="delete"]');
-
-      runBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        runMacro(macro.id, macro.name);
-      });
-
-      editBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
+      // Click card to open flowchart
+      card.addEventListener('click', (e) => {
+        // Don't open flowchart if delete button was clicked
+        if (e.target.classList.contains('macro-delete-btn')) {
+          return;
+        }
         editMacro(macro.id);
       });
 
+      // Delete button handler
+      const deleteBtn = card.querySelector('.macro-delete-btn');
       deleteBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         deleteMacro(macro.id, macro.name);
-      });
-
-      // Click card to open flowchart (not run)
-      card.addEventListener('click', () => {
-        editMacro(macro.id);
       });
 
       return card;
@@ -375,7 +349,7 @@
         console.log('[Cobalt Home] Running macro:', macroId);
 
         // Load the macro data first
-        const loadResult = await ipcRenderer.invoke('load-macro', macroId);
+        const loadResult = await window.__browserViewAPI.loadMacro(macroId);
         if (!loadResult.success) {
           throw new Error(loadResult.error || 'Failed to load macro');
         }
@@ -385,14 +359,14 @@
         // Open chat sidebar for execution logs
         if (window.__browserViewAPI && window.__browserViewAPI.toggleChatSidebar) {
           // Check if sidebar is hidden, then open it
-          const sidebarVisible = await ipcRenderer.invoke('is-chat-sidebar-visible');
+          const sidebarVisible = await window.__browserViewAPI.isChatSidebarVisible();
           if (!sidebarVisible) {
             window.__browserViewAPI.toggleChatSidebar();
           }
         }
 
         // Execute macro with loaded data
-        const result = await ipcRenderer.invoke('execute-macro', {
+        const result = await window.__browserViewAPI.executeMacro({
           macroData: macroData,
           model: null // Use default model
         });
@@ -414,7 +388,7 @@
         console.log('[Cobalt Home] Opening macro for editing:', macroId);
 
         // Load the macro data first
-        const loadResult = await ipcRenderer.invoke('load-macro', macroId);
+        const loadResult = await window.__browserViewAPI.loadMacro(macroId);
         if (!loadResult.success) {
           throw new Error(loadResult.error || 'Failed to load macro');
         }
@@ -422,7 +396,7 @@
         const macroData = loadResult.macro;
 
         // Open flowchart with macro data
-        await ipcRenderer.invoke('macro-show-flowchart', macroData);
+        await window.__browserViewAPI.showMacroFlowchart(macroData);
       } catch (error) {
         console.error('[Cobalt Home] Error opening macro:', error);
         alert(`Failed to open macro: ${error.message}`);
@@ -436,7 +410,7 @@
 
       try {
         console.log('[Cobalt Home] Deleting macro:', macroId);
-        await ipcRenderer.invoke('delete-macro', macroId);
+        await window.__browserViewAPI.deleteMacro(macroId);
         console.log('[Cobalt Home] Macro deleted successfully');
 
         // Reload macros
@@ -470,15 +444,17 @@
     }
 
     // Listen for macro updates
-    ipcRenderer.on('macro-saved', () => {
-      console.log('[Cobalt Home] Macro saved, reloading list...');
-      loadMacros();
-    });
+    if (window.__browserViewAPI) {
+      window.__browserViewAPI.onMacroSaved(() => {
+        console.log('[Cobalt Home] Macro saved, reloading list...');
+        loadMacros();
+      });
 
-    ipcRenderer.on('macro-deleted', () => {
-      console.log('[Cobalt Home] Macro deleted, reloading list...');
-      loadMacros();
-    });
+      window.__browserViewAPI.onMacroDeleted(() => {
+        console.log('[Cobalt Home] Macro deleted, reloading list...');
+        loadMacros();
+      });
+    }
 
     // Load macros when page loads
     window.addEventListener('DOMContentLoaded', () => {

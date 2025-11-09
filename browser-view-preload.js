@@ -66,6 +66,23 @@ contextBridge.exposeInMainWorld('__browserViewAPI', {
   sendMacroEvent: (event) => {
     console.log('[BrowserView Preload] sendMacroEvent called:', event.type);
     ipcRenderer.send('macro-record-event', event);
+  },
+
+  // Macro management APIs
+  listMacros: () => ipcRenderer.invoke('list-macros'),
+  loadMacro: (macroId) => ipcRenderer.invoke('load-macro', macroId),
+  deleteMacro: (macroId) => ipcRenderer.invoke('delete-macro', macroId),
+  executeMacro: (params) => ipcRenderer.invoke('execute-macro', params),
+  showMacroFlowchart: (macroData) => ipcRenderer.invoke('macro-show-flowchart', macroData),
+  isChatSidebarVisible: () => ipcRenderer.invoke('is-chat-sidebar-visible'),
+  toggleChatSidebar: () => ipcRenderer.send('toggle-chat-sidebar'),
+
+  // Macro event listeners
+  onMacroSaved: (callback) => {
+    ipcRenderer.on('macro-saved', (_event, data) => callback(data));
+  },
+  onMacroDeleted: (callback) => {
+    ipcRenderer.on('macro-deleted', (_event, data) => callback(data));
   }
 });
 
