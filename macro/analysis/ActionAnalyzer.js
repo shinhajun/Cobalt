@@ -156,7 +156,7 @@ class ActionAnalyzer {
         return createNavigationStep(
           stepNumber,
           event.timestamp,
-          event.data.url || event.url
+          (event.data && event.data.url) || event.url
         );
 
       case EventType.CLICK:
@@ -164,7 +164,7 @@ class ActionAnalyzer {
           stepNumber,
           event.timestamp,
           event.target,
-          event.data.coordinates || event.coordinates
+          (event.data && event.data.coordinates) || event.coordinates
         );
 
       case EventType.INPUT:
@@ -172,17 +172,19 @@ class ActionAnalyzer {
           stepNumber,
           event.timestamp,
           event.target,
-          event.data.value || ''
+          (event.data && event.data.value) || ''
         );
 
       case EventType.KEYDOWN:
         // Only include important keys
-        if (this.isImportantKey(event.data.key || event.key)) {
+        const key = (event.data && event.data.key) || event.key;
+        const keyCode = (event.data && event.data.keyCode) || event.keyCode;
+        if (this.isImportantKey(key)) {
           return createKeypressStep(
             stepNumber,
             event.timestamp,
-            event.data.key || event.key,
-            event.data.keyCode || event.keyCode
+            key,
+            keyCode
           );
         }
         return null;

@@ -36,8 +36,7 @@ let browserController = null;
 let llmService = null;
 let isTaskRunning = false;
 let stopRequested = false;
-let screenshotInterval = null; // Auto-screenshot timer (AI)
-let macroScreenshotInterval = null; // Auto-screenshot timer (Macro)
+let screenshotInterval = null; // Auto-screenshot timer (AI only)
 let chatVisible = false; // Chat visibility state - 기본값 false로 변경
 let currentMacroExecutor = null; // Current running macro executor
 
@@ -209,29 +208,16 @@ function cleanupMacroExecution() {
   // Store tab ID before clearing
   const completedTabId = macroWorkingTabId;
 
-  // IMPORTANT: Clear macroWorkingTabId FIRST to stop interval callbacks immediately
+  // Clear macro state
   if (completedTabId !== null) {
     console.log('[Macro] Execution ended, releasing tab:', completedTabId);
   }
   macroWorkingTabId = null;
 
-  // Clear executor to stop interval callbacks
+  // Clear executor
   currentMacroExecutor = null;
 
-  // Now stop screenshot interval (callbacks will no longer execute due to null checks)
-  if (macroScreenshotInterval) {
-    clearInterval(macroScreenshotInterval);
-    macroScreenshotInterval = null;
-    console.log('[Macro] Auto-screenshot streaming stopped');
-  }
-
-  // Remove overlay from macro working tab
-  if (completedTabId !== null) {
-    const completedTabView = browserViews.get(completedTabId);
-    if (completedTabView && completedTabView.webContents && !completedTabView.webContents.isDestroyed()) {
-      OverlayManager.remove(completedTabView.webContents, 'macro');
-    }
-  }
+  console.log('[Macro] Cleanup completed');
 }
 
 // Note: We do not reserve extra overlay space for the omnibox dropdown; it overlays visually.
@@ -2672,6 +2658,24 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
     macroWorkingTabId = currentTabId;
     console.log('[Macro] Started on tab:', macroWorkingTabId);
 
+    // Ensure macro tab is visible for real-time viewing
+    if (currentTabId !== macroWorkingTabId && browserViews.has(macroWorkingTabId)) {
+      const macroTabView = browserViews.get(macroWorkingTabId);
+      if (browserView) {
+        mainWindow.removeBrowserView(browserView);
+      }
+      browserView = macroTabView;
+      currentTabId = macroWorkingTabId;
+      mainWindow.addBrowserView(browserView);
+      updateBrowserViewBounds();
+
+      const url = browserView.webContents.getURL();
+      const title = browserView.webContents.getTitle();
+      mainWindow.webContents.send('url-changed', url, title);
+      mainWindow.webContents.send('tab-switched', { tabId: macroWorkingTabId });
+      console.log('[Macro] Switched to macro tab for real-time viewing');
+    }
+
     // Forward all executor events to renderer process
     executor.on('macro-started', (data) => {
       mainWindow.webContents.send('macro-started', data);
@@ -2772,61 +2776,10 @@ ipcMain.handle('execute-macro', async (event, { macroData, model }) => {
       }
     });
 
-    // === AUTO SCREENSHOT STREAMING (same as AI) ===
-    // Clear any existing interval first to prevent duplicates
-    if (macroScreenshotInterval) {
-      clearInterval(macroScreenshotInterval);
-      macroScreenshotInterval = null;
-    }
-
-    // Capture screenshots every 1 second and stream to Chat UI + BrowserView overlay
-    macroScreenshotInterval = setInterval(async () => {
-      // Early exit if macro is no longer running
-      if (macroWorkingTabId === null || !currentMacroExecutor || currentMacroExecutor.stopped) {
-        return;
-      }
-
-      try {
-        const macroTabView = browserViews.get(macroWorkingTabId);
-        if (macroTabView && macroTabView.webContents && !macroTabView.webContents.isDestroyed()) {
-          const image = await macroTabView.webContents.capturePage();
-          const buffer = image.toPNG();
-          const screenshotBase64 = buffer.toString('base64');
-          const screenshotDataURL = `data:image/png;base64,${screenshotBase64}`;
-          const currentUrl = macroTabView.webContents.getURL();
-
-          // Double-check: Don't send/inject if macro was stopped during async operations
-          if (macroWorkingTabId === null || !currentMacroExecutor) {
-            return; // Macro was stopped/completed during screenshot capture
-          }
-
-          // Send screenshot to Chat UI (mainWindow) with tabId
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('macro-screenshot', {
-              screenshot: screenshotDataURL,
-              timestamp: Date.now(),
-              url: currentUrl,
-              tabId: macroWorkingTabId
-            });
-          }
-
-          // Double-check again before injecting overlay
-          if (macroWorkingTabId === null || !currentMacroExecutor) {
-            return; // Macro was stopped/completed during screenshot send
-          }
-
-          // Inject overlay to macro working tab with screenshot
-          OverlayManager.inject(macroTabView.webContents, {
-            type: 'macro',
-            screenshot: screenshotDataURL
-          });
-        }
-      } catch (error) {
-        console.error('[Macro] Screenshot capture failed:', error);
-      }
-    }, 1000); // Every 1 second, same as AI
-
-    console.log('[Macro] Auto-screenshot streaming started (1fps)');
+    // === REAL-TIME MACRO EXECUTION (no overlay) ===
+    // Macro runs directly on BrowserView - user sees it in real-time
+    // No screenshot streaming needed - just keep macro tab visible
+    console.log('[Macro] Running in real-time mode (no overlay)');
 
     const result = await executor.execute(macroData).catch(err => {
       console.error('[Electron] Executor promise rejection:', err);
