@@ -115,10 +115,6 @@ Cobalt is an Electron-based browser that combines traditional web browsing with 
 ### Prerequisites
 - Node.js 18+ and npm
 - Windows, macOS, or Linux
-- At least one API key:
-  - OpenAI API key (for GPT models), OR
-  - Google API key (for Gemini models), OR
-  - Anthropic API key (for Claude models)
 
 ### Installation
 
@@ -136,34 +132,29 @@ npm install
 cd ../..
 ```
 
-3. **Configure API keys**
-
-Copy the example environment file and add your API keys:
+3. **Build the project**
 ```bash
-cp .env.example .env
+npm run build
 ```
 
-Then edit `.env` and add at least one API key:
-```env
-OPENAI_API_KEY=your-openai-key-here
-GOOGLE_API_KEY=your-google-key-here
-ANTHROPIC_API_KEY=your-anthropic-key-here
+4. **Launch Cobalt**
+```bash
+npm start
 ```
+
+5. **Configure API keys in the browser**
+
+After launching Cobalt, open the AI chat sidebar and click the settings (⚙️) button to configure your API keys:
+- OpenAI API key (for GPT models)
+- Google API key (for Gemini models)
+- Anthropic API key (for Claude models)
+
+At least one API key is required to use AI features.
 
 Get your API keys from:
 - OpenAI: https://platform.openai.com/api-keys
 - Google: https://aistudio.google.com/app/apikey
 - Anthropic: https://console.anthropic.com/
-
-4. **Build the project**
-```bash
-npm run build
-```
-
-5. **Launch Cobalt**
-```bash
-npm start
-```
 
 ---
 
@@ -297,9 +288,9 @@ ai-agent/
 ### Supported AI Models
 
 #### OpenAI
-- `gpt-4o` - Most capable, best for complex tasks
-- `gpt-4o-mini` - Faster and cheaper, good for most tasks
-- `gpt-4-turbo` - Balanced performance
+- `gpt-5` - Most capable, best for complex tasks
+- `gpt-5-mini` - Faster and cheaper, good for most tasks
+- `gpt-5-nano` - Ultra-fast for simple tasks
 
 #### Google Gemini
 - `gemini-2.5-pro` - Best quality and reasoning
@@ -311,21 +302,20 @@ ai-agent/
 - `claude-haiku-4-5` - Fast and affordable
 
 **Recommended:**
-- **General browsing**: `gpt-4o-mini` or `gemini-2.5-flash`
-- **Complex automation**: `claude-sonnet-4-5` or `gpt-4o`
-- **CAPTCHA solving**: `gpt-4o` or `gemini-2.5-pro`
+- **General browsing**: `gpt-5-mini` or `gemini-2.5-flash`
+- **Complex automation**: `claude-sonnet-4-5` or `gpt-5`
+- **CAPTCHA solving**: `gpt-5` or `gemini-2.5-pro`
 
-### Environment Variables
+### API Key Configuration
 
-```env
-# API Keys (at least one required)
-OPENAI_API_KEY=sk-proj-...
-GOOGLE_API_KEY=AIzaSy...
-ANTHROPIC_API_KEY=sk-ant-...
+API keys are configured directly in the Cobalt browser UI:
+1. Launch Cobalt
+2. Open the AI chat sidebar
+3. Click the settings (⚙️) button
+4. Enter your API keys for the AI providers you want to use
+5. Keys are securely stored locally on your machine
 
-# Optional Configuration
-VISION_MODEL=gpt-4o  # Model for vision tasks (default: gpt-4o)
-```
+At least one API key is required to use AI automation features.
 
 ---
 
@@ -458,9 +448,10 @@ npm run dist:all      # Both platforms
 ### Common Issues
 
 **"API key not configured"**
-- Create `.env` file in project root
-- Check API key format
-- Restart application after adding keys
+- Open the AI chat sidebar and click the settings (⚙️) button
+- Enter at least one API key (OpenAI, Google, or Anthropic)
+- Check that your API key format is correct
+- Keys are saved automatically
 
 **"Macro not appearing on home page"**
 - Macros are saved to `%APPDATA%/cobalt/macros/` on Windows
@@ -519,17 +510,17 @@ npm run dist:all      # Both platforms
 - **Secure storage**: Cookies and autofill data encrypted locally
 
 ### API Key Security
-- **Environment variables**: API keys stored in `.env` file (never committed to git)
-- **Example file**: Use `.env.example` as a template
-- **Access control**: Only main process has access to API keys
-- **No hardcoding**: Keys are never embedded in source code
+- **Local storage**: API keys are stored securely on your local machine
+- **UI configuration**: Keys are entered through the browser settings UI
+- **Access control**: Only the main process has access to API keys
+- **No transmission**: Keys are never sent anywhere except to their respective AI providers
 
 ### Important Security Notes
 ⚠️ **Before publishing or sharing:**
-1. Verify `.env` is in `.gitignore` and not tracked by git
-2. Never commit API keys, credentials, or personal data
-3. Check `debug/` folder is excluded (contains screenshots)
-4. Review macros for sensitive information before sharing
+1. Never share your API keys with others
+2. Check `debug/` folder is excluded (contains screenshots)
+3. Review macros for sensitive information before sharing
+4. Browsing history and autofill data may contain personal information
 
 ⚠️ **User data locations:**
 - Macros: `%APPDATA%/cobalt/macros/` (Windows) or `~/Library/Application Support/cobalt/macros/` (Mac)
