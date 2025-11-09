@@ -1204,26 +1204,12 @@
     urlInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        // If inline suggestion exists, prefer it
-        if (inlineSuggestion) {
-          ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: inlineSuggestion });
-          closeOmniboxDropdown();
-          return;
-        }
         let url = urlInput.value.trim();
-
-        // If a suggestion is selected, prefer it
-        try {
-          if (typeof omniboxSelected === 'object' && omniboxSelected && omniboxSelected.url) {
-            ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: omniboxSelected.url });
-            closeOmniboxDropdown();
-            return;
-          }
-        } catch (_) {}
 
         // 주소창이 비어있으면 홈 페이지로 이동
         if (!url) {
           ipcRenderer.invoke('browser-navigation', { action: 'navigate', url: homePageUrl });
+          closeOmniboxDropdown();
           return;
         }
 
